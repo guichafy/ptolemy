@@ -1,3 +1,10 @@
+## [0.10.4](https://github.com/guichafy/ptolemy/compare/v0.10.3...v0.10.4) (2026-10-31)
+
+
+### Bug Fixes
+
+* **pages:** follow the renamed repository path on GitHub Pages ([8b29894](https://github.com/guichafy/ptolemy/commit/8b29894aec3e19683657292d11c391327c3c72fa)), closes [#pages](https://github.com/guichafy/ptolemy/issues/pages) [#pages](https://github.com/guichafy/ptolemy/issues/pages)
+
 ## [0.10.3](https://github.com/guichafy/ptolomeu/compare/v0.10.2...v0.10.3) (2026-05-12)
 
 
