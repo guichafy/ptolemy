@@ -74,7 +74,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION="${{ steps.release.outputs.version }}"
-          URL="https://guichafy.github.io/ptolemy/v${VERSION}/ptolemy-${VERSION}-macos-arm64.zip"
+          OWNER=$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')
+          URL="https://${OWNER}.github.io/${GITHUB_REPOSITORY#*/}/v${VERSION}/${{ steps.release.outputs.zip }}"
           gh release view "v${VERSION}" --json body -q .body > /tmp/body.md
           {
             printf '**Download direto (mirror GitHub Pages):** %s\n\n---\n\n' "$URL"

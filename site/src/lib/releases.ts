@@ -1,5 +1,6 @@
 const REPO = "guichafy/ptolemy";
-const PAGES_BASE = "https://guichafy.github.io/ptolemy";
+// Derived from `site` + `base` in astro.config.mjs (single source of truth).
+const PAGES_BASE = `${import.meta.env.SITE.replace(/\/$/, "")}${import.meta.env.BASE_URL.replace(/\/$/, "")}`;
 
 type GitHubAsset = {
 	name: string;
