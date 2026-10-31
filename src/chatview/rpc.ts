@@ -186,7 +186,7 @@ export interface StoredMessage {
 	modelUsed?: string;
 }
 
-interface PtolomeuRPCSchema extends ElectrobunRPCSchema {
+interface PtolemyRPCSchema extends ElectrobunRPCSchema {
 	bun: {
 		requests: {
 			listApps: { params: void; response: { name: string; path: string }[] };
@@ -327,7 +327,7 @@ export function onAgentEvent(listener: AgentEventListener): () => void {
 	return agentEventBuffer.subscribe(listener);
 }
 
-const rpcInstance = Electroview.defineRPC<PtolomeuRPCSchema>({
+const rpcInstance = Electroview.defineRPC<PtolemyRPCSchema>({
 	maxRequestTime: 60_000,
 	handlers: {
 		messages: {

@@ -149,8 +149,8 @@ describe("githubFetchSearch", () => {
 				JSON.stringify([
 					{
 						id: 99,
-						name: "ptolomeu",
-						full_name: "Chafy-Studio/ptolomeu",
+						name: "ptolemy",
+						full_name: "Chafy-Studio/ptolemy",
 						description: "d",
 						stargazers_count: 0,
 						language: "TS",
@@ -171,7 +171,7 @@ describe("githubFetchSearch", () => {
 					team: "chafy",
 				},
 			},
-			query: "ptolomeu",
+			query: "ptolemy",
 		});
 		expect(result.items).toHaveLength(1);
 		expect(result.items[0].kind).toBe("repo");

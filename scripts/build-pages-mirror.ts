@@ -3,7 +3,7 @@ import { $ } from "bun";
 import { copyFile, mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 
-const PAGES_BASE = "https://guichafy.github.io/ptolomeu";
+const PAGES_BASE = "https://guichafy.github.io/ptolemy";
 const SEMVER_RE = /^\d+\.\d+\.\d+(?:-[\w.-]+)?$/;
 
 const version = process.argv[2];
@@ -21,7 +21,7 @@ if (!zipArg) {
 const root = resolve(import.meta.dir, "..");
 const pagesDist = resolve(root, "pages-dist");
 const versionDir = resolve(pagesDist, `v${version}`);
-const zipName = `ptolomeu-${version}-macos-arm64.zip`;
+const zipName = `ptolemy-${version}-macos-arm64.zip`;
 const zipSrc = resolve(root, zipArg);
 
 if (!(await Bun.file(zipSrc).exists())) {
@@ -33,10 +33,13 @@ await mkdir(versionDir, { recursive: true });
 await copyFile(zipSrc, resolve(versionDir, zipName));
 console.log(`Staged ${zipName} → pages-dist/v${version}/`);
 
-const priorVersions = await listPriorVersions();
-const allVersions = Array.from(new Set([version, ...priorVersions])).sort(compareSemverDesc);
+// Maps each published version to its zip name. Releases up to v0.10.x were
+// published as `ptolomeu-*` (the project's former name); newer ones as `ptolemy-*`.
+const zipsByVersion = await listPriorZips();
+zipsByVersion.set(version, zipName);
+const allVersions = Array.from(zipsByVersion.keys()).sort(compareSemverDesc);
 const latestVersion = allVersions.find((v) => !v.includes("-")) ?? allVersions[0];
-const latestZip = `ptolomeu-${latestVersion}-macos-arm64.zip`;
+const latestZip = zipsByVersion.get(latestVersion) ?? zipName;
 const latest = {
 	version: latestVersion,
 	url: `${PAGES_BASE}/v${latestVersion}/${latestZip}`,
@@ -45,20 +48,23 @@ const latest = {
 await Bun.write(resolve(pagesDist, "latest.json"), `${JSON.stringify(latest, null, 2)}\n`);
 console.log(`Wrote latest.json → ${latestVersion}`);
 
-async function listPriorVersions(): Promise<string[]> {
+async function listPriorZips(): Promise<Map<string, string>> {
+	const zips = new Map<string, string>();
 	try {
 		await $`git fetch origin gh-pages --depth=1`.quiet();
 	} catch {
 		console.warn("gh-pages branch not reachable yet — starting with empty version list");
-		return [];
+		return zips;
 	}
 	const list = await $`git ls-tree -r --name-only origin/gh-pages`.text();
-	const re = /^v(\d+\.\d+\.\d+(?:-[\w.-]+)?)\/ptolomeu-\1-macos-arm64\.zip$/;
-	return list
-		.split("\n")
-		.map((line) => line.match(re))
-		.filter((m): m is RegExpMatchArray => m !== null)
-		.map((m) => m[1]);
+	const re = /^v(\d+\.\d+\.\d+(?:-[\w.-]+)?)\/((?:ptolemy|ptolomeu)-\1-macos-arm64\.zip)$/;
+	for (const line of list.split("\n")) {
+		const m = line.match(re);
+		if (!m) continue;
+		// Prefer the current name if a version somehow has both.
+		if (!zips.has(m[1]) || m[2].startsWith("ptolemy-")) zips.set(m[1], m[2]);
+	}
+	return zips;
 }
 
 function parseSemver(v: string): [number, number, number] {

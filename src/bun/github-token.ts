@@ -43,7 +43,7 @@ async function validateTokenViaApi(token: string): Promise<SetTokenResult> {
 			headers: {
 				Authorization: `Bearer ${token}`,
 				Accept: "application/vnd.github+json",
-				"User-Agent": "Ptolomeu",
+				"User-Agent": "Ptolemy",
 			},
 		});
 		if (res.status === 401) {

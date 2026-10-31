@@ -19,7 +19,7 @@
     [
       "@semantic-release/exec",
       {
-        "prepareCmd": "bun run scripts/sync-versions.ts ${nextRelease.version} && bun run build:release && ditto -c -k --sequesterRsrc --keepParent build/stable-macos-arm64/ptolomeu.app ptolomeu-${nextRelease.version}-macos-arm64.zip"
+        "prepareCmd": "bun run scripts/sync-versions.ts ${nextRelease.version} && bun run build:release && ditto -c -k --sequesterRsrc --keepParent build/stable-macos-arm64/ptolemy.app ptolemy-${nextRelease.version}-macos-arm64.zip"
       }
     ],
     [
@@ -34,7 +34,7 @@
       {
         "assets": [
           {
-            "path": "ptolomeu-*-macos-arm64.zip",
+            "path": "ptolemy-*-macos-arm64.zip",
             "label": "macOS (arm64)"
           }
         ]

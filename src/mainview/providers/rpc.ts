@@ -214,7 +214,7 @@ export interface StoredMessage {
 	tokenUsage?: { input: number; output: number };
 }
 
-interface PtolomeuRPCSchema extends ElectrobunRPCSchema {
+interface PtolemyRPCSchema extends ElectrobunRPCSchema {
 	bun: {
 		requests: {
 			listApps: { params: void; response: { name: string; path: string }[] };
@@ -415,7 +415,7 @@ export function setClaudeSessionsUpdateHandler(
 	}
 }
 
-const rpcInstance = Electroview.defineRPC<PtolomeuRPCSchema>({
+const rpcInstance = Electroview.defineRPC<PtolemyRPCSchema>({
 	maxRequestTime: 30_000,
 	handlers: {
 		messages: {

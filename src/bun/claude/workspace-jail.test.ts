@@ -8,7 +8,7 @@ describe("isInsideWorkspace", () => {
 	let ws: string;
 
 	beforeEach(async () => {
-		ws = await realpath(await mkdtemp(join(tmpdir(), "ptolomeu-jail-")));
+		ws = await realpath(await mkdtemp(join(tmpdir(), "ptolemy-jail-")));
 	});
 
 	afterEach(async () => {
@@ -48,7 +48,7 @@ describe("isInsideWorkspace", () => {
 describe("checkToolInput — Write/Edit/NotebookEdit", () => {
 	let ws: string;
 	beforeEach(async () => {
-		ws = await realpath(await mkdtemp(join(tmpdir(), "ptolomeu-jail-")));
+		ws = await realpath(await mkdtemp(join(tmpdir(), "ptolemy-jail-")));
 	});
 	afterEach(async () => {
 		await rm(ws, { recursive: true, force: true });
@@ -107,7 +107,7 @@ describe("checkToolInput — Write/Edit/NotebookEdit", () => {
 
 	it("denies Write through a symlink that points outside the workspace", async () => {
 		const outside = await realpath(
-			await mkdtemp(join(tmpdir(), "ptolomeu-out-")),
+			await mkdtemp(join(tmpdir(), "ptolemy-out-")),
 		);
 		try {
 			await symlink(outside, join(ws, "out-link"));
@@ -125,7 +125,7 @@ describe("checkToolInput — Write/Edit/NotebookEdit", () => {
 describe("checkToolInput — Bash", () => {
 	let ws: string;
 	beforeEach(async () => {
-		ws = await realpath(await mkdtemp(join(tmpdir(), "ptolomeu-jail-")));
+		ws = await realpath(await mkdtemp(join(tmpdir(), "ptolemy-jail-")));
 	});
 	afterEach(async () => {
 		await rm(ws, { recursive: true, force: true });
@@ -185,7 +185,7 @@ describe("checkToolInput — Bash", () => {
 
 	it("denies writes through symlinked directories", async () => {
 		const outside = await realpath(
-			await mkdtemp(join(tmpdir(), "ptolomeu-out-")),
+			await mkdtemp(join(tmpdir(), "ptolemy-out-")),
 		);
 		try {
 			await symlink(outside, join(ws, "out-link"));
@@ -326,7 +326,7 @@ describe("checkToolInput — Bash", () => {
 describe("checkToolInput — other tools", () => {
 	let ws: string;
 	beforeEach(async () => {
-		ws = await realpath(await mkdtemp(join(tmpdir(), "ptolomeu-jail-")));
+		ws = await realpath(await mkdtemp(join(tmpdir(), "ptolemy-jail-")));
 	});
 	afterEach(async () => {
 		await rm(ws, { recursive: true, force: true });

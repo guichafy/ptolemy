@@ -72,7 +72,7 @@ export type SettingsSection =
 	| "network"
 	| `plugin:${string}`;
 
-export interface PtolomeuRPCSchema extends ElectrobunRPCSchema {
+export interface PtolemyRPCSchema extends ElectrobunRPCSchema {
 	bun: {
 		requests: {
 			listApps: { params: void; response: { name: string; path: string }[] };
@@ -217,7 +217,7 @@ export interface PtolomeuRPCSchema extends ElectrobunRPCSchema {
 	};
 }
 
-type BunRequests = PtolomeuRPCSchema["bun"]["requests"];
+type BunRequests = PtolemyRPCSchema["bun"]["requests"];
 type RequestParams<K extends keyof BunRequests> = BunRequests[K]["params"];
 type RequestResponse<K extends keyof BunRequests> = Awaited<
 	BunRequests[K]["response"]
@@ -351,7 +351,7 @@ async function getAppIconBase64(appPath: string): Promise<string | null> {
 		}
 
 		// Convert to 32x32 PNG using sips
-		const tmpFile = `/tmp/ptolomeu-icon-${process.pid}-${Date.now()}.png`;
+		const tmpFile = `/tmp/ptolemy-icon-${process.pid}-${Date.now()}.png`;
 		const sipsProc = Bun.spawn(
 			["sips", "-s", "format", "png", "-Z", "32", icnsPath, "--out", tmpFile],
 			{ stdout: "pipe", stderr: "pipe" },
@@ -411,7 +411,7 @@ async function invalidateModelsCache(authMode: ClaudeAuthMode): Promise<void> {
 // Request handlers extracted as a top-level const so tests can exercise each
 // one directly with mocked module deps, without having to spin up the
 // Electrobun RPC transport. The object shape is validated against
-// `PtolomeuRPCSchema` when it's passed to `defineElectrobunRPC` below.
+// `PtolemyRPCSchema` when it's passed to `defineElectrobunRPC` below.
 export const requestHandlers: BunRequestHandlers = {
 	listApps: async () => {
 		return scanApps();
@@ -555,7 +555,7 @@ export const requestHandlers: BunRequestHandlers = {
 		try {
 			const res = await fetchWithProxy(url, {
 				signal: AbortSignal.timeout(10_000),
-				headers: { "User-Agent": "Ptolomeu-ProxyTest" },
+				headers: { "User-Agent": "Ptolemy-ProxyTest" },
 			});
 			return {
 				ok: res.ok,
@@ -757,7 +757,7 @@ export const requestHandlers: BunRequestHandlers = {
 // window and targeting them explicitly. Both share the same request
 // handlers; they differ only in the transport Electrobun wires up.
 function buildRpc() {
-	return defineElectrobunRPC<PtolomeuRPCSchema, "bun">("bun", {
+	return defineElectrobunRPC<PtolemyRPCSchema, "bun">("bun", {
 		handlers: {
 			requests: requestHandlers,
 		},

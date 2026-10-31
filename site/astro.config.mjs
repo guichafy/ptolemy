@@ -4,7 +4,7 @@ import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig({
 	site: "https://guichafy.github.io",
-	base: "/ptolomeu",
+	base: "/ptolemy",
 	trailingSlash: "ignore",
 	build: {
 		assets: "_assets",

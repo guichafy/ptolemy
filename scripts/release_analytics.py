@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Release analytics for Ptolomeu.
+"""Release analytics for Ptolemy.
 
 CLI tool called during the release pipeline to track build and release lifecycle
 events in PostHog. Pairs with scripts/sync-versions.ts in the release workflow.
@@ -128,7 +128,7 @@ def cmd_build_failed(args: argparse.Namespace, client: Posthog | None) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Ptolomeu release analytics")
+    parser = argparse.ArgumentParser(description="Ptolemy release analytics")
     subparsers = parser.add_subparsers(dest="command", help="Event to track")
 
     # release_published

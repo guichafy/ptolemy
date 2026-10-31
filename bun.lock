@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "ptolomeu",
+      "name": "ptolemy",
       "dependencies": {
         "@anthropic-ai/claude-agent-sdk": "^0.2.118",
         "@dnd-kit/core": "^6.3.1",

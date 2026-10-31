@@ -25,7 +25,7 @@ describe("ToolDecisionStore", () => {
 	let store: ToolDecisionStore;
 
 	beforeEach(async () => {
-		root = await mkdtemp(join(tmpdir(), "ptolomeu-tool-decisions-"));
+		root = await mkdtemp(join(tmpdir(), "ptolemy-tool-decisions-"));
 		store = new ToolDecisionStore({ sessionsRoot: root });
 	});
 

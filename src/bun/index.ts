@@ -93,7 +93,7 @@ function openChatWindow(sessionId?: string) {
 
 	console.log("[main] openChatWindow: creating new chat window");
 	chatWindow = new BrowserWindow({
-		title: "Ptolomeu — Chat",
+		title: "Ptolemy — Chat",
 		url: "views://chatview/index.html",
 		hidden: false,
 		titleBarStyle: "default",
@@ -140,7 +140,7 @@ Utils.setDockIconVisible(false);
 // dock icon hidden, NSApp.mainMenu still participates in the responder chain.
 ApplicationMenu.setApplicationMenu([
 	{
-		label: "Ptolomeu",
+		label: "Ptolemy",
 		submenu: [],
 	},
 	{
@@ -166,7 +166,7 @@ ApplicationMenu.setApplicationMenu([
 const url = "views://mainview/index.html";
 
 const mainWindow = new BrowserWindow({
-	title: "Ptolomeu",
+	title: "Ptolemy",
 	url,
 	hidden: true,
 	titleBarStyle: "hidden",

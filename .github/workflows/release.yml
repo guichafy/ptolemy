@@ -42,9 +42,9 @@ jobs:
       - name: Detect new release
         id: release
         run: |
-          if compgen -G "ptolomeu-*-macos-arm64.zip" > /dev/null; then
+          if compgen -G "ptolemy-*-macos-arm64.zip" > /dev/null; then
             VERSION=$(jq -r .version package.json)
-            ZIP="ptolomeu-${VERSION}-macos-arm64.zip"
+            ZIP="ptolemy-${VERSION}-macos-arm64.zip"
             echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
             echo "zip=${ZIP}" >> "$GITHUB_OUTPUT"
             echo "published=true" >> "$GITHUB_OUTPUT"
@@ -74,7 +74,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION="${{ steps.release.outputs.version }}"
-          URL="https://guichafy.github.io/ptolomeu/v${VERSION}/ptolomeu-${VERSION}-macos-arm64.zip"
+          URL="https://guichafy.github.io/ptolemy/v${VERSION}/ptolemy-${VERSION}-macos-arm64.zip"
           gh release view "v${VERSION}" --json body -q .body > /tmp/body.md
           {
             printf '**Download direto (mirror GitHub Pages):** %s\n\n---\n\n' "$URL"

@@ -37,7 +37,7 @@ export async function fetchAllTeamRepos(
 ): Promise<TeamRepo[]> {
 	const headers: Record<string, string> = {
 		Accept: "application/vnd.github+json",
-		"User-Agent": "Ptolomeu",
+		"User-Agent": "Ptolemy",
 	};
 	if (token) headers.Authorization = `Bearer ${token}`;
 

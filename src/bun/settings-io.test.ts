@@ -54,7 +54,7 @@ function settingsPath(): string {
 describe("settings I/O", () => {
 	beforeEach(async () => {
 		installBunFsShim();
-		fakeHome.path = await mkdtemp(join(tmpdir(), "ptolomeu-settings-"));
+		fakeHome.path = await mkdtemp(join(tmpdir(), "ptolemy-settings-"));
 		vi.resetModules();
 	});
 
