@@ -1,10 +1,24 @@
-# Ptolomeu
+# Ptolemy
 
 Suas ferramentas do dia, orbitando você. Um command center para a barra de menus do macOS, feito para engenheiros de software.
 
-Ptolomeu é um app de menu bar para macOS construído com [Electrobun](https://electrobun.dev/) (runtime Bun) e React. Ele oferece uma command palette global (`⌘+Shift+Space`) extensível por um sistema de plugins — cada plugin é um provider que adiciona uma nova capacidade. Vem com 5 plugins integrados.
+Ptolemy é um app de menu bar para macOS construído com [Electrobun](https://electrobun.dev/) (runtime Bun) e React. Ele abre uma command palette global (`⌘+Shift+Space`) extensível por plugins: cada plugin é um provider que adiciona uma nova capacidade. Vem com 5 plugins integrados, incluindo uma janela de chat com o Claude.
 
-## Início rápido
+> Antes chamado **Ptolomeu**. Os releases até a v0.10.x foram publicados com esse nome; configurações, sessões e itens do Keychain já existentes continuam funcionando após a renomeação.
+
+🇺🇸 [Read in English](README.md)
+
+## Instalação
+
+Requisitos: macOS 13+ em Apple Silicon (arm64).
+
+1. Baixe o `.zip` mais recente em [GitHub Releases](https://github.com/guichafy/ptolemy/releases) ou no [site do projeto](https://guichafy.github.io/ptolemy/).
+2. Descompacte e arraste o app para `/Applications`. Na primeira execução, autorize em Ajustes do Sistema → Privacidade e Segurança.
+3. Aperte `⌘+Shift+Space`. O ícone fica na barra de menus (não há ícone no Dock).
+
+O plugin do Claude também precisa do Claude Code CLI (`claude`) instalado e autenticado (as configurações do plugin podem instalá-lo e abrir o login), ou de um perfil AWS Bedrock configurado ali.
+
+## Início rápido (desenvolvimento)
 
 ```bash
 # Pré-requisitos: macOS (arm64), Bun, Xcode Command Line Tools
@@ -16,11 +30,11 @@ bun run dev:hmr
 
 | Plugin | Descrição |
 |--------|-----------|
-| **GitHub** | Buscar repositórios, código, issues e usuários. Filtros customizados, builder de qualifiers, repos de times. |
 | **Apps** | Abrir aplicativos do macOS direto da palette. |
+| **GitHub** | Buscar repositórios, código, issues e usuários. Filtros customizados, builder de qualifiers, repos de times. |
 | **Calculadora** | Avaliar expressões matemáticas inline. |
-| **Busca Web** | Atalho para Google, DuckDuckGo, Stack Overflow, YouTube. |
-| **Claude AI** | Conversar com Claude — respostas em streaming, persistência de sessões, janela dedicada. |
+| **Busca Web** | Atalho para Google, DuckDuckGo, Stack Overflow e YouTube. |
+| **Claude Code** | Conversar com o Claude em uma janela dedicada: respostas em streaming, sessões persistentes, seletor de modelo, aprovação de ferramentas e servidores MCP. Cada conversa roda em um workspace isolado. |
 
 ## Sistema de plugins
 
@@ -97,20 +111,22 @@ export const PLUGIN_META: PluginMeta[] = [
 ];
 ```
 
+Labels e descrições da UI ficam em português (pt-BR), como no resto do app.
+
 ### Ideias de plugins
 
 Procurando inspiração? Alguns plugins que a comunidade pode construir:
 
-- **Jira / Linear** — issues, boards, status de sprint
-- **Slack** — canais, mensagens, pessoas
-- **AWS Console** — serviços, recursos, CloudWatch
-- **Docker** — containers, imagens, compose stacks
-- **npm / PyPI** — busca em registry de pacotes
-- **Homebrew** — formulae, casks
-- **Kubernetes** — pods, deployments, services
-- **CI/CD** — status de runs do GitHub Actions, CircleCI
-- **Bookmarks** — busca em favoritos do navegador
-- **Notas** — Apple Notes, vault do Obsidian
+- **Jira / Linear**: issues, boards, status de sprint
+- **Slack**: canais, mensagens, pessoas
+- **AWS Console**: serviços, recursos, CloudWatch
+- **Docker**: containers, imagens, compose stacks
+- **npm / PyPI**: busca em registry de pacotes
+- **Homebrew**: formulae, casks
+- **Kubernetes**: pods, deployments, services
+- **CI/CD**: status de runs do GitHub Actions, CircleCI
+- **Bookmarks**: busca em favoritos do navegador
+- **Notas**: Apple Notes, vault do Obsidian
 
 Não viu sua ferramenta? Construa um plugin e abra um PR.
 
@@ -119,8 +135,8 @@ Não viu sua ferramenta? Construa um plugin e abra um PR.
 | Processo / view | Caminho | Papel |
 |-----------------|---------|-------|
 | **Main (Bun)** | `src/bun/` | System tray, janelas, FFI nativo, atalho global, gerente de sessões Claude, fetch com proxy. |
-| **Renderer da palette** | `src/mainview/` | App React da command palette em uma BrowserWindow oculta, alternada por ⌘+Shift+Space. |
-| **Renderer do chat** | `src/chatview/` | App React separado para a janela de chat do Claude, criada sob demanda. |
+| **Renderer da palette** | `src/mainview/` | App React da command palette em uma BrowserWindow oculta, alternada por `⌘+Shift+Space`. |
+| **Renderer do chat** | `src/chatview/` | App React separado para a janela de chat do Claude, criada na primeira abertura. |
 
 ```
                        ┌───────────────────┐
@@ -134,21 +150,21 @@ Não viu sua ferramenta? Construa um plugin e abra um PR.
 └──────────────┘       └───────────────────┘
 ```
 
-Cada janela tem sua própria instância RPC do Electrobun (transporte por janela), mas compartilha o mesmo conjunto de handlers. Veja [CLAUDE.md](CLAUDE.md) para a documentação detalhada de arquitetura.
+Cada janela tem sua própria instância RPC do Electrobun (um transporte por janela), mas compartilha o mesmo conjunto de handlers. Veja o [AGENTS.md](AGENTS.md) para a arquitetura detalhada, a referência de RPC e as convenções. Ele também é o arquivo de instruções para agentes de IA que trabalham neste repositório.
 
 ## Desenvolvimento
 
 **Dev com HMR (recomendado)**
 
 ```bash
-bun run dev:hmr         # Vite (mainview + chatview) + Electrobun simultaneamente
+bun run dev:hmr            # Vite (mainview + chatview) + Electrobun, todos em watch
 ```
 
 **Build**
 
 ```bash
 bun run build:native       # Compila Objective-C → liboverlay.dylib
-bun run build:vite         # Build do mainview (dist/) e chatview (dist-chat/)
+bun run build:vite         # Build do mainview (dist/) e do chatview (dist-chat/)
 bun run build:dev-bundle   # Bundle .app de dev (necessário para E2E)
 bun run build:canary       # Build de produção (canal canary)
 bun run build:release      # Build de produção (canal stable)
@@ -157,38 +173,45 @@ bun run build:release      # Build de produção (canal stable)
 **Testes**
 
 ```bash
-bun run test              # Vitest — projetos node + jsdom
-bun run test:watch        # Vitest em modo watch
-bun run test:coverage     # Relatório de cobertura (HTML em ./coverage/)
-bun run test:e2e          # E2E (Appium Mac2; precisa do dev bundle)
-bun run screenshots       # Build dev bundle + E2E + regenera docs/screenshots/
+bun run test               # Vitest: projetos node + jsdom
+bun run test:watch         # Vitest em modo watch
+bun run test:coverage      # Relatório de cobertura (HTML em ./coverage/)
+bun run test:e2e           # E2E (Appium Mac2; precisa do dev bundle)
+bun run screenshots        # Build do dev bundle + E2E + regenera docs/screenshots/
 ```
 
-A suíte E2E controla o app real do macOS via Appium Mac2 e grava PNGs em
-`docs/screenshots/`. Tanto o job `e2e` da CI quanto o script `screenshots`
-produzem o dev bundle via `electrobun build --env=dev` antes de rodar.
+A suíte E2E controla o app real do macOS via Appium Mac2 e grava screenshots PNG em `docs/screenshots/`. Tanto o job `e2e` da CI quanto o script `screenshots` geram o dev bundle com `electrobun build --env=dev` antes de rodar.
 
 O Vitest roda dois projetos lado a lado:
 
-- `node` — módulos de backend (`src/bun/**`, `src/chatview/lib/**`, `src/chatview/hooks/**`)
-- `jsdom` — UI React (`src/mainview/**`, `src/chatview/components/**`, `src/lib/**`)
+- `node`: módulos de backend (`src/bun/**`, `src/chatview/lib/**`, `src/chatview/hooks/**`)
+- `jsdom`: UI React (`src/mainview/**`, `src/chatview/components/**`, `src/lib/**`)
+
+**Lint e tipos**
+
+```bash
+bun run lint               # Biome check
+bun run lint:fix           # Biome auto-fix
+bun run typecheck          # tsc --noEmit
+```
 
 **Git hooks (lefthook)**
 
-O lefthook é instalado automaticamente via `bun install` (executa `lefthook install` pelo script `prepare`). Cada commit roda Biome nos arquivos staged e Vitest nos testes afetados pela mudança. Para pular temporariamente: `LEFTHOOK=0 git commit …`.
+O lefthook é instalado automaticamente via `bun install` (o script `prepare` executa `lefthook install`). Cada commit roda o Biome nos arquivos staged e o Vitest nos testes afetados pela mudança. Para pular uma vez: `LEFTHOOK=0 git commit …`.
 
-**Lint**
+**Landing page**
 
-```bash
-bun run lint            # Biome check
-bun run lint:fix        # Biome auto-fix
-```
+O site do projeto fica em `site/` (Astro). Rode com `bun run dev:site`; o deploy no GitHub Pages é feito por `.github/workflows/site.yml`.
+
+## Releases
+
+Os releases são automatizados com semantic-release na `main`, a partir dos Conventional Commits. Cada release publica `ptolemy-<versão>-macos-arm64.zip` no GitHub Releases, espelha o arquivo no GitHub Pages e atualiza o [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Contribuindo
 
 ### Reportar bugs
 
-Abra uma issue com passos para reproduzir. Inclua sua versão do macOS, versão do Bun e os passos.
+Abra uma issue com passos para reproduzir. Inclua sua versão do macOS, a versão do Bun e os passos.
 
 ### Sugerir um plugin
 
@@ -203,9 +226,9 @@ Abra uma issue com a tag `plugin-idea`. Descreva a ferramenta ou serviço e quai
 
 ### Padrões de código
 
-- **Linter/formatter:** Biome — rode `bun run lint:fix` antes de commitar
-- **Commits:** conventional commits (`feat(scope):`, `fix(scope):`)
-- **Labels da UI:** Português (pt-BR) — "Abrir", "Sair", "Buscar"
+- **Linter/formatter:** Biome; rode `bun run lint:fix` antes de commitar
+- **Commits:** Conventional Commits (`feat(scope):`, `fix(scope):`)
+- **Labels da UI:** português (pt-BR), por exemplo "Abrir", "Sair", "Buscar"
 - **Gerenciador de pacotes:** apenas Bun (`bun install`, `bun run`)
 - **Path alias:** `@/*` mapeia para `src/*`
 
@@ -213,15 +236,13 @@ Abra uma issue com a tag `plugin-idea`. Descreva a ferramenta ou serviço e quai
 
 1. Faça fork do repo
 2. Crie uma branch (`feat/meu-plugin`)
-3. Rode `bun run lint:fix && bun run test`
+3. Rode `bun run lint:fix && bun run typecheck && bun run test`
 4. Abra um PR descrevendo as mudanças
 
 ## Licença
 
-Apache 2.0 — veja [LICENSE](LICENSE) para detalhes.
+Apache 2.0, veja [LICENSE](LICENSE) para detalhes.
 
 ---
 
-> Nomeado em homenagem a Cláudio Ptolomeu, que colocou a Terra no centro do cosmos. Ptolomeu coloca você no centro do seu workflow.
-
-[Read in English](README.md)
+> O nome vem de Cláudio Ptolomeu (Claudius Ptolemy), que colocou a Terra no centro do cosmos. O Ptolemy coloca você no centro do seu workflow.
