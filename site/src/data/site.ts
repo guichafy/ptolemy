@@ -5,7 +5,6 @@ export const SITE = {
 		"Uma menu bar app pra macOS que abre um command palette global em ⌘+Shift+Space. Apps, GitHub, calculadora, web e Claude Code, tudo num único atalho.",
 	githubUrl: "https://github.com/guichafy/ptolemy",
 	releasesUrl: "https://github.com/guichafy/ptolemy/releases",
-	downloadJsonUrl: "/ptolemy/latest.json",
 	hotkey: "⌘ + Shift + Space",
 	requirements: "macOS 13+ · Apple Silicon (arm64)",
 } as const;

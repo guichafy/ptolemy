@@ -6,6 +6,7 @@ on:
     paths:
       - "site/**"
       - ".github/workflows/site.yml"
+      - "scripts/build-pages-mirror.ts"
   workflow_dispatch:
 
 permissions:
@@ -37,6 +38,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bun run build
+
+      # Regenerate latest.json from what is on gh-pages so it always points at
+      # the current Pages path (keep_files would otherwise leave a stale copy).
+      - name: Refresh latest.json
+        run: |
+          bun run scripts/build-pages-mirror.ts --latest-only
+          if [ -f pages-dist/latest.json ]; then cp pages-dist/latest.json site/dist/latest.json; fi
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4

@@ -86,7 +86,7 @@ const ogImage = new URL(`${baseUrl}/icons/icon-512.png`, Astro.site).toString();
 				<div class="flex items-center gap-4">
 					<a href={SITE.githubUrl} class="hover:text-[var(--color-fg)] transition-colors">GitHub</a>
 					<a href={SITE.releasesUrl} class="hover:text-[var(--color-fg)] transition-colors">Releases</a>
-					<a href={SITE.downloadJsonUrl} class="hover:text-[var(--color-fg)] transition-colors font-mono text-xs">latest.json</a>
+					<a href={`${baseUrl}/latest.json`} class="hover:text-[var(--color-fg)] transition-colors font-mono text-xs">latest.json</a>
 				</div>
 			</div>
 		</footer>

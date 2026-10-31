@@ -147,6 +147,8 @@ Built on `@anthropic-ai/claude-agent-sdk` using the stable `query()` API. Authen
 
 semantic-release (`.releaserc.json`) runs on `main`: it bumps versions via `scripts/sync-versions.ts`, builds the stable bundle, zips it as `ptolemy-<version>-macos-arm64.zip` and publishes a GitHub Release. `.github/workflows/release.yml` then mirrors the zip to GitHub Pages (`scripts/build-pages-mirror.ts`, which also writes `latest.json`) and triggers a rebuild of the landing page in `site/` (Astro, deployed by `.github/workflows/site.yml` to `https://guichafy.github.io/ptolemy/`). Releases up to v0.10.x were published as `ptolomeu-*.zip`; the mirror script recognizes both prefixes.
 
+The Pages path is never hardcoded in CI: `site/astro.config.mjs` sets `base` from `GITHUB_REPOSITORY`, the site reads URLs from `import.meta.env.SITE`/`BASE_URL`, and `build-pages-mirror.ts` derives the same base (override with `PAGES_BASE`). Every site deploy runs `build-pages-mirror.ts --latest-only`, so `latest.json` always points at the current path; renaming the repo only requires a redeploy (`gh workflow run site.yml`). The fallback `/ptolemy` in those files matters only for local builds.
+
 ### Key config files
 
 - `electrobun.config.ts`: app name (`ptolemy`) and identity (`com.ptolomeu.app`), `exitOnLastWindowClosed: false`, copy rules (`dist/` → `views/mainview/`, `dist-chat/` → `views/chatview/`, dylib + tray icon → `native/`), icon set `ptolemy.iconset`
