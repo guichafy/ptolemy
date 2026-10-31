@@ -2,7 +2,7 @@ import type { ElectrobunConfig } from "electrobun";
 
 export default {
 	app: {
-		name: "ptolomeu",
+		name: "ptolemy",
 		identifier: "com.ptolomeu.app",
 		version: "0.10.3",
 	},
@@ -22,7 +22,7 @@ export default {
 		watchIgnore: [],
 		mac: {
 			bundleCEF: false,
-			icons: "ptolomeu.iconset",
+			icons: "ptolemy.iconset",
 		},
 		linux: {
 			bundleCEF: false,

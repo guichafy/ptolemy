@@ -1,5 +1,5 @@
-const REPO = "guichafy/ptolomeu";
-const PAGES_BASE = "https://guichafy.github.io/ptolomeu";
+const REPO = "guichafy/ptolemy";
+const PAGES_BASE = "https://guichafy.github.io/ptolemy";
 
 type GitHubAsset = {
 	name: string;
@@ -60,7 +60,7 @@ export async function fetchReleases(limit = 20): Promise<ReleasesResult> {
 	const headers: Record<string, string> = {
 		Accept: "application/vnd.github+json",
 		"X-GitHub-Api-Version": "2022-11-28",
-		"User-Agent": "ptolomeu-site",
+		"User-Agent": "ptolemy-site",
 	};
 	if (token) headers.Authorization = `Bearer ${token}`;
 

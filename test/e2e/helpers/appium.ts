@@ -176,8 +176,8 @@ case "activate":
 case "bounds":
     let list = CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String:Any]] ?? []
     for w in list {
-        if (w["kCGWindowOwnerName"] as? String) == "ptolomeu-dev",
-           (w["kCGWindowName"] as? String) == "Ptolomeu",
+        if (w["kCGWindowOwnerName"] as? String) == "ptolemy-dev",
+           (w["kCGWindowName"] as? String) == "Ptolemy",
            let b = w["kCGWindowBounds"] as? [String:Any] {
             let x = b["X"] as? Int ?? 0
             let y = b["Y"] as? Int ?? 0

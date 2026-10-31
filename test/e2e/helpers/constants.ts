@@ -11,7 +11,7 @@ export const APP_PATH = path.join(
 	PROJECT_ROOT,
 	"build",
 	"dev-macos-arm64",
-	"ptolomeu-dev.app",
+	"ptolemy-dev.app",
 );
 
 export const APPIUM_HOST = "127.0.0.1";

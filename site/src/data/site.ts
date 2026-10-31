@@ -1,11 +1,11 @@
 export const SITE = {
-	name: "Ptolomeu",
+	name: "Ptolemy",
 	tagline: "Spotlight, com sotaque de dev.",
 	description:
 		"Uma menu bar app pra macOS que abre um command palette global em ⌘+Shift+Space. Apps, GitHub, calculadora, web e Claude Code, tudo num único atalho.",
-	githubUrl: "https://github.com/guichafy/ptolomeu",
-	releasesUrl: "https://github.com/guichafy/ptolomeu/releases",
-	downloadJsonUrl: "/ptolomeu/latest.json",
+	githubUrl: "https://github.com/guichafy/ptolemy",
+	releasesUrl: "https://github.com/guichafy/ptolemy/releases",
+	downloadJsonUrl: "/ptolemy/latest.json",
 	hotkey: "⌘ + Shift + Space",
 	requirements: "macOS 13+ · Apple Silicon (arm64)",
 } as const;
@@ -77,7 +77,7 @@ export type Screenshot = {
 export const SCREENSHOTS: readonly Screenshot[] = [
 	{
 		src: "estado-inicial.png",
-		alt: "Command palette do Ptolomeu aberto sobre o desktop, mostrando as cinco abas de plugins",
+		alt: "Command palette do Ptolemy aberto sobre o desktop, mostrando as cinco abas de plugins",
 		caption: "Estado inicial — ⌘+Shift+Space abre a paleta sobre qualquer app",
 		plugin: "Geral",
 	},

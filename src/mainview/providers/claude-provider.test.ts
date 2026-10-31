@@ -19,7 +19,7 @@ function makeSession(overrides: Partial<Record<string, unknown>> = {}) {
 		sdkSessionId: "sdk-1",
 		title: "Conversa teste",
 		projectId: "conversa-teste-abc123",
-		projectPath: "/tmp/ptolomeu/projects/conversa-teste-abc123",
+		projectPath: "/tmp/ptolemy/projects/conversa-teste-abc123",
 		model: "claude-sonnet-4-6",
 		authMode: "anthropic" as const,
 		createdAt: new Date().toISOString(),

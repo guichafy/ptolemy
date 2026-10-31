@@ -168,9 +168,9 @@ describe("SettingsProvider", () => {
 				{
 					id: "f1",
 					kind: "search",
-					name: "Ptolomeu issues",
+					name: "Ptolemy issues",
 					baseType: "issues",
-					qualifiers: "repo:guichafy/ptolomeu",
+					qualifiers: "repo:guichafy/ptolemy",
 				},
 			]);
 		});

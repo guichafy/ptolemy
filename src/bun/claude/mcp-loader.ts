@@ -5,7 +5,7 @@
  *
  * This file is separate from the dev-time `.mcp.json` in the repo root —
  * that one is consumed by Claude Code when working in this codebase, not
- * by the Ptolomeu app at runtime.
+ * by the Ptolemy app at runtime.
  */
 
 import { existsSync } from "node:fs";

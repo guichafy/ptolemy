@@ -1,7 +1,7 @@
 <wizard-report>
 # PostHog post-wizard report
 
-The wizard has completed a PostHog integration for Ptolomeu. Since this is a TypeScript/Bun/Electrobun project with no prior Python code, the integration introduces a new Python release analytics CLI (`scripts/release_analytics.py`) alongside the existing `scripts/sync-versions.ts`. This script is designed to be called during the release pipeline (CI/CD or manually) to track build and release lifecycle events. A `requirements.txt` was added at the project root, and PostHog credentials are loaded from environment variables via `.env` (covered by `.gitignore`).
+The wizard has completed a PostHog integration for Ptolemy. Since this is a TypeScript/Bun/Electrobun project with no prior Python code, the integration introduces a new Python release analytics CLI (`scripts/release_analytics.py`) alongside the existing `scripts/sync-versions.ts`. This script is designed to be called during the release pipeline (CI/CD or manually) to track build and release lifecycle events. A `requirements.txt` was added at the project root, and PostHog credentials are loaded from environment variables via `.env` (covered by `.gitignore`).
 
 | Event | Description | File |
 |---|---|---|

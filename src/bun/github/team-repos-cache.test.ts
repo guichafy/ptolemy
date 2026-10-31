@@ -20,8 +20,8 @@ describe("fetchAllTeamRepos", () => {
 				JSON.stringify([
 					{
 						id: 1,
-						name: "ptolomeu",
-						full_name: "Chafy-Studio/ptolomeu",
+						name: "ptolemy",
+						full_name: "Chafy-Studio/ptolemy",
 						description: "menu bar app",
 						stargazers_count: 5,
 						language: "TypeScript",
@@ -34,8 +34,8 @@ describe("fetchAllTeamRepos", () => {
 		globalThis.fetch = fetchMock as unknown as typeof fetch;
 		const results = await fetchAllTeamRepos("Chafy-Studio", "chafy", "tok");
 		expect(results).toHaveLength(1);
-		expect(results[0].name).toBe("ptolomeu");
-		expect(results[0].fullName).toBe("Chafy-Studio/ptolomeu");
+		expect(results[0].name).toBe("ptolemy");
+		expect(results[0].fullName).toBe("Chafy-Studio/ptolemy");
 	});
 
 	it("inclui Authorization quando token fornecido", async () => {
@@ -69,8 +69,8 @@ describe("filterTeamRepos", () => {
 	const sample: TeamRepo[] = [
 		{
 			id: 1,
-			name: "ptolomeu",
-			fullName: "o/ptolomeu",
+			name: "ptolemy",
+			fullName: "o/ptolemy",
 			description: "menu BAR",
 			stars: 0,
 			language: null,
@@ -104,7 +104,7 @@ describe("filterTeamRepos", () => {
 		const matches = filterTeamRepos(sample, "bar");
 		expect(matches.map((r: TeamRepo) => r.name).sort()).toEqual([
 			"bar-service",
-			"ptolomeu",
+			"ptolemy",
 		]);
 	});
 

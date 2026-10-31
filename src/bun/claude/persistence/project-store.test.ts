@@ -10,7 +10,7 @@ describe("ProjectStore", () => {
 	let store: ProjectStore;
 
 	beforeEach(async () => {
-		root = await mkdtemp(join(tmpdir(), "ptolomeu-projects-"));
+		root = await mkdtemp(join(tmpdir(), "ptolemy-projects-"));
 		store = new ProjectStore({ root });
 	});
 

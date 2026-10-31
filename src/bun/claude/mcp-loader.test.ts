@@ -10,7 +10,7 @@ describe("McpLoader", () => {
 	let loader: McpLoader;
 
 	beforeEach(async () => {
-		root = join(tmpdir(), `ptolomeu-mcp-${Date.now()}-${Math.random()}`);
+		root = join(tmpdir(), `ptolemy-mcp-${Date.now()}-${Math.random()}`);
 		await mkdir(root, { recursive: true });
 		path = join(root, "mcp-servers.json");
 		loader = new McpLoader({ path });

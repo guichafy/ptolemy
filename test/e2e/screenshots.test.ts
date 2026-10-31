@@ -25,7 +25,7 @@ import { Providers, Screenshots, Timing } from "./helpers/constants";
  * Previously tests chained state through `pressTab` without clearing, which
  * accumulated typed text and left every screenshot on the wrong provider.
  */
-describe("Ptolomeu Screenshots", () => {
+describe("Ptolemy Screenshots", () => {
 	let appiumProcess: ChildProcess;
 	let driver: WebdriverIO.Browser;
 
