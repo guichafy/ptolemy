@@ -102,6 +102,95 @@ describe("Agent composer", () => {
 			}),
 		);
 	});
+	test("native defaults have removable chips and selectable checkboxes", async () => {
+		request.agentListSkills.mockResolvedValue([
+			{
+				...skill,
+				id: "native",
+				source: { kind: "harness", agent: "codex" },
+				origin: "system",
+			},
+		]);
+		render(<Composer />);
+		await userEvent.click(
+			await screen.findByRole("button", { name: "Remover review" }),
+		);
+		await userEvent.click(
+			screen.getByRole("button", { name: /Configurar Skills/ }),
+		);
+		expect(
+			screen.getByRole("checkbox", { name: "Usar review" }),
+		).not.toBeChecked();
+		await userEvent.click(
+			screen.getByRole("checkbox", { name: "Usar review" }),
+		);
+		expect(screen.getByText("Integrada ao sistema")).toBeInTheDocument();
+		await userEvent.keyboard("{Escape}");
+		await userEvent.click(
+			screen.getByRole("button", { name: "Iniciar conversa" }),
+		);
+		expect(request.claudeCreateSession).toHaveBeenCalledWith(
+			expect.objectContaining({ skillIds: ["native"] }),
+		);
+	});
+
+	test("agent switching ignores a stale catalog and applies the new agent defaults", async () => {
+		let finish!: (value: unknown) => void;
+		request.agentListSkills.mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					finish = resolve;
+				}),
+		);
+		request.agentListSkills.mockResolvedValueOnce([
+			{
+				...skill,
+				id: "claude-skill",
+				name: "claude-skill",
+				defaultFor: ["claude"],
+			},
+		]);
+		const { rerender } = render(<Composer agent="codex" />);
+		rerender(<Composer agent="claude" />);
+		expect(
+			await screen.findByRole("button", { name: "Remover claude-skill" }),
+		).toBeInTheDocument();
+		finish([skill]);
+		await waitFor(() =>
+			expect(
+				screen.queryByRole("button", { name: "Remover review" }),
+			).not.toBeInTheDocument(),
+		);
+		await userEvent.click(
+			screen.getByRole("button", { name: "Iniciar conversa" }),
+		);
+		expect(request.claudeCreateSession).toHaveBeenCalledWith(
+			expect.objectContaining({ agent: "claude", skillIds: ["claude-skill"] }),
+		);
+	});
+	test("unavailable native Skills show a reason and cannot be enabled", async () => {
+		request.agentListSkills.mockResolvedValue([
+			{
+				...skill,
+				source: { kind: "harness", agent: "codex" },
+				unavailableReason: "Skill contém link simbólico.",
+			},
+		]);
+		render(<Composer />);
+		await userEvent.click(
+			screen.getByRole("button", { name: /Configurar Skills/ }),
+		);
+		expect(
+			screen.getByRole("checkbox", { name: "Usar review" }),
+		).toBeDisabled();
+		expect(
+			screen.getByRole("checkbox", { name: "Usar review" }),
+		).not.toBeChecked();
+		expect(
+			screen.getByText("Skill contém link simbólico."),
+		).toBeInTheDocument();
+	});
+
 	test("can start with the configured model and retry after model discovery fails", async () => {
 		request.codexListModels.mockRejectedValueOnce(
 			new Error("Falha ao carregar modelos"),

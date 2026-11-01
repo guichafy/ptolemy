@@ -16,14 +16,19 @@ import type {
 	SessionInfoPatch,
 	SessionStats,
 } from "@/shared/agent-protocol";
-import type { SessionSkill } from "@/shared/skills";
+import type { SessionSkill, SessionSkillSelection } from "@/shared/skills";
 import { backupCorruptJson, writeJsonAtomic } from "../atomic-json";
 import { readCodexContextBreakdown } from "../codex/rollout-info";
 import { CodexSessionRuntime } from "../codex/session-runtime";
 import { ptolemyDataDir } from "../paths";
 import { loadSettings } from "../settings";
+import { assertSkillSelectionSupport } from "../skills/runtime-support";
 import { skillsStore } from "../skills/store";
-import { activateSkills, snapshotSkills } from "../skills/workspace";
+import {
+	activateSkills,
+	buildCodexSkillConfig,
+	snapshotSkills,
+} from "../skills/workspace";
 import { findClaudeCli } from "./claude-cli";
 import { mapClaudeContextUsage } from "./context-breakdown";
 import { mcpLoader } from "./mcp-loader";
@@ -68,8 +73,10 @@ export interface SessionMeta {
 	sdkSessionId: string;
 	/** Which agent backs this session. Absent on pre-Codex sessions = claude. */
 	agent?: AgentKind;
-	/** Immutable imported Skill snapshots selected before the first turn. */
+	/** Immutable file Skill snapshots selected before the first turn. */
 	skills?: SessionSkill[];
+	/** Undefined retains legacy native discovery; explicit selection is frozen at creation. */
+	skillSelection?: SessionSkillSelection;
 	title: string;
 	/** Project this conversation belongs to. Many sessions can share one project. */
 	projectId: string;
@@ -711,6 +718,18 @@ function createCodexRuntime(
 				reasoningEffort: settings.codex.reasoningEffort,
 			};
 		},
+		loadSkillConfig: async () => {
+			const meta = (await readIndex()).sessions.find((s) => s.id === sessionId);
+			return buildCodexSkillConfig(
+				meta?.skillSelection,
+				await skillsStore.nativePaths("codex", cwd),
+				meta?.skillSelection
+					? (meta.skills ?? []).map((skill) =>
+							join(cwd, ".agents", "skills", skill.name, "SKILL.md"),
+						)
+					: [],
+			);
+		},
 		onSessionInfo: (patch) => {
 			void recordSessionInfo(sessionId, patch);
 		},
@@ -725,6 +744,7 @@ async function createCodexSession(
 	prompt: string,
 	project: Project,
 	skills: SessionSkill[],
+	skillSelection: SessionSkillSelection,
 	model?: string,
 ): Promise<string> {
 	const settings = await loadSettings();
@@ -734,6 +754,7 @@ async function createCodexSession(
 		sdkSessionId: "", // filled in when Codex reports thread.started
 		agent: "codex",
 		skills,
+		skillSelection,
 		title: generateTitle(prompt),
 		projectId: project.id,
 		projectPath: project.path,
@@ -814,6 +835,10 @@ export async function createSession(
 		skillIds,
 	);
 
+	const skillSelection = {
+		nativePaths: await skillsStore.nativePaths(opts.agent ?? "claude"),
+	};
+
 	// Resolve (or create) the project this conversation belongs to. The
 	// project directory becomes the agent's cwd — every Write/Edit/Bash is
 	// scoped to it, guaranteeing isolation between conversations.
@@ -834,7 +859,14 @@ export async function createSession(
 
 	if (opts.agent === "codex") {
 		const skills = await snapshotSkills(SESSIONS_DIR, id, selectedSkills);
-		return createCodexSession(id, prompt, project, skills, opts.model);
+		return createCodexSession(
+			id,
+			prompt,
+			project,
+			skills,
+			skillSelection,
+			opts.model,
+		);
 	}
 	verbose(
 		`[claude:session] createSession prompt preview: id=${id} prompt="${previewText(prompt)}"`,
@@ -848,6 +880,7 @@ export async function createSession(
 	);
 
 	const claudePath = await findClaudeCli();
+	await assertSkillSelectionSupport("claude", claudePath);
 	const mcpServers = await mcpLoader.resolve();
 	const skills = await snapshotSkills(SESSIONS_DIR, id, selectedSkills);
 	const mcpNames = Object.keys(mcpServers);
@@ -869,6 +902,7 @@ export async function createSession(
 		id,
 		sdkSessionId: id, // placeholder; gets corrected by sdk-session-id capture in the streaming loop
 		skills,
+		skillSelection,
 		title: generateTitle(prompt),
 		projectId: project.id,
 		projectPath: project.path,
@@ -910,6 +944,7 @@ export async function createSession(
 		inbox,
 		authMode,
 		options: buildQueryOptions({
+			explicitSkillSelection: true,
 			model,
 			permissionMode,
 			claudePath,
@@ -1080,6 +1115,8 @@ export async function resumeSession(sessionId: string): Promise<boolean> {
 		}
 
 		const claudePath = await findClaudeCli();
+		if (meta.skillSelection !== undefined)
+			await assertSkillSelectionSupport("claude", claudePath);
 		const mcpServers = await mcpLoader.resolve();
 		const cwd = await resolveProjectPath(meta);
 		await activateSkills(SESSIONS_DIR, sessionId, cwd, "claude");
@@ -1103,6 +1140,7 @@ export async function resumeSession(sessionId: string): Promise<boolean> {
 		const q = query({
 			prompt: inbox.iterable,
 			options: buildQueryOptions({
+				explicitSkillSelection: meta.skillSelection !== undefined,
 				model,
 				permissionMode,
 				claudePath,

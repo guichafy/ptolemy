@@ -17,6 +17,9 @@ export interface SkillSummary {
 	description: string;
 	source: SkillSource;
 	defaultFor: AgentKind[];
+	/** Local CLI discovery origin, shown without conflating built-ins and user Skills. */
+	origin?: "system" | "local";
+	localPath?: string;
 	/** A native package the isolated SDK cannot load; never blocks creation. */
 	unavailableReason?: string;
 }
@@ -39,4 +42,9 @@ export interface SessionSkill {
 	id: string;
 	name: string;
 	source: SkillSource;
+}
+
+/** Absence preserves legacy native discovery; an explicit empty selection disables it. */
+export interface SessionSkillSelection {
+	nativePaths: string[];
 }

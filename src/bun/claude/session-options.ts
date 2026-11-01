@@ -18,6 +18,8 @@ export interface BuildQueryArgs {
 	cwd: string;
 	/** Pass to resume an existing SDK session (CLI `--resume` semantics). */
 	resumeSdkSessionId?: string;
+	/** Native paths are suppressed only when a new immutable Skill selection exists. */
+	explicitSkillSelection?: boolean;
 }
 
 /**
@@ -43,6 +45,9 @@ export function buildQueryOptions(args: BuildQueryArgs): Options {
 		// settings, hooks or permission grants alongside the selected Skills.
 		plugins: [{ type: "local", path: claudeSkillsPlugin(args.cwd) }],
 	};
+	if (args.explicitSkillSelection) {
+		opts.managedSettings = { strictPluginOnlyCustomization: ["skills"] };
+	}
 	if (args.permissionMode) {
 		opts.permissionMode = args.permissionMode;
 	}

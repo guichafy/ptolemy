@@ -1,4 +1,4 @@
-import { BookOpen, Check, Download, Loader2, Star } from "lucide-react";
+import { BookOpen, Download, Loader2, Star } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,8 +35,6 @@ export function SkillPicker({
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [saved, setSaved] = useState(false);
-	const native = skills.filter((skill) => skill.source.kind === "harness");
-	const imported = skills.filter((skill) => skill.source.kind === "github");
 	async function importSkill() {
 		if (busy || !url.trim()) return;
 		setBusy(true);
@@ -108,41 +106,22 @@ export function SkillPicker({
 					</span>
 				</div>
 				<p className="mb-3 text-xs text-muted-foreground">
-					As Skills nativas são gerenciadas pelo harness. Adicione outras para
-					esta conversa.
+					Selecione as Skills disponíveis para esta conversa. A seleção fica
+					salva ao iniciar.
 				</p>
 				<div className="max-h-32 overflow-y-auto space-y-1">
-					{native.map((skill) => (
-						<div
-							key={skill.id}
-							className="px-2 py-1 text-xs text-muted-foreground"
-							title={skill.description}
-						>
-							{!skill.unavailableReason && (
-								<Check className="mr-1 inline h-3 w-3" />
-							)}
-							{skill.name}
-							<span className="ml-2 text-[10px]">
-								{skill.unavailableReason ? "Indisponível" : "Do harness"}
-							</span>
-							{skill.unavailableReason && (
-								<span className="mt-1 block text-[10px] text-destructive">
-									{skill.unavailableReason}
-								</span>
-							)}
-						</div>
-					))}
-					{imported.map((skill) => (
+					{skills.map((skill) => (
 						<label
 							key={skill.id}
 							className="flex cursor-pointer items-start gap-2 rounded-md px-2 py-2 hover:bg-accent"
+							title={skill.localPath}
 						>
 							<input
 								type="checkbox"
 								className="mt-0.5 accent-primary"
 								aria-label={`Usar ${skill.name}`}
 								checked={selected.includes(skill.id)}
-								disabled={busy || disabled}
+								disabled={busy || disabled || !!skill.unavailableReason}
 								onChange={(event) => {
 									onSelect(
 										event.target.checked
@@ -157,10 +136,22 @@ export function SkillPicker({
 								<span className="line-clamp-2 block text-xs text-muted-foreground">
 									{skill.description}
 								</span>
+								{skill.source.kind === "harness" && (
+									<span className="block text-[10px]">
+										{skill.origin === "system"
+											? "Integrada ao sistema"
+											: "Instalada localmente"}
+									</span>
+								)}
+								{skill.unavailableReason && (
+									<span className="block text-destructive">
+										{skill.unavailableReason}
+									</span>
+								)}
 							</span>
 						</label>
 					))}
-					{!imported.length && (
+					{!skills.length && (
 						<p className="px-2 py-2 text-xs text-muted-foreground">
 							Importe uma Skill do GitHub para começar.
 						</p>

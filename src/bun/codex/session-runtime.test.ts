@@ -110,6 +110,38 @@ describe("CodexSessionRuntime", () => {
 		expect(runtime.threadId).toBe("th_new");
 	});
 
+	it("passes per-invocation native Skill disabling configuration to the SDK on every resumed turn", async () => {
+		const skillConfig = {
+			skills: { config: [{ path: "/native/review/SKILL.md", enabled: false }] },
+		};
+		const createThread = vi.fn(
+			async (
+				_id: string | null,
+				_options: ThreadOptions,
+				_config: Record<string, unknown>,
+			) => ({
+				id: "thread",
+				async runStreamed() {
+					return {
+						events: (async function* () {
+							yield { type: "turn.completed" as const, usage };
+						})(),
+					};
+				},
+			}),
+		);
+		const { runtime } = makeRuntime({
+			createThread,
+			loadSkillConfig: async () => skillConfig,
+		});
+		await runtime.enqueue("first");
+		await runtime.enqueue("resume");
+		expect(createThread.mock.calls.map((call) => call[2])).toEqual([
+			skillConfig,
+			skillConfig,
+		]);
+	});
+
 	it("serializa turnos enviados enquanto outro está rodando", async () => {
 		const { runtime, calls } = makeRuntime();
 		const a = runtime.enqueue("a");

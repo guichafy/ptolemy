@@ -46,6 +46,7 @@ export function AgentComposer({
 	const textarea = useRef<HTMLTextAreaElement>(null);
 	const inFlight = useRef(false);
 	const mounted = useRef(true);
+	const catalogRequest = useRef(0);
 	const label = agent === "claude" ? "Claude" : "Codex";
 	const resolvedId = models.find((item) => item.value === model)?.resolvesTo;
 	const resolvedLabel =
@@ -76,30 +77,31 @@ export function AgentComposer({
 		};
 	}, [agent, modelAttempt]);
 	const loadCatalog = useCallback(async () => {
+		const requestId = ++catalogRequest.current;
 		setLoading(true);
 		setCatalogError(null);
 		try {
 			const catalog = await rpc.request.agentListSkills({ agent });
-			if (!mounted.current) return;
+			if (!mounted.current || requestId !== catalogRequest.current) return;
 			setSkills(catalog);
 			setSelected(
 				catalog
 					.filter(
 						(skill) =>
-							skill.source.kind === "github" &&
-							skill.defaultFor.includes(agent),
+							!skill.unavailableReason && skill.defaultFor.includes(agent),
 					)
 					.map((skill) => skill.id),
 			);
 		} catch (err) {
-			if (mounted.current)
+			if (mounted.current && requestId === catalogRequest.current)
 				setCatalogError(
 					err instanceof Error
 						? err.message
 						: "Não foi possível carregar as Skills.",
 				);
 		} finally {
-			if (mounted.current) setLoading(false);
+			if (mounted.current && requestId === catalogRequest.current)
+				setLoading(false);
 		}
 	}, [agent]);
 	useEffect(() => {

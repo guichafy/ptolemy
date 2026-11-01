@@ -9,7 +9,11 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { activateSkills, snapshotSkills } from "./workspace";
+import {
+	activateSkills,
+	buildCodexSkillConfig,
+	snapshotSkills,
+} from "./workspace";
 
 let root: string;
 const bundle = (name: string) => ({
@@ -82,6 +86,56 @@ describe("conversation Skills", () => {
 			"user content",
 		);
 	});
+	test("explicit empty native selection disables current and snapshotted discovery paths without replacing unrelated settings", () => {
+		expect(
+			buildCodexSkillConfig({ nativePaths: ["/old/review/SKILL.md"] }, [
+				"/new/review/SKILL.md",
+			]),
+		).toEqual({
+			skills: {
+				bundled: { enabled: false },
+				config: [
+					{ path: "/old/review/SKILL.md", enabled: false },
+					{ path: "/new/review/SKILL.md", enabled: false },
+				],
+			},
+		});
+		expect(buildCodexSkillConfig(undefined, ["/new/review/SKILL.md"])).toEqual(
+			{},
+		);
+	});
+	test.each([
+		"claude",
+		"codex",
+	] as const)("native %s snapshots survive original deletion and update", async (agent) => {
+		const { SkillsStore } = await import("./store");
+		const nativeRoot = join(root, "native");
+		await mkdir(join(nativeRoot, "review"), { recursive: true });
+		await writeFile(
+			join(nativeRoot, "review/SKILL.md"),
+			Buffer.from(bundle("review").files[0].content, "base64"),
+		);
+		const store = new SkillsStore({
+			root: join(root, "catalog"),
+			harnessRoots: { claude: [nativeRoot], codex: [nativeRoot] },
+		});
+		const selected = await store.resolveForSession(
+			agent,
+			await store.defaults(agent),
+		);
+		await snapshotSkills(root, "native-session", selected);
+		await writeFile(join(nativeRoot, "review/SKILL.md"), "updated source");
+		await rm(nativeRoot, { recursive: true });
+		const cwd = join(root, "project");
+		await mkdir(cwd);
+		await activateSkills(root, "native-session", cwd, agent);
+		const target =
+			agent === "claude" ? ".ptolemy/claude-harness/skills" : ".agents/skills";
+		expect(
+			await readFile(join(cwd, target, "review/SKILL.md"), "utf8"),
+		).toContain("name: review");
+	});
+
 	test("Claude reload removes workspace-added plugin hooks and tool grants", async () => {
 		const cwd = join(root, "project");
 		await mkdir(cwd);
