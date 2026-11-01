@@ -154,6 +154,7 @@ export async function selectProvider(
 	);
 	await clickPaletteElement(button);
 	await wait(Timing.POST_TAB);
+	await ensurePaletteVisible(driver);
 	if (provider !== "claude") {
 		// Clicking a mode leaves keyboard focus on its button. Refocus the
 		// search field before typing instead of relying on the previous DOM.
@@ -171,12 +172,34 @@ async function ensurePaletteVisible(
 		const webview = source.match(/<XCUIElementTypeWebView\b[^>]*>/)?.[0];
 		const x = Number(webview?.match(/\bx="([^"]+)"/)?.[1]);
 		const y = Number(webview?.match(/\by="([^"]+)"/)?.[1]);
+		console.log(`[e2e] palette visibility attempt=${attempt} x=${x} y=${y}`);
 		if (Number.isFinite(x) && Number.isFinite(y) && x > -10_000 && y > -10_000)
 			return;
 		activateWindow();
 		await wait(Timing.SETTLE_LOCAL);
 	}
 	throw new Error("A paleta continua oculta após o atalho global.");
+}
+
+export function saveNativeWindowLog(): void {
+	try {
+		const logs = execFileSync(
+			"/usr/bin/log",
+			[
+				"show",
+				"--last",
+				"10m",
+				"--style",
+				"compact",
+				"--predicate",
+				'eventMessage CONTAINS "[Hotkey]" OR eventMessage CONTAINS "[Delegate]"',
+			],
+			{ timeout: 15_000 },
+		);
+		writeFileSync(path.join(SCREENSHOTS_DIR, "native-window.log"), logs);
+	} catch (error) {
+		console.warn("[e2e] native window logs unavailable:", error);
+	}
 }
 
 /** XCTest element.click can activate another native window and hide overlays.
@@ -188,6 +211,9 @@ export async function clickPaletteElement(
 		element.getLocation(),
 		element.getSize(),
 	]);
+	console.log(
+		`[e2e] native click x=${location.x} y=${location.y} width=${size.width} height=${size.height}`,
+	);
 	if (location.x < -10_000 || location.y < -10_000)
 		throw new Error("Controle da paleta está fora da tela.");
 	execFileSync(compileSwiftHelper(), [
