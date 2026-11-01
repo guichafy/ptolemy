@@ -1,3 +1,10 @@
+# [0.11.0](https://github.com/guichafy/ptolemy/compare/v0.10.4...v0.11.0) (2026-11-01)
+
+
+### Features
+
+* **site:** reposition landing for any Mac user, not only developers ([95a41d5](https://github.com/guichafy/ptolemy/commit/95a41d5b11dbb95ccae9c731aee7ce2238f72369))
+
 ## [0.10.4](https://github.com/guichafy/ptolemy/compare/v0.10.3...v0.10.4) (2026-10-31)
 
 
