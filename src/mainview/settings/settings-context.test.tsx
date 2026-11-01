@@ -28,7 +28,8 @@ vi.mock("../providers/rpc", () => ({
 }));
 
 vi.mock("../providers/registry", () => ({
-	KNOWN_PLUGIN_IDS: ["apps", "github", "calc", "web", "claude"],
+	KNOWN_PLUGIN_IDS: ["apps", "github", "calc", "web", "claude", "codex"],
+	DEFAULT_ENABLED_ORDER: ["apps", "github", "calc", "web", "claude"],
 }));
 
 const { SettingsProvider, useSettings } = await import("./settings-context");

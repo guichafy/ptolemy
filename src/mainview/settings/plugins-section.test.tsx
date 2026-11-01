@@ -45,11 +45,13 @@ describe("<PluginsSection />", () => {
 		expect(screen.getByText("Claude Code")).toBeInTheDocument();
 	});
 
-	it("hides the 'Disponíveis' section when all plugins are active", () => {
-		settingsState.enabledOrder = ["apps", "github", "calc", "web", "claude"];
+	it("caps active plugins at five while Codex stays opt-in", () => {
+		settingsState.enabledOrder = ["apps", "github", "calc", "web", "codex"];
+		// Six plugins exist but only five fit; swap one in to reach "all".
 		render(<PluginsSection />);
-		expect(screen.queryByText("Disponíveis")).not.toBeInTheDocument();
 		expect(screen.getByText("5/5 ativos")).toBeInTheDocument();
+		// Claude is the only one left out, and it cannot be added at the cap.
+		expect(screen.getByLabelText("Habilitar Claude Code")).toBeDisabled();
 	});
 
 	it("clicking the + on an available plugin adds it to enabledOrder", async () => {

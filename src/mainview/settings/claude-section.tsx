@@ -14,6 +14,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import type { ProtocolModelInfo } from "@/shared/agent-protocol";
+import { sessionsForAgent } from "../providers/agent-sessions";
 import {
 	type ClaudeAuthMode,
 	type ClaudeAuthStatus,
@@ -122,7 +123,7 @@ export function ClaudeSection() {
 	const refreshSessions = useCallback(async () => {
 		try {
 			const sessions = await rpc.request.claudeListSessions();
-			setSessionCount(sessions.length);
+			setSessionCount(sessionsForAgent(sessions, "claude").length);
 		} catch {
 			setSessionCount(0);
 		}
@@ -260,8 +261,9 @@ export function ClaudeSection() {
 	async function handleClearHistory() {
 		setClearingHistory(true);
 		try {
+			// Codex sessions live in the same store; clear only Claude's here.
 			const sessions = await rpc.request.claudeListSessions();
-			for (const session of sessions) {
+			for (const session of sessionsForAgent(sessions, "claude")) {
 				await rpc.request.claudeDeleteSession({ sessionId: session.id });
 			}
 			await refreshSessions();

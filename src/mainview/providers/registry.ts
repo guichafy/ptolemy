@@ -1,7 +1,15 @@
-import { AppWindow, BookMarked, Bot, Calculator, Globe } from "lucide-react";
+import {
+	AppWindow,
+	BookMarked,
+	Bot,
+	Calculator,
+	Globe,
+	SquareTerminal,
+} from "lucide-react";
 import { appsProvider } from "./apps-provider";
 import { calculatorProvider } from "./calculator-provider";
 import { claudeProvider } from "./claude-provider";
+import { codexProvider } from "./codex-provider";
 import { githubProvider } from "./github-provider";
 import type { IconComponent, SearchProvider } from "./types";
 import { webSearchProvider } from "./web-search-provider";
@@ -12,6 +20,7 @@ export const PLUGIN_REGISTRY: Record<string, SearchProvider> = {
 	calc: calculatorProvider,
 	web: webSearchProvider,
 	claude: claudeProvider,
+	codex: codexProvider,
 };
 
 export interface PluginMeta {
@@ -52,9 +61,23 @@ export const PLUGIN_META: PluginMeta[] = [
 		description: "Sessões de chat com Claude Code",
 		icon: Bot,
 	},
+	{
+		id: "codex",
+		label: "Codex",
+		description: "Sessões de chat com o Codex da OpenAI",
+		icon: SquareTerminal,
+	},
 ];
 
 export const KNOWN_PLUGIN_IDS = PLUGIN_META.map((p) => p.id);
+
+/**
+ * Plugins enabled on a fresh install. Codex is opt-in: it needs its own CLI
+ * and sign-in, so it starts in the "available" list in Settings → Plugins.
+ */
+export const DEFAULT_ENABLED_ORDER = KNOWN_PLUGIN_IDS.filter(
+	(id) => id !== "codex",
+);
 
 export function findPluginMeta(id: string): PluginMeta | undefined {
 	return PLUGIN_META.find((p) => p.id === id);

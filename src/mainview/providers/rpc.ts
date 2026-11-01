@@ -1,5 +1,5 @@
 import { type ElectrobunRPCSchema, Electroview } from "electrobun/view";
-import type { AgentEvent } from "@/shared/agent-protocol";
+import type { AgentEvent, AgentKind } from "@/shared/agent-protocol";
 
 export type GitHubSearchType = "repos" | "code" | "issues" | "users";
 
@@ -42,6 +42,26 @@ export interface ClaudeSettings {
 	authMode: ClaudeAuthMode;
 	model: string;
 	permissionMode: ClaudePermissionMode;
+}
+
+export type CodexSandboxMode = "workspace-write" | "read-only";
+export type CodexReasoningEffort = "" | "low" | "medium" | "high" | "xhigh";
+
+export interface CodexSettings {
+	model: string;
+	sandboxMode: CodexSandboxMode;
+	reasoningEffort: CodexReasoningEffort;
+}
+
+export type CodexCliStatus =
+	| "not-installed"
+	| "not-authenticated"
+	| "authenticated";
+
+export interface CodexAuthStatus {
+	cliStatus: CodexCliStatus;
+	method?: "chatgpt" | "api-key";
+	cliPath?: string;
 }
 
 export interface McpServerEntry {
@@ -96,6 +116,7 @@ export interface Settings {
 	github: GitHubSettings;
 	analytics: AnalyticsSettings;
 	claude: ClaudeSettings;
+	codex: CodexSettings;
 	proxy: ProxySettings;
 }
 
@@ -171,13 +192,15 @@ export interface BedrockConfig {
 export interface SessionMeta {
 	id: string;
 	sdkSessionId: string;
+	/** Backing agent; absent on sessions created before Codex support. */
+	agent?: AgentKind;
 	title: string;
 	/** Project this conversation belongs to. */
 	projectId: string;
 	/** Snapshot of the project directory (agent's cwd for the session). */
 	projectPath: string;
 	model: string;
-	authMode: "anthropic" | "bedrock";
+	authMode?: "anthropic" | "bedrock";
 	createdAt: string;
 	updatedAt: string;
 	messageCount: number;
@@ -254,7 +277,7 @@ interface PtolemyRPCSchema extends ElectrobunRPCSchema {
 			};
 			claudeListSessions: { params: void; response: SessionMeta[] };
 			claudeCreateSession: {
-				params: { prompt: string; projectId?: string };
+				params: { prompt: string; projectId?: string; agent?: AgentKind };
 				response: { sessionId: string };
 			};
 			claudeResumeSession: {
@@ -291,6 +314,21 @@ interface PtolemyRPCSchema extends ElectrobunRPCSchema {
 				response: {
 					models: import("@/shared/agent-protocol").ProtocolModelInfo[];
 					authMode: ClaudeAuthMode;
+				};
+			};
+			codexGetAuthStatus: { params: void; response: CodexAuthStatus };
+			codexOpenLogin: {
+				params: void;
+				response: { ok: boolean; error?: string };
+			};
+			codexInstallCli: {
+				params: void;
+				response: { ok: boolean; error?: string };
+			};
+			codexListModels: {
+				params: void;
+				response: {
+					models: import("@/shared/agent-protocol").ProtocolModelInfo[];
 				};
 			};
 			agentApproveTool: {

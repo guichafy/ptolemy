@@ -21,6 +21,14 @@ export type PermissionMode =
 export type ClaudeAuthMode = "anthropic" | "bedrock";
 
 /**
+ * Which coding agent backs a chat session. Sessions created before Codex
+ * support carry no `agent` field and are treated as `"claude"`.
+ */
+export type AgentKind = "claude" | "codex";
+
+export const DEFAULT_AGENT: AgentKind = "claude";
+
+/**
  * Subset of the SDK's `ModelInfo` that crosses the RPC boundary.
  * Mirrors @anthropic-ai/claude-agent-sdk's ModelInfo shape but is declared
  * here so the renderer bundle does not pull the SDK.

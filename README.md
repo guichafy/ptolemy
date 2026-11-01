@@ -2,7 +2,7 @@
 
 Your daily tools, orbiting you. A macOS menu bar command center for software engineers.
 
-Ptolemy is a menu bar app for macOS built with [Electrobun](https://electrobun.dev/) (Bun runtime) and React. It opens a global command palette (`⌘+Shift+Space`) that is extensible through plugins: each plugin is a provider that adds a new capability. It ships with 5 built-in plugins, including an embedded Claude chat window.
+Ptolemy is a menu bar app for macOS built with [Electrobun](https://electrobun.dev/) (Bun runtime) and React. It opens a global command palette (`⌘+Shift+Space`) that is extensible through plugins: each plugin is a provider that adds a new capability. It ships with 6 built-in plugins, including an embedded chat window for Claude Code and OpenAI Codex.
 
 > Formerly **Ptolomeu**. Releases up to v0.10.x were published under that name; existing settings, sessions and Keychain entries keep working after the rename.
 
@@ -16,7 +16,7 @@ Requirements: macOS 13+ on Apple Silicon (arm64).
 2. Unzip it and drag the app into `/Applications`. On first launch, allow it in System Settings → Privacy & Security.
 3. Press `⌘+Shift+Space`. The icon lives in the menu bar (there is no Dock icon).
 
-The Claude plugin also needs the Claude Code CLI (`claude`) installed and signed in (the plugin settings can install it and open the login), or an AWS Bedrock profile configured there.
+The Claude plugin also needs the Claude Code CLI (`claude`) installed and signed in (the plugin settings can install it and open the login), or an AWS Bedrock profile configured there. The Codex plugin (off by default, enable it in **Settings → Plugins**) needs the Codex CLI (`codex`) installed and signed in with ChatGPT or an API key; its settings can install it and open the login as well.
 
 ## Quick start (development)
 
@@ -35,6 +35,7 @@ bun run dev:hmr
 | **Calculator** | Evaluate math expressions inline. |
 | **Web Search** | Quick access to Google, DuckDuckGo, Stack Overflow and YouTube. |
 | **Claude Code** | Chat with Claude in a dedicated window: streaming responses, persistent sessions, model picker, tool approval and MCP servers. Each conversation runs in its own isolated workspace. |
+| **Codex** | Chat with OpenAI Codex in the same chat window, via the Codex SDK and your Codex CLI: persistent sessions, model and reasoning effort picker, live commands, file changes and plan. Runs inside the Codex sandbox, confined to the conversation's workspace. Opt-in. |
 
 ## Plugin system
 
@@ -134,9 +135,9 @@ Don't see your tool? Build a plugin and open a PR.
 
 | Process / view | Path | Role |
 |----------------|------|------|
-| **Main (Bun)** | `src/bun/` | System tray, windows, native FFI, global hotkey, Claude session manager, proxy-aware fetch. |
+| **Main (Bun)** | `src/bun/` | System tray, windows, native FFI, global hotkey, agent session manager (Claude and Codex), proxy-aware fetch. |
 | **Palette renderer** | `src/mainview/` | React command palette in a hidden BrowserWindow toggled by `⌘+Shift+Space`. |
-| **Chat renderer** | `src/chatview/` | Separate React app for the Claude chat window, created on first open. |
+| **Chat renderer** | `src/chatview/` | Separate React app for the agent chat window (Claude or Codex), created on first open. |
 
 ```
                        ┌───────────────────┐
@@ -145,7 +146,7 @@ Don't see your tool? Build a plugin and open a PR.
 ┌──────────────┐       └───────────────────┘
 │  Main (Bun)   │
 │  tray, FFI,   │       ┌───────────────────┐
-│  Claude SDK   │  RPC  │  Chat (React)     │
+│  Claude/Codex │  RPC  │  Chat (React)     │
 │  proxy, RPC   ├─────► │  AI Elements      │
 └──────────────┘       └───────────────────┘
 ```

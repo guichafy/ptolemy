@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { backupCorruptJson, writeJsonAtomic } from "./atomic-json";
+import { CODEX_DEFAULT_MODEL } from "./codex/constants";
 
 export const KNOWN_PLUGIN_IDS = [
 	"apps",
@@ -10,6 +11,7 @@ export const KNOWN_PLUGIN_IDS = [
 	"calc",
 	"web",
 	"claude",
+	"codex",
 ] as const;
 export type PluginId = (typeof KNOWN_PLUGIN_IDS)[number];
 
@@ -56,6 +58,22 @@ export interface ClaudeSettings {
 	permissionMode: ClaudePermissionMode;
 }
 
+/**
+ * Codex sandbox modes Ptolemy exposes. `danger-full-access` is intentionally
+ * absent: every conversation runs inside its own project directory and the
+ * sandbox is what keeps Codex's writes there.
+ */
+export type CodexSandboxMode = "workspace-write" | "read-only";
+/** Empty string means "use the Codex CLI's configured default". */
+export type CodexReasoningEffort = "" | "low" | "medium" | "high" | "xhigh";
+
+export interface CodexSettings {
+	/** Model slug, or `CODEX_DEFAULT_MODEL` to defer to the Codex CLI config. */
+	model: string;
+	sandboxMode: CodexSandboxMode;
+	reasoningEffort: CodexReasoningEffort;
+}
+
 export type ProxyMode = "auto" | "system" | "env" | "none" | "manual";
 
 export type ManualProxyProtocol = "http" | "https";
@@ -87,6 +105,7 @@ export interface Settings {
 	github: GitHubSettings;
 	analytics: AnalyticsSettings;
 	claude: ClaudeSettings;
+	codex: CodexSettings;
 	proxy: ProxySettings;
 }
 
@@ -106,6 +125,12 @@ export const DEFAULT_CLAUDE_SETTINGS: ClaudeSettings = {
 	permissionMode: "acceptEdits",
 };
 
+export const DEFAULT_CODEX_SETTINGS: CodexSettings = {
+	model: CODEX_DEFAULT_MODEL,
+	sandboxMode: "workspace-write",
+	reasoningEffort: "",
+};
+
 export const DEFAULT_PROXY_SETTINGS: ProxySettings = {
 	mode: "auto",
 };
@@ -117,6 +142,45 @@ const VALID_PERMISSION_MODES: readonly ClaudePermissionMode[] = [
 	"bypassPermissions",
 	"plan",
 ];
+const VALID_CODEX_SANDBOX_MODES: readonly CodexSandboxMode[] = [
+	"workspace-write",
+	"read-only",
+];
+const VALID_CODEX_EFFORTS: readonly CodexReasoningEffort[] = [
+	"",
+	"low",
+	"medium",
+	"high",
+	"xhigh",
+];
+
+/**
+ * Field-by-field validation with per-field fallback: a bad value in one key
+ * (e.g. a sandbox mode from a future build) resets only that key instead of
+ * the whole block. A missing block (settings written before Codex support)
+ * yields the defaults.
+ */
+function validateCodex(value: unknown): CodexSettings {
+	if (!value || typeof value !== "object") return { ...DEFAULT_CODEX_SETTINGS };
+	const c = value as Record<string, unknown>;
+	return {
+		model:
+			typeof c.model === "string" && c.model.trim()
+				? c.model.trim()
+				: DEFAULT_CODEX_SETTINGS.model,
+		sandboxMode:
+			typeof c.sandboxMode === "string" &&
+			(VALID_CODEX_SANDBOX_MODES as readonly string[]).includes(c.sandboxMode)
+				? (c.sandboxMode as CodexSandboxMode)
+				: DEFAULT_CODEX_SETTINGS.sandboxMode,
+		reasoningEffort:
+			typeof c.reasoningEffort === "string" &&
+			(VALID_CODEX_EFFORTS as readonly string[]).includes(c.reasoningEffort)
+				? (c.reasoningEffort as CodexReasoningEffort)
+				: DEFAULT_CODEX_SETTINGS.reasoningEffort,
+	};
+}
+
 const VALID_PROXY_MODES: readonly ProxyMode[] = [
 	"auto",
 	"system",
@@ -178,6 +242,7 @@ const DEFAULT_SETTINGS: Settings = {
 	github: DEFAULT_GITHUB_SETTINGS,
 	analytics: DEFAULT_ANALYTICS_SETTINGS,
 	claude: DEFAULT_CLAUDE_SETTINGS,
+	codex: DEFAULT_CODEX_SETTINGS,
 	proxy: DEFAULT_PROXY_SETTINGS,
 };
 
@@ -300,6 +365,7 @@ export function validateSettings(value: unknown): ValidateResult {
 	} else {
 		claude = { ...DEFAULT_CLAUDE_SETTINGS };
 	}
+	const codex = validateCodex((s as Record<string, unknown>).codex);
 	const rawProxy = (s as Record<string, unknown>).proxy;
 	let proxy: ProxySettings;
 	if (
@@ -332,6 +398,7 @@ export function validateSettings(value: unknown): ValidateResult {
 			github,
 			analytics,
 			claude,
+			codex,
 			proxy,
 		},
 	};

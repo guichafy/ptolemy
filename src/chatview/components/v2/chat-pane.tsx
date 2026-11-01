@@ -122,15 +122,21 @@ export function ChatPaneV2() {
 	const [models, setModels] = useState<ProtocolModelInfo[]>([]);
 	const [overrideModel, setOverrideModel] = useState<string | null>(null);
 	const fileInputRef = useRef<HTMLInputElement>(null);
+	// Until the session meta loads, assume Claude (the historical default).
+	const agent = state.sessionAgent ?? "claude";
 
 	useEffect(() => {
 		let cancelled = false;
+		setModels([]);
 		const refresh = async () => {
 			try {
-				const res = await rpc.request.claudeListSupportedModels();
+				const res =
+					agent === "codex"
+						? await rpc.request.codexListModels()
+						: await rpc.request.claudeListSupportedModels();
 				if (!cancelled) setModels(res.models);
 			} catch (err) {
-				console.warn("[chat-pane] claudeListSupportedModels failed:", err);
+				console.warn(`[chat-pane] list models (${agent}) failed:`, err);
 			}
 		};
 		refresh();
@@ -141,7 +147,7 @@ export function ChatPaneV2() {
 			cancelled = true;
 			unsubscribe();
 		};
-	}, []);
+	}, [agent]);
 
 	useEffect(() => {
 		onOpenSession(({ sessionId: sid }) => {
@@ -197,12 +203,13 @@ export function ChatPaneV2() {
 	return (
 		<div className="flex h-screen flex-col bg-background text-foreground">
 			<ChatHeader
+				agent={agent}
 				sessionId={sessionId}
 				sessionState={toLegacySessionState(state.sessionState)}
 				sessionModel={state.sessionModel}
 				models={models}
 			/>
-			<PlanModeBanner />
+			{agent === "claude" && <PlanModeBanner />}
 			<Conversation>
 				<ConversationContent>
 					{messages.length === 0 && (
@@ -220,12 +227,21 @@ export function ChatPaneV2() {
 					<TurnIndicator
 						status={turnStatus.status}
 						toolName={turnStatus.toolName}
+						agent={agent}
 					/>
 				</ConversationContent>
 				<ConversationScrollButton />
 			</Conversation>
 
 			<div className="flex flex-col gap-2 border-t border-border/60 bg-background p-3">
+				{state.lastError && state.sessionState !== "running" && (
+					<p
+						role="alert"
+						className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-1.5 text-[11px] text-destructive"
+					>
+						{state.lastError.message}
+					</p>
+				)}
 				<ConfirmationQueue
 					pending={state.pendingPermissions}
 					onApprove={approveTool}
@@ -247,7 +263,11 @@ export function ChatPaneV2() {
 					<PromptInputTextarea
 						value={draft}
 						onChange={(e) => setDraft(e.target.value)}
-						placeholder="Pergunte algo ao Claude..."
+						placeholder={
+							agent === "codex"
+								? "Pergunte algo ao Codex..."
+								: "Pergunte algo ao Claude..."
+						}
 						disabled={state.sessionState === "error"}
 					/>
 					<PromptInputToolbar>

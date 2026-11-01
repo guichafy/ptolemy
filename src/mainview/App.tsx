@@ -11,7 +11,11 @@ import {
 	type SearchTypeComboboxHandle,
 } from "./components/search-type-combobox";
 import { useWindowShown } from "./hooks/use-window-shown";
-import { sessionToResult } from "./providers/claude-provider";
+import {
+	agentForProviderId,
+	sessionsForAgent,
+	sessionToResult,
+} from "./providers/agent-sessions";
 import { GitHubProvider, useGitHub } from "./providers/github-context";
 import {
 	ProviderContextProvider,
@@ -108,7 +112,8 @@ function PaletteContent() {
 		// [] — whether legitimately or due to a transient webview/RPC failure —
 		// must not clobber a populated list that arrived via push. Use the
 		// functional setter to compare against the latest state.
-		const preserveOnEmpty = activeProvider.id === "claude" && !query.trim();
+		const preserveOnEmpty =
+			agentForProviderId(activeProvider.id) !== null && !query.trim();
 
 		try {
 			const items = await activeProvider.search(
@@ -139,12 +144,13 @@ function PaletteContent() {
 		}
 	}, [activeProvider, query, providerContext]);
 
-	// Auto-search for calculator (real-time), apps (on any change), and claude (recent sessions)
+	// Auto-search for calculator (real-time), apps (on any change), and the
+	// agent plugins (Claude / Codex recent sessions)
 	useEffect(() => {
 		if (
 			activeProvider.id === "calc" ||
 			activeProvider.id === "apps" ||
-			activeProvider.id === "claude"
+			agentForProviderId(activeProvider.id) !== null
 		) {
 			const timer = setTimeout(
 				handleSearch,
@@ -169,10 +175,11 @@ function PaletteContent() {
 			console.log(
 				`[mainview] claudeSessionsUpdate: count=${sessions.length} providerId=${activeProvider.id} hasQuery=${query.trim().length > 0}`,
 			);
-			if (activeProvider.id !== "claude") return;
+			const agent = agentForProviderId(activeProvider.id);
+			if (!agent) return;
 			if (query.trim()) return;
 			abortRef.current?.abort();
-			setResults(sessions.map(sessionToResult));
+			setResults(sessionsForAgent(sessions, agent).map(sessionToResult));
 			setError(null);
 			setIsLoading(false);
 			setSelectedIndex(0);
@@ -188,7 +195,7 @@ function PaletteContent() {
 	// `claudeSessionsUpdate` push above is still the primary path (it carries
 	// the session payload), this is only the no-payload "refresh now" hint.
 	useWindowShown(() => {
-		if (activeProvider.id === "claude" && !query.trim()) {
+		if (agentForProviderId(activeProvider.id) !== null && !query.trim()) {
 			handleSearch();
 		}
 	});
@@ -203,9 +210,11 @@ function PaletteContent() {
 		handleSearch();
 	}, [activeProvider.id, activeSubType, handleSearch, query]);
 
-	// Claude provider shows recent sessions even with empty query
+	// Agent providers (Claude / Codex) show recent sessions even with empty query
 	const hasIdleResults =
-		activeProvider.id === "claude" && results.length > 0 && !query.trim();
+		agentForProviderId(activeProvider.id) !== null &&
+		results.length > 0 &&
+		!query.trim();
 	const resultsMatchQuery = resultsQueryRef.current === query;
 	// Stable signal for window expansion: tracks user intent (typing) rather
 	// than the in-flight fetch state, so the native window does not collapse

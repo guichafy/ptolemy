@@ -7,10 +7,11 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { KNOWN_PLUGIN_IDS } from "../providers/registry";
+import { DEFAULT_ENABLED_ORDER, KNOWN_PLUGIN_IDS } from "../providers/registry";
 import {
 	type AnalyticsSettings,
 	type ClaudeSettings,
+	type CodexSettings,
 	type CustomFilter,
 	type ManualProxyProtocol,
 	type ProxyMode,
@@ -48,6 +49,8 @@ interface SettingsContextValue {
 	updateAnalyticsConsent: (consentGiven: boolean) => void;
 	proxySettings: ProxySettings;
 	updateProxyMode: (mode: ProxyMode) => void;
+	codexSettings: CodexSettings;
+	updateCodexSettings: (patch: Partial<CodexSettings>) => void;
 	saveManualProxy: (
 		draft: ManualProxyDraft & { changePassword: boolean },
 	) => Promise<{ ok: boolean; error?: string }>;
@@ -79,6 +82,12 @@ const DEFAULT_CLAUDE: ClaudeSettings = {
 	authMode: "anthropic",
 	model: "claude-sonnet-4-6",
 	permissionMode: "acceptEdits",
+};
+
+const DEFAULT_CODEX: CodexSettings = {
+	model: "default",
+	sandboxMode: "workspace-write",
+	reasoningEffort: "",
 };
 
 const DEFAULT_PROXY: ProxySettings = {
@@ -116,17 +125,21 @@ function normalizeSettings(loaded: Settings): Settings {
 		github: loaded.github ?? DEFAULT_GITHUB,
 		analytics: loaded.analytics ?? DEFAULT_ANALYTICS,
 		claude: loaded.claude ?? DEFAULT_CLAUDE,
+		codex: loaded.codex ?? DEFAULT_CODEX,
 		proxy: loaded.proxy ?? DEFAULT_PROXY,
 	};
 }
 
-function fallbackSettings(order: string[] = [...KNOWN_PLUGIN_IDS]): Settings {
+function fallbackSettings(
+	order: string[] = [...DEFAULT_ENABLED_ORDER],
+): Settings {
 	return {
 		version: 1,
 		plugins: { enabledOrder: order },
 		github: DEFAULT_GITHUB,
 		analytics: DEFAULT_ANALYTICS,
 		claude: DEFAULT_CLAUDE,
+		codex: DEFAULT_CODEX,
 		proxy: DEFAULT_PROXY,
 	};
 }
@@ -218,6 +231,21 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
 		[scheduleSave],
 	);
 
+	const updateCodexSettings = useCallback(
+		(patch: Partial<CodexSettings>) => {
+			setSettings((prev) => {
+				const base = prev ?? fallbackSettings();
+				const updated: Settings = {
+					...base,
+					codex: { ...(base.codex ?? DEFAULT_CODEX), ...patch },
+				};
+				scheduleSave(updated);
+				return updated;
+			});
+		},
+		[scheduleSave],
+	);
+
 	const updateProxyMode = useCallback(
 		(mode: ProxyMode) => {
 			setSettings((prev) => {
@@ -297,6 +325,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
 	const customFilters = settings?.github.customFilters ?? [];
 	const analyticsSettings = settings?.analytics ?? DEFAULT_ANALYTICS;
 	const proxySettings = settings?.proxy ?? DEFAULT_PROXY;
+	const codexSettings = settings?.codex ?? DEFAULT_CODEX;
 
 	return (
 		<SettingsContext.Provider
@@ -310,6 +339,8 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
 				updateAnalyticsConsent,
 				proxySettings,
 				updateProxyMode,
+				codexSettings,
+				updateCodexSettings,
 				saveManualProxy,
 				clearManualProxy,
 				testProxyConnection,
