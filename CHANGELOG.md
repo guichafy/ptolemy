@@ -1,3 +1,10 @@
+# [0.12.0](https://github.com/guichafy/ptolemy/compare/v0.11.0...v0.12.0) (2026-11-01)
+
+
+### Features
+
+* **codex:** add OpenAI Codex as a second chat agent ([c12fed4](https://github.com/guichafy/ptolemy/commit/c12fed43ecdefacd9dd7c745ebff8c6b2dd0c13b))
+
 # [0.11.0](https://github.com/guichafy/ptolemy/compare/v0.10.4...v0.11.0) (2026-11-01)
 
 
