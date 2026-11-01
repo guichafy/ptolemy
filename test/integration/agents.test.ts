@@ -336,6 +336,18 @@ function scenario(agent: AgentKind, other: AgentKind) {
 
 		test("persiste a conversa e o id do agente", async () => {
 			const meta = await metaOf(state.id);
+			// The agent revealed the concrete model, and the chat got it as a
+			// session-info event before the turn's finish.
+			expect(meta.resolvedModel).toBeTruthy();
+			const all = eventsOf(state.id);
+			const infoIdx = all.findIndex(
+				(e) => e.type === "session-info" && e.info.resolvedModel,
+			);
+			expect(infoIdx).toBeGreaterThan(-1);
+			expect(infoIdx).toBeLessThan(all.findIndex((e) => e.type === "finish"));
+			console.log(
+				`[it] ${agent} session-info: model=${meta.resolvedModel} context=${JSON.stringify(meta.contextUsage ?? null)}`,
+			);
 			state.sdkId = meta.sdkSessionId;
 			expect(state.sdkId).not.toBe("");
 			expect(state.sdkId).not.toBe(state.id);

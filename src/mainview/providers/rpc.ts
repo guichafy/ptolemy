@@ -1,5 +1,9 @@
 import { type ElectrobunRPCSchema, Electroview } from "electrobun/view";
-import type { AgentEvent, AgentKind } from "@/shared/agent-protocol";
+import type {
+	AgentEvent,
+	AgentKind,
+	ContextUsageInfo,
+} from "@/shared/agent-protocol";
 
 export type GitHubSearchType = "repos" | "code" | "issues" | "users";
 
@@ -205,6 +209,10 @@ export interface SessionMeta {
 	updatedAt: string;
 	messageCount: number;
 	lastMessage: string;
+	/** Concrete model behind `model` (e.g. the alias `default`), once known. */
+	resolvedModel?: string;
+	/** Context window usage after the last turn. */
+	contextUsage?: ContextUsageInfo;
 }
 
 /** Block type for stored messages. */
@@ -235,6 +243,9 @@ export interface StoredMessage {
 	cost?: number;
 	durationMs?: number;
 	tokenUsage?: { input: number; output: number };
+	modelUsed?: string;
+	/** Assistant messages: concrete model that produced the reply. */
+	model?: string;
 }
 
 interface PtolemyRPCSchema extends ElectrobunRPCSchema {

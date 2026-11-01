@@ -1,107 +1,57 @@
 import {
-	AlertCircle,
-	CheckCircle2,
-	ChevronDown,
-	Loader2,
-	Wrench,
+	BotIcon,
+	CheckCircle2Icon,
+	CircleIcon,
+	FilePenIcon,
+	FileTextIcon,
+	GlobeIcon,
+	ListTodoIcon,
+	LoaderCircleIcon,
+	PlugIcon,
+	SearchIcon,
+	SquareTerminalIcon,
+	WrenchIcon,
 } from "lucide-react";
-import { useState } from "react";
-import { Artifact } from "@/components/ai-elements/artifact";
-import {
-	CodeBlock,
-	CodeBlockCopyButton,
-} from "@/components/ai-elements/code-block";
+import { memo, type ReactNode, useState } from "react";
 import { Source, Sources } from "@/components/ai-elements/sources";
 import {
-	Collapsible,
-	CollapsibleContent,
-	CollapsibleTrigger,
-} from "@/components/ui/collapsible";
+	Tool,
+	ToolContent,
+	ToolHeader,
+	ToolInput,
+	ToolOutput,
+	type ToolState,
+} from "@/components/ai-elements/tool";
 import { cn } from "@/lib/utils";
 import type { AgentToolPart } from "../../hooks/agent-state";
+import { describeTool, type ToolIconKind } from "../../lib/tool-display";
 
-const ARTIFACT_LINE_THRESHOLD = 20;
-const ARTIFACT_CHAR_THRESHOLD = 1200;
+const ICONS: Record<ToolIconKind, ReactNode> = {
+	terminal: <SquareTerminalIcon />,
+	"file-read": <FileTextIcon />,
+	"file-edit": <FilePenIcon />,
+	search: <SearchIcon />,
+	web: <GlobeIcon />,
+	todo: <ListTodoIcon />,
+	agent: <BotIcon />,
+	mcp: <PlugIcon />,
+	generic: <WrenchIcon />,
+};
 
-function statusIcon(status: AgentToolPart["status"]) {
+export function toolState(
+	status: AgentToolPart["status"],
+	awaitingApproval = false,
+): ToolState {
+	if (awaitingApproval) return "approval-requested";
 	switch (status) {
-		case "completed":
-			return <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />;
-		case "error":
-			return <AlertCircle className="h-3.5 w-3.5 text-destructive" />;
+		case "pending":
+			return "input-streaming";
 		case "running":
-			return (
-				<Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
-			);
-		default:
-			return <Wrench className="h-3.5 w-3.5 text-muted-foreground" />;
-	}
-}
-
-function formatArgs(part: AgentToolPart): string {
-	if (part.args !== undefined) {
-		try {
-			return JSON.stringify(part.args, null, 2);
-		} catch {
-			return String(part.args);
-		}
-	}
-	return part.argsStreaming || "";
-}
-
-function formatResult(value: unknown): string {
-	if (value === undefined || value === null) return "";
-	if (typeof value === "string") return value;
-	try {
-		return JSON.stringify(value, null, 2);
-	} catch {
-		return String(value);
-	}
-}
-
-function languageFor(part: AgentToolPart): string | undefined {
-	const args = part.args as Record<string, unknown> | undefined;
-	const path =
-		typeof args?.file_path === "string"
-			? args.file_path
-			: typeof args?.path === "string"
-				? args.path
-				: undefined;
-	if (!path) return undefined;
-	const ext = path.split(".").pop()?.toLowerCase();
-	switch (ext) {
-		case "ts":
-			return "typescript";
-		case "tsx":
-			return "tsx";
-		case "js":
-			return "javascript";
-		case "jsx":
-			return "jsx";
-		case "json":
-			return "json";
-		case "py":
-			return "python";
-		case "rs":
-			return "rust";
-		case "go":
-			return "go";
-		case "md":
-			return "markdown";
-		case "sh":
-		case "bash":
-			return "bash";
-		case "sql":
-			return "sql";
-		case "yml":
-		case "yaml":
-			return "yaml";
-		case "css":
-			return "css";
-		case "html":
-			return "html";
-		default:
-			return ext;
+			return "input-available";
+		case "completed":
+			return "output-available";
+		case "error":
+			return "output-error";
 	}
 }
 
@@ -132,13 +82,61 @@ function extractSources(
 	return null;
 }
 
-function ResultRenderer({ part }: { part: AgentToolPart }) {
-	const text = formatResult(part.result);
-	if (!text) return null;
+interface TodoItem {
+	content: string;
+	status?: string;
+}
 
+function extractTodos(part: AgentToolPart): TodoItem[] | null {
+	if (part.toolName !== "TodoWrite") return null;
+	const todos = (part.args as { todos?: unknown } | undefined)?.todos;
+	if (!Array.isArray(todos)) return null;
+	return todos
+		.map((t) => ({
+			content: String(
+				(t as { content?: unknown; text?: unknown }).content ??
+					(t as { text?: unknown }).text ??
+					"",
+			),
+			status: (t as { status?: string }).status,
+		}))
+		.filter((t) => t.content);
+}
+
+function TodoList({ items }: { items: TodoItem[] }) {
+	return (
+		<ul className="space-y-1.5 text-xs">
+			{items.map((item, i) => (
+				<li
+					// biome-ignore lint/suspicious/noArrayIndexKey: plan items have no id
+					key={i}
+					className={cn(
+						"flex items-start gap-2",
+						item.status === "completed" && "text-muted-foreground line-through",
+					)}
+				>
+					{item.status === "completed" ? (
+						<CheckCircle2Icon className="mt-0.5 size-3.5 shrink-0 text-emerald-500" />
+					) : item.status === "in_progress" ? (
+						<LoaderCircleIcon className="mt-0.5 size-3.5 shrink-0 animate-spin text-sky-500" />
+					) : (
+						<CircleIcon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+					)}
+					<span>{item.content}</span>
+				</li>
+			))}
+		</ul>
+	);
+}
+
+function ToolBody({ part }: { part: AgentToolPart }) {
+	const todos = extractTodos(part);
+	if (todos) return <TodoList items={todos} />;
+
+	const input = part.args !== undefined ? part.args : part.argsStreaming;
 	const sources = extractSources(part);
-	if (sources) {
-		return (
+	const output =
+		part.status === "error" ? undefined : sources ? (
 			<Sources>
 				{sources.map((s) => (
 					<Source key={s.url} href={s.url} title={s.title}>
@@ -146,89 +144,57 @@ function ResultRenderer({ part }: { part: AgentToolPart }) {
 					</Source>
 				))}
 			</Sources>
+		) : (
+			part.result
 		);
-	}
-
-	const lineCount = text.split("\n").length;
-	const looksLikeCode =
-		lineCount >= ARTIFACT_LINE_THRESHOLD ||
-		text.length >= ARTIFACT_CHAR_THRESHOLD;
-	if (looksLikeCode) {
-		const language = languageFor(part) ?? "text";
-		return (
-			<Artifact
-				title={`${part.toolName} output`}
-				subtitle={`${lineCount} linhas • ${text.length} caracteres`}
-			>
-				<CodeBlock code={text} language={language}>
-					<CodeBlockCopyButton code={text} />
-				</CodeBlock>
-			</Artifact>
-		);
-	}
-
-	return <pre className="whitespace-pre-wrap text-foreground/90">{text}</pre>;
-}
-
-export function ToolBlock({ part }: { part: AgentToolPart }) {
-	const [open, setOpen] = useState(part.status === "error");
-	const args = formatArgs(part);
 
 	return (
-		<Collapsible
-			open={open}
-			onOpenChange={setOpen}
-			className={cn(
-				"rounded-md border border-border/60 bg-muted/30 text-xs",
-				part.status === "error" && "border-destructive/40",
-			)}
-		>
-			<CollapsibleTrigger
-				className={cn(
-					"flex w-full items-center gap-2 px-3 py-2 text-left",
-					"[&[data-state=open]_svg.chev]:rotate-180",
-				)}
-			>
-				{statusIcon(part.status)}
-				<span className="font-mono text-[11px] font-semibold">
-					{part.toolName}
-				</span>
-				{typeof part.elapsedSeconds === "number" &&
-					part.status === "running" && (
-						<span className="text-[10px] text-muted-foreground">
-							{part.elapsedSeconds.toFixed(1)}s
-						</span>
-					)}
-				<span className="flex-1" />
-				<ChevronDown className="chev h-3.5 w-3.5 text-muted-foreground transition-transform" />
-			</CollapsibleTrigger>
-			<CollapsibleContent className="border-t border-border/60 px-3 py-2 font-mono text-[11px] leading-relaxed">
-				{args && (
-					<div className="mb-2">
-						<div className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">
-							Argumentos
-						</div>
-						<pre className="whitespace-pre-wrap text-foreground/90">{args}</pre>
-					</div>
-				)}
-				{part.status === "error" ? (
-					<div>
-						<div className="mb-1 text-[10px] uppercase tracking-wide text-destructive">
-							Erro
-						</div>
-						<pre className="whitespace-pre-wrap text-destructive">
-							{part.error?.message ?? ""}
-						</pre>
-					</div>
-				) : part.result !== undefined ? (
-					<div>
-						<div className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">
-							Resultado
-						</div>
-						<ResultRenderer part={part} />
-					</div>
-				) : null}
-			</CollapsibleContent>
-		</Collapsible>
+		<>
+			<ToolInput input={input} />
+			<ToolOutput
+				output={output}
+				errorText={
+					part.status === "error"
+						? (part.error?.message ?? "Falha na ferramenta")
+						: undefined
+				}
+			/>
+		</>
 	);
 }
+
+export const ToolBlock = memo(function ToolBlock({
+	part,
+	awaitingApproval,
+}: {
+	part: AgentToolPart;
+	awaitingApproval?: boolean;
+}) {
+	// Errors start open; plans start open so the checklist is visible.
+	const [open, setOpen] = useState(
+		part.status === "error" || part.toolName === "TodoWrite",
+	);
+	const display = describeTool(part.toolName, part.args);
+	const elapsed =
+		typeof part.elapsedSeconds === "number" && part.elapsedSeconds > 0
+			? `${part.elapsedSeconds.toFixed(1)}s`
+			: undefined;
+
+	return (
+		<Tool open={open} onOpenChange={setOpen}>
+			<ToolHeader
+				title={display.title}
+				subtitle={display.subtitle}
+				icon={ICONS[display.icon]}
+				state={toolState(part.status, awaitingApproval)}
+				meta={elapsed}
+			/>
+			{/* Mount the body only when open: tool outputs can be huge. */}
+			{open && (
+				<ToolContent>
+					<ToolBody part={part} />
+				</ToolContent>
+			)}
+		</Tool>
+	);
+});

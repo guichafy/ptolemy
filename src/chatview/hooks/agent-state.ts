@@ -9,6 +9,8 @@ import type { StoredBlock, StoredMessage } from "@/chatview/rpc";
 import type {
 	AgentEvent,
 	AgentKind,
+	ContextUsageInfo,
+	SessionInfoPatch,
 	TokenUsage,
 } from "@/shared/agent-protocol";
 
@@ -57,6 +59,16 @@ export interface AgentMessage {
 	createdAt: number;
 	/** Set when this user message used a per-turn model override. */
 	modelUsed?: string;
+	/** Assistant messages: facts about the turn, shown under the reply. */
+	meta?: AgentMessageMeta;
+}
+
+export interface AgentMessageMeta {
+	/** Concrete model that answered. */
+	model?: string;
+	durationMs?: number;
+	/** Cost of the turn in USD (Claude only). */
+	costUsd?: number;
 }
 
 export interface PendingPermission {
@@ -102,6 +114,10 @@ export interface AgentState {
 	sessionModel: string | null;
 	/** Agent backing the open session (null until the session meta loads). */
 	sessionAgent: AgentKind | null;
+	/** Concrete model behind `sessionModel` (aliases such as `default`). */
+	resolvedModel: string | null;
+	/** Context window usage after the last turn. */
+	contextUsage: ContextUsageInfo | null;
 }
 
 export function initialAgentState(): AgentState {
@@ -119,6 +135,8 @@ export function initialAgentState(): AgentState {
 		suggestions: [],
 		sessionModel: null,
 		sessionAgent: null,
+		resolvedModel: null,
+		contextUsage: null,
 	};
 }
 
@@ -136,6 +154,10 @@ export function reduceAgentState(
 				...initialAgentState(),
 				sessionId: event.sessionId,
 				sessionState: "running",
+				sessionModel: state.sessionModel,
+				sessionAgent: state.sessionAgent,
+				resolvedModel: state.resolvedModel,
+				contextUsage: state.contextUsage,
 			};
 
 		case "session-state-change":
@@ -329,9 +351,28 @@ export function reduceAgentState(
 		case "session-model-changed":
 			return { ...state, sessionModel: event.model };
 
+		case "session-info":
+			return applySessionInfo(state, event.info);
+
 		default:
 			return state;
 	}
+}
+
+/** Merge a session-info patch (resolved model, context usage) into state. */
+export function applySessionInfo(
+	state: AgentState,
+	info: SessionInfoPatch,
+): AgentState {
+	const resolvedModel = info.resolvedModel ?? state.resolvedModel;
+	const contextUsage = info.contextUsage ?? state.contextUsage;
+	if (
+		resolvedModel === state.resolvedModel &&
+		contextUsage === state.contextUsage
+	) {
+		return state;
+	}
+	return { ...state, resolvedModel, contextUsage };
 }
 
 /**
@@ -422,9 +463,60 @@ export function hydrateMessages(
 ): AgentState {
 	return {
 		...state,
-		messages,
+		messages: reconcileMessages(state.messages, messages),
 		currentMessage: null,
 	};
+}
+
+/**
+ * Reuse the in-memory message objects (and their React keys) for messages
+ * whose content did not change, so re-reading the transcript after every
+ * turn does not remount and re-highlight the whole conversation. Only the
+ * stored metadata (model, duration, cost) is merged into a kept message.
+ */
+export function reconcileMessages(
+	prev: AgentMessage[],
+	next: AgentMessage[],
+): AgentMessage[] {
+	if (prev.length === 0) return next;
+	return next.map((incoming, i) => {
+		const existing = prev[i];
+		if (!existing || !sameContent(existing, incoming)) return incoming;
+		if (!incoming.meta || sameMeta(existing.meta, incoming.meta)) {
+			return existing;
+		}
+		return { ...existing, meta: { ...existing.meta, ...incoming.meta } };
+	});
+}
+
+function sameMeta(a?: AgentMessageMeta, b?: AgentMessageMeta): boolean {
+	return (
+		a?.model === b?.model &&
+		a?.durationMs === b?.durationMs &&
+		a?.costUsd === b?.costUsd
+	);
+}
+
+function partSignature(part: AgentPart): string {
+	switch (part.kind) {
+		case "text":
+		case "reasoning":
+			return `${part.kind}:${part.text}`;
+		case "tool":
+			return `tool:${part.toolCallId}:${part.status}`;
+	}
+}
+
+function sameContent(a: AgentMessage, b: AgentMessage): boolean {
+	if (a.role !== b.role) return false;
+	// Subagent text never reaches the transcript, so compare top-level parts.
+	const pa = a.parts.filter((p) => p.parentToolCallId === null);
+	const pb = b.parts.filter((p) => p.parentToolCallId === null);
+	if (pa.length !== pb.length) return false;
+	for (let i = 0; i < pa.length; i++) {
+		if (partSignature(pa[i]) !== partSignature(pb[i])) return false;
+	}
+	return true;
 }
 
 /**
@@ -445,12 +537,21 @@ export function storedToAgentMessage(
 		appendStoredBlock(block, id, parts, toolPartsById);
 	}
 
+	const meta: AgentMessageMeta = {};
+	if (stored.role === "assistant") {
+		if (stored.model) meta.model = stored.model;
+		if (typeof stored.durationMs === "number") {
+			meta.durationMs = stored.durationMs;
+		}
+		if (typeof stored.cost === "number") meta.costUsd = stored.cost;
+	}
 	return {
 		id,
 		role: stored.role,
 		parts,
 		createdAt: Date.parse(stored.timestamp) || 0,
 		...(stored.modelUsed && { modelUsed: stored.modelUsed }),
+		...(Object.keys(meta).length > 0 && { meta }),
 	};
 }
 
@@ -732,9 +833,16 @@ function finalizeMessage(
 		durationMs: durationMs ?? state.durationMs,
 	};
 	if (!state.currentMessage) return base;
+	const meta: AgentMessageMeta = { ...state.currentMessage.meta };
+	if (state.resolvedModel) meta.model = state.resolvedModel;
+	if (typeof durationMs === "number") meta.durationMs = durationMs;
+	// `finish.totalCostUsd` is cumulative for the Claude process; the per-turn
+	// figure comes from the session-info snapshot sent right before `finish`.
+	const turnCost = state.contextUsage?.lastTurnCostUsd;
+	if (typeof turnCost === "number") meta.costUsd = turnCost;
 	return {
 		...base,
-		messages: [...state.messages, state.currentMessage],
+		messages: [...state.messages, { ...state.currentMessage, meta }],
 		currentMessage: null,
 	};
 }

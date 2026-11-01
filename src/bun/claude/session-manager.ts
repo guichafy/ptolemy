@@ -9,7 +9,11 @@ import type {
 	SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import type { AgentKind } from "@/shared/agent-protocol";
+import type {
+	AgentKind,
+	ContextUsageInfo,
+	SessionInfoPatch,
+} from "@/shared/agent-protocol";
 import { backupCorruptJson, writeJsonAtomic } from "../atomic-json";
 import { CodexSessionRuntime } from "../codex/session-runtime";
 import { ptolemyDataDir } from "../paths";
@@ -69,6 +73,10 @@ export interface SessionMeta {
 	updatedAt: string;
 	messageCount: number;
 	lastMessage: string;
+	/** Concrete model behind `model` (e.g. the alias `default`), once known. */
+	resolvedModel?: string;
+	/** Context window usage after the last turn. */
+	contextUsage?: ContextUsageInfo;
 }
 
 /**
@@ -119,6 +127,8 @@ export interface StoredMessageV2 {
 	tokenUsage?: { input: number; output: number };
 	/** Set when this user message was sent with a per-turn model override. */
 	modelUsed?: string;
+	/** Assistant messages: concrete model that produced the reply. */
+	model?: string;
 }
 
 export type StoredMessage = StoredMessageV1 | StoredMessageV2;
@@ -446,10 +456,32 @@ const persister: MessagePersister = {
 			...(meta?.totalCostUsd != null && { cost: meta.totalCostUsd }),
 			...(meta?.durationMs != null && { durationMs: meta.durationMs }),
 			...(meta?.usage && { tokenUsage: meta.usage }),
+			...(meta?.model && { model: meta.model }),
 		};
 		await appendStoredMessageV2(sessionId, msg);
 	},
 };
+
+/**
+ * Persist what the agent revealed about the session (resolved model, context
+ * usage) on its index entry, so a reopened chat shows it before the next
+ * turn. Best-effort: a failed write only costs the cached snapshot.
+ */
+async function recordSessionInfo(
+	sessionId: string,
+	patch: SessionInfoPatch,
+): Promise<void> {
+	try {
+		await mutateIndex((idx) => {
+			const m = idx.sessions.find((s) => s.id === sessionId);
+			if (!m) return;
+			if (patch.resolvedModel) m.resolvedModel = patch.resolvedModel;
+			if (patch.contextUsage) m.contextUsage = patch.contextUsage;
+		});
+	} catch (err) {
+		console.error("[claude:session] recordSessionInfo failed:", err);
+	}
+}
 
 /**
  * Persist the SDK-issued session id captured from the first SDKMessage. Called
@@ -583,6 +615,9 @@ function startLoopForActive(sessionId: string): boolean {
 			onSdkSessionId: (sdkSessionId) => {
 				void recordSdkSessionId(sessionId, sdkSessionId);
 			},
+			onSessionInfo: (patch) => {
+				void recordSessionInfo(sessionId, patch);
+			},
 		},
 	).finally(() => {
 		if (active && active.sessionId === sessionId) {
@@ -661,6 +696,9 @@ function createCodexRuntime(
 				sandboxMode: settings.codex.sandboxMode,
 				reasoningEffort: settings.codex.reasoningEffort,
 			};
+		},
+		onSessionInfo: (patch) => {
+			void recordSessionInfo(sessionId, patch);
 		},
 		onThreadId: (threadId) => {
 			void recordSdkSessionId(sessionId, threadId);

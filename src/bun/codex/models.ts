@@ -41,3 +41,17 @@ export function toSdkModel(model: string | undefined): string | undefined {
 	if (!model || model === CODEX_DEFAULT_MODEL) return undefined;
 	return model;
 }
+
+/**
+ * The catalog with the `"default"` entry annotated with the model it
+ * currently resolves to (the top-level `model` of the Codex config).
+ */
+export async function listCodexModels(
+	readConfigured: () => Promise<string | null>,
+): Promise<ProtocolModelInfo[]> {
+	const configured = await readConfigured().catch(() => null);
+	if (!configured) return CODEX_MODELS;
+	return CODEX_MODELS.map((m) =>
+		m.value === CODEX_DEFAULT_MODEL ? { ...m, resolvesTo: configured } : m,
+	);
+}

@@ -3,8 +3,8 @@
  * and the typed `agentEvent` stream. Default (and only) chat experience.
  */
 
-import { Paperclip, Sparkles } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { Bot, Paperclip, Sparkles, SquareTerminal } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
 	type Attachment,
 	Attachments,
@@ -12,33 +12,32 @@ import {
 import {
 	Conversation,
 	ConversationContent,
+	ConversationEmptyState,
 	ConversationScrollButton,
 } from "@/components/ai-elements/conversation";
-import { Message, MessageContent } from "@/components/ai-elements/message";
 import {
 	PromptInput,
+	PromptInputBody,
+	PromptInputButton,
+	PromptInputFooter,
 	PromptInputSubmit,
 	PromptInputTextarea,
-	PromptInputToolbar,
+	PromptInputTools,
 } from "@/components/ai-elements/prompt-input";
 import { Suggestion, Suggestions } from "@/components/ai-elements/suggestion";
 import { ModelPicker } from "@/components/claude/model-picker";
-import { Button } from "@/components/ui/button";
 import type { ProtocolModelInfo } from "@/shared/agent-protocol";
-import {
-	type AgentMessage as AgentMessageType,
-	computeTurnStatus,
-	type SessionState,
-} from "../../hooks/agent-state";
+import { computeTurnStatus, type SessionState } from "../../hooks/agent-state";
 import { useAgentChat } from "../../hooks/use-agent-chat";
 import { onAgentEvent, onOpenSession, rpc } from "../../rpc";
 import { ChatHeader } from "../chat-header";
+import { AgentMessageView } from "./agent-message";
 import { ConfirmationQueue } from "./confirmation-queue";
-import { MessagePart as MessagePartRenderer } from "./message-parts";
 import { TurnIndicator } from "./turn-indicator";
 
 const ACCEPTED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp"];
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const EMPTY_SET: ReadonlySet<string> = new Set();
 
 function toLegacySessionState(
 	state: SessionState,
@@ -53,46 +52,6 @@ function toLegacySessionState(
 		default:
 			return "idle";
 	}
-}
-
-function partKey(
-	message: AgentMessageType,
-	part: AgentMessageType["parts"][number],
-): string {
-	switch (part.kind) {
-		case "text":
-		case "reasoning":
-			return `${message.id}:${part.kind}:${part.messageId}`;
-		case "tool":
-			return `${message.id}:tool:${part.toolCallId}`;
-	}
-}
-
-function AgentMessageView({
-	message,
-	models,
-}: {
-	message: AgentMessageType;
-	models: ProtocolModelInfo[];
-}) {
-	const modelLabel = message.modelUsed
-		? (models.find((m) => m.value === message.modelUsed)?.displayName ??
-			message.modelUsed)
-		: null;
-	return (
-		<Message from={message.role}>
-			<MessageContent role={message.role}>
-				{message.parts.map((part) => (
-					<MessagePartRenderer key={partKey(message, part)} part={part} />
-				))}
-				{modelLabel && (
-					<span className="mt-1 inline-flex rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-						Modelo: {modelLabel}
-					</span>
-				)}
-			</MessageContent>
-		</Message>
-	);
 }
 
 async function fileToAttachment(file: File): Promise<Attachment | null> {
@@ -193,12 +152,23 @@ export function ChatPaneV2() {
 	const removeAttachment = (id: string) =>
 		setAttachments((prev) => prev.filter((a) => a.id !== id));
 
-	const messages = state.currentMessage
-		? [...state.messages, state.currentMessage]
-		: state.messages;
-	const status = state.sessionState === "running" ? "streaming" : "ready";
-	const hasSubmittableContent = Boolean(draft.trim()) || attachments.length > 0;
 	const turnStatus = computeTurnStatus(state);
+	const isRunning = state.sessionState === "running";
+	const status = isRunning
+		? turnStatus.status === "waiting"
+			? "submitted"
+			: "streaming"
+		: "ready";
+	const hasSubmittableContent = Boolean(draft.trim()) || attachments.length > 0;
+	const awaitingToolIds = useMemo<ReadonlySet<string>>(
+		() =>
+			state.pendingPermissions.length > 0
+				? new Set(state.pendingPermissions.map((p) => p.toolCallId))
+				: EMPTY_SET,
+		[state.pendingPermissions],
+	);
+	const agentName = agent === "codex" ? "Codex" : "Claude";
+	const isEmpty = state.messages.length === 0 && !state.currentMessage;
 
 	return (
 		<div className="flex h-screen flex-col bg-background text-foreground">
@@ -207,23 +177,43 @@ export function ChatPaneV2() {
 				sessionId={sessionId}
 				sessionState={toLegacySessionState(state.sessionState)}
 				sessionModel={state.sessionModel}
+				resolvedModel={state.resolvedModel}
+				contextUsage={state.contextUsage}
 				models={models}
 			/>
 			{agent === "claude" && <PlanModeBanner />}
 			<Conversation>
-				<ConversationContent>
-					{messages.length === 0 && (
-						<p className="m-auto text-xs text-muted-foreground">
-							Inicie a conversa digitando abaixo.
-						</p>
+				<ConversationContent className="mx-auto w-full max-w-3xl gap-6 px-5 py-6">
+					{isEmpty && (
+						<ConversationEmptyState
+							className="min-h-[50vh]"
+							icon={
+								agent === "codex" ? (
+									<SquareTerminal className="size-8" />
+								) : (
+									<Bot className="size-8" />
+								)
+							}
+							title={`Converse com o ${agentName}`}
+							description="Digite sua mensagem abaixo para começar."
+						/>
 					)}
-					{messages.map((message) => (
+					{state.messages.map((message) => (
 						<AgentMessageView
 							key={message.id}
 							message={message}
 							models={models}
 						/>
 					))}
+					{state.currentMessage && (
+						<AgentMessageView
+							key={state.currentMessage.id}
+							message={state.currentMessage}
+							models={models}
+							isStreaming
+							awaitingToolIds={awaitingToolIds}
+						/>
+					)}
 					<TurnIndicator
 						status={turnStatus.status}
 						toolName={turnStatus.toolName}
@@ -233,83 +223,81 @@ export function ChatPaneV2() {
 				<ConversationScrollButton />
 			</Conversation>
 
-			<div className="flex flex-col gap-2 border-t border-border/60 bg-background p-3">
-				{state.lastError && state.sessionState !== "running" && (
-					<p
-						role="alert"
-						className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-1.5 text-[11px] text-destructive"
-					>
-						{state.lastError.message}
-					</p>
-				)}
-				<ConfirmationQueue
-					pending={state.pendingPermissions}
-					onApprove={approveTool}
-					onReject={rejectTool}
-				/>
-				{state.suggestions.length > 0 && (
-					<Suggestions>
-						{state.suggestions.map((suggestion) => (
-							<Suggestion
-								key={suggestion}
-								suggestion={suggestion}
-								onSuggestionClick={(s) => setDraft(s)}
-							/>
-						))}
-					</Suggestions>
-				)}
-				<Attachments items={attachments} onRemove={removeAttachment} />
-				<PromptInput onSubmit={handleSubmit}>
-					<PromptInputTextarea
-						value={draft}
-						onChange={(e) => setDraft(e.target.value)}
-						placeholder={
-							agent === "codex"
-								? "Pergunte algo ao Codex..."
-								: "Pergunte algo ao Claude..."
-						}
-						disabled={state.sessionState === "error"}
-					/>
-					<PromptInputToolbar>
-						<ModelPicker
-							variant="turn-override"
-							value={overrideModel ?? state.sessionModel}
-							sessionDefault={state.sessionModel}
-							models={models}
-							onChange={(v) =>
-								setOverrideModel(v === state.sessionModel ? null : v)
-							}
-							disabled={state.sessionState !== "idle" || !sessionId}
-							placeholder="Modelo do turno"
-						/>
-						<input
-							ref={fileInputRef}
-							type="file"
-							accept={ACCEPTED_IMAGE_TYPES.join(",")}
-							multiple
-							className="hidden"
-							onChange={(e) => {
-								handleFilesSelected(e.target.files).catch(() => {});
-								e.target.value = "";
-							}}
-						/>
-						<Button
-							type="button"
-							size="sm"
-							variant="ghost"
-							onClick={() => fileInputRef.current?.click()}
-							className="h-8 w-8 p-0 text-muted-foreground"
-							aria-label="Anexar imagem"
+			<div className="shrink-0 bg-background px-4 pt-2 pb-4">
+				<div className="mx-auto flex w-full max-w-3xl flex-col gap-2">
+					{state.lastError && !isRunning && (
+						<p
+							role="alert"
+							className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-destructive text-xs"
 						>
-							<Paperclip className="h-3.5 w-3.5" />
-						</Button>
-						<span className="flex-1" />
-						<PromptInputSubmit
-							status={status}
-							disabled={!hasSubmittableContent && status !== "streaming"}
-						/>
-					</PromptInputToolbar>
-				</PromptInput>
+							{state.lastError.message}
+						</p>
+					)}
+					<ConfirmationQueue
+						pending={state.pendingPermissions}
+						onApprove={approveTool}
+						onReject={rejectTool}
+					/>
+					{state.suggestions.length > 0 && !isRunning && (
+						<Suggestions>
+							{state.suggestions.map((suggestion) => (
+								<Suggestion
+									key={suggestion}
+									suggestion={suggestion}
+									onSuggestionClick={(s) => setDraft(s)}
+								/>
+							))}
+						</Suggestions>
+					)}
+					<Attachments items={attachments} onRemove={removeAttachment} />
+					<PromptInput onSubmit={handleSubmit}>
+						<PromptInputBody>
+							<PromptInputTextarea
+								value={draft}
+								onChange={(e) => setDraft(e.target.value)}
+								placeholder={`Pergunte algo ao ${agentName}...`}
+								disabled={state.sessionState === "error"}
+								autoFocus
+							/>
+						</PromptInputBody>
+						<PromptInputFooter>
+							<PromptInputTools>
+								<input
+									ref={fileInputRef}
+									type="file"
+									accept={ACCEPTED_IMAGE_TYPES.join(",")}
+									multiple
+									className="hidden"
+									onChange={(e) => {
+										handleFilesSelected(e.target.files).catch(() => {});
+										e.target.value = "";
+									}}
+								/>
+								<PromptInputButton
+									onClick={() => fileInputRef.current?.click()}
+									aria-label="Anexar imagem"
+								>
+									<Paperclip className="size-4" />
+								</PromptInputButton>
+								<ModelPicker
+									variant="turn-override"
+									value={overrideModel ?? state.sessionModel}
+									sessionDefault={state.sessionModel}
+									models={models}
+									onChange={(v) =>
+										setOverrideModel(v === state.sessionModel ? null : v)
+									}
+									disabled={state.sessionState !== "idle" || !sessionId}
+									placeholder="Modelo do turno"
+								/>
+							</PromptInputTools>
+							<PromptInputSubmit
+								status={status}
+								disabled={!hasSubmittableContent && status === "ready"}
+							/>
+						</PromptInputFooter>
+					</PromptInput>
+				</div>
 			</div>
 		</div>
 	);
@@ -333,7 +321,7 @@ function PlanModeBanner() {
 	}, []);
 	if (!planMode) return null;
 	return (
-		<div className="flex items-center gap-2 border-b border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-[11px] text-amber-600 dark:text-amber-300">
+		<div className="flex shrink-0 items-center gap-2 border-b border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-[11px] text-amber-600 dark:text-amber-300">
 			<Sparkles className="h-3 w-3" />
 			<span>
 				Modo Planejamento ativo — o agente apenas descreve um plano, sem

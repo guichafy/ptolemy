@@ -1,10 +1,11 @@
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import type { AgentEvent } from "@/shared/agent-protocol";
+import type { AgentEvent, SessionInfoPatch } from "@/shared/agent-protocol";
 import {
 	buildAgentEvents,
 	createEventMapperContext,
 	type EventMapperContext,
 } from "./event-mapper";
+import { createSessionInfoTracker } from "./session-info";
 
 // ---------------------------------------------------------------------------
 // Logging
@@ -51,6 +52,8 @@ export type ResultMeta = {
 	totalCostUsd?: number;
 	durationMs?: number;
 	usage?: { input: number; output: number };
+	/** Concrete model that answered (the alias resolved by the SDK). */
+	model?: string;
 };
 
 /**
@@ -71,6 +74,8 @@ export interface StreamingHooks {
 	onTurnComplete?: () => void;
 	/** Fires once when the SDK reveals its session id on the first message that carries it. */
 	onSdkSessionId?: (sdkSessionId: string) => void;
+	/** Fires when the resolved model or the context usage changes. */
+	onSessionInfo?: (patch: SessionInfoPatch) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -268,6 +273,20 @@ export async function startStreamingLoop(
 	let chunkCount = 0;
 	let resultCount = 0;
 	const mapperCtx: EventMapperContext = createEventMapperContext();
+	const infoTracker = createSessionInfoTracker();
+
+	function publishSessionInfo(patch: SessionInfoPatch | null): void {
+		if (!patch) return;
+		sender.sendEvent(sessionId, { type: "session-info", info: patch });
+		try {
+			hooks.onSessionInfo?.(patch);
+		} catch (hookErr) {
+			console.error(
+				`[claude:stream] onSessionInfo hook threw: sessionId=${sessionId}`,
+				hookErr,
+			);
+		}
+	}
 
 	function pushAgentEvents(msg: SDKMessage): void {
 		for (const event of buildAgentEvents(msg, mapperCtx)) {
@@ -297,6 +316,13 @@ export async function startStreamingLoop(
 				}
 			}
 
+			// Session info goes out before the mapped events so the context
+			// snapshot lands before `finish` on result messages.
+			publishSessionInfo(
+				msg.type === "result"
+					? infoTracker.onResult(msg)
+					: infoTracker.observe(msg),
+			);
 			pushAgentEvents(msg);
 
 			// Track thinking blocks from stream_event deltas.
@@ -397,8 +423,11 @@ export async function startStreamingLoop(
 				};
 
 				const meta: ResultMeta = {};
-				if (typeof result.total_cost_usd === "number") {
-					meta.totalCostUsd = result.total_cost_usd;
+				if (infoTracker.model) meta.model = infoTracker.model;
+				// Per-turn cost: the SDK's total_cost_usd is cumulative for the
+				// CLI process (see session-info.ts).
+				if (infoTracker.lastTurnCostUsd !== null) {
+					meta.totalCostUsd = infoTracker.lastTurnCostUsd;
 				}
 				if (typeof result.duration_ms === "number") {
 					meta.durationMs = result.duration_ms;

@@ -1,175 +1,107 @@
 /**
- * AI Elements `Conversation` — scroll container that auto-sticks to bottom
- * while new content streams in, with an escape hatch button that appears
- * once the user scrolls up.
- *
- * Local implementation compatible with the API at
- * https://elements.ai-sdk.dev/r/conversation.json. Swap to the registry
- * drop when phase 5 retires the legacy chat.
+ * AI Elements `Conversation`: scroll container that sticks to the bottom
+ * while content streams, with a jump-to-bottom button once the user scrolls
+ * up. Ported from https://github.com/vercel/ai-elements (`conversation.tsx`),
+ * built on `use-stick-to-bottom` (ResizeObserver-driven, so streaming does
+ * not force a layout read on every DOM mutation).
  */
 
-import { ArrowDown } from "lucide-react";
-import {
-	type ComponentProps,
-	forwardRef,
-	useCallback,
-	useEffect,
-	useRef,
-	useState,
-} from "react";
+import { ArrowDownIcon } from "lucide-react";
+import type { ComponentProps, ReactNode } from "react";
+import { useCallback } from "react";
+import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-type ConversationContextValue = {
-	registerViewport: (el: HTMLDivElement | null) => void;
-};
+export type ConversationProps = ComponentProps<typeof StickToBottom>;
 
-const conversationEl = Symbol("conversation");
-type InternalConversationRef = HTMLDivElement & {
-	[conversationEl]?: ConversationContextValue;
-};
-
-export const Conversation = forwardRef<HTMLDivElement, ComponentProps<"div">>(
-	({ className, children, ...props }, ref) => (
-		<div
-			ref={ref}
-			className={cn(
-				"relative flex min-h-0 flex-1 flex-col overflow-hidden",
-				className,
-			)}
-			{...props}
-		>
-			{children}
-		</div>
-	),
+export const Conversation = ({ className, ...props }: ConversationProps) => (
+	<StickToBottom
+		className={cn("relative min-h-0 flex-1 overflow-y-hidden", className)}
+		initial="instant"
+		resize="smooth"
+		role="log"
+		{...props}
+	/>
 );
-Conversation.displayName = "Conversation";
 
-export interface ConversationContentProps extends ComponentProps<"div"> {
-	/** When true, auto-scroll to bottom as content streams. Default true. */
-	stickToBottom?: boolean;
-}
+export type ConversationContentProps = ComponentProps<
+	typeof StickToBottom.Content
+>;
 
-export const ConversationContent = forwardRef<
-	HTMLDivElement,
-	ConversationContentProps
->(({ className, children, stickToBottom = true, ...props }, ref) => {
-	const localRef = useRef<HTMLDivElement | null>(null);
-	const stuckRef = useRef(true);
+export const ConversationContent = ({
+	className,
+	...props
+}: ConversationContentProps) => (
+	<StickToBottom.Content
+		className={cn("flex flex-col gap-8 p-4", className)}
+		{...props}
+	/>
+);
 
-	const mergedRef = useCallback(
-		(node: HTMLDivElement | null) => {
-			localRef.current = node;
-			if (typeof ref === "function") ref(node);
-			else if (ref) (ref as { current: HTMLDivElement | null }).current = node;
-		},
-		[ref],
-	);
+export type ConversationEmptyStateProps = ComponentProps<"div"> & {
+	title?: string;
+	description?: string;
+	icon?: ReactNode;
+};
 
-	useEffect(() => {
-		const el = localRef.current;
-		if (!el) return;
-		const onScroll = () => {
-			const threshold = 24;
-			stuckRef.current =
-				el.scrollHeight - el.scrollTop - el.clientHeight <= threshold;
-		};
-		el.addEventListener("scroll", onScroll, { passive: true });
-		return () => el.removeEventListener("scroll", onScroll);
-	}, []);
+export const ConversationEmptyState = ({
+	className,
+	title = "Nenhuma mensagem ainda",
+	description = "Comece a conversa para ver as mensagens aqui",
+	icon,
+	children,
+	...props
+}: ConversationEmptyStateProps) => (
+	<div
+		className={cn(
+			"flex size-full flex-col items-center justify-center gap-3 p-8 text-center",
+			className,
+		)}
+		{...props}
+	>
+		{children ?? (
+			<>
+				{icon && <div className="text-muted-foreground">{icon}</div>}
+				<div className="space-y-1">
+					<h3 className="font-medium text-sm">{title}</h3>
+					{description && (
+						<p className="text-muted-foreground text-sm">{description}</p>
+					)}
+				</div>
+			</>
+		)}
+	</div>
+);
 
-	useEffect(() => {
-		if (!stickToBottom) return;
-		const el = localRef.current;
-		if (!el) return;
-		const observer = new MutationObserver(() => {
-			if (stuckRef.current) el.scrollTop = el.scrollHeight;
-		});
-		observer.observe(el, {
-			childList: true,
-			subtree: true,
-			characterData: true,
-		});
-		return () => observer.disconnect();
-	}, [stickToBottom]);
-
-	return (
-		<div
-			ref={mergedRef}
-			className={cn(
-				"flex flex-1 flex-col gap-4 overflow-y-auto px-4 py-4",
-				className,
-			)}
-			data-slot="conversation-content"
-			{...props}
-		>
-			{children}
-		</div>
-	);
-});
-ConversationContent.displayName = "ConversationContent";
-
-export interface ConversationScrollButtonProps
-	extends ComponentProps<typeof Button> {
-	/** The ConversationContent element to scroll; queried via data-slot when omitted. */
-	targetRef?: React.RefObject<HTMLDivElement>;
-}
+export type ConversationScrollButtonProps = ComponentProps<typeof Button>;
 
 export const ConversationScrollButton = ({
 	className,
-	targetRef,
 	...props
 }: ConversationScrollButtonProps) => {
-	const [visible, setVisible] = useState(false);
+	const { isAtBottom, scrollToBottom } = useStickToBottomContext();
 
-	useEffect(() => {
-		const el =
-			targetRef?.current ??
-			document.querySelector<HTMLDivElement>(
-				"[data-slot='conversation-content']",
-			);
-		if (!el) return;
-		const update = () => {
-			const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-			setVisible(distance > 120);
-		};
-		update();
-		el.addEventListener("scroll", update, { passive: true });
-		const resize = new ResizeObserver(update);
-		resize.observe(el);
-		return () => {
-			el.removeEventListener("scroll", update);
-			resize.disconnect();
-		};
-	}, [targetRef]);
+	const handleScrollToBottom = useCallback(() => {
+		scrollToBottom();
+	}, [scrollToBottom]);
 
-	const onClick = () => {
-		const el =
-			targetRef?.current ??
-			document.querySelector<HTMLDivElement>(
-				"[data-slot='conversation-content']",
-			);
-		if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-	};
-
-	if (!visible) return null;
 	return (
-		<Button
-			type="button"
-			size="sm"
-			variant="secondary"
-			onClick={onClick}
-			className={cn(
-				"absolute bottom-2 left-1/2 z-10 -translate-x-1/2 rounded-full shadow-sm",
-				className,
-			)}
-			{...props}
-		>
-			<ArrowDown className="h-3.5 w-3.5" />
-		</Button>
+		!isAtBottom && (
+			<Button
+				aria-label="Ir para o fim da conversa"
+				className={cn(
+					"absolute bottom-4 left-[50%] translate-x-[-50%] rounded-full bg-background shadow-md hover:bg-muted",
+					className,
+				)}
+				onClick={handleScrollToBottom}
+				size="icon"
+				type="button"
+				variant="outline"
+				{...props}
+			>
+				<ArrowDownIcon className="size-4" />
+			</Button>
+		)
 	);
 };
-ConversationScrollButton.displayName = "ConversationScrollButton";
-
-/* Marker export so tree-shaking keeps the symbol alive if imported nakedly. */
-export type { InternalConversationRef };

@@ -1,5 +1,10 @@
 @import "tailwindcss" source("../");
 @import "tw-animate-css";
+@import "streamdown/styles.css";
+
+/* Streamdown renders Tailwind classes from its own bundle. */
+@source "../../node_modules/streamdown/dist/*.js";
+@source "../../node_modules/@streamdown/code/dist/*.js";
 
 @custom-variant dark (&:where(.dark, .dark *));
 
@@ -72,6 +77,16 @@
 	--border: hsl(0 0% 14.9%);
 	--input: hsl(0 0% 14.9%);
 	--ring: hsl(0 0% 83.1%);
+}
+
+/* AI Elements Shimmer (see components/ai-elements/shimmer.tsx). */
+@keyframes ai-shimmer {
+	from {
+		background-position: 100% center;
+	}
+	to {
+		background-position: 0% center;
+	}
 }
 
 @keyframes bounce-dot {

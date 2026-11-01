@@ -1,10 +1,16 @@
 import { useCallback, useEffect, useReducer, useRef } from "react";
-import type { AgentKind, ApproveBehavior } from "@/shared/agent-protocol";
+import type {
+	AgentEvent,
+	AgentKind,
+	ApproveBehavior,
+	SessionInfoPatch,
+} from "@/shared/agent-protocol";
 import { onAgentEvent, rpc } from "../rpc";
 import {
 	type AgentMessage,
 	type AgentState,
 	appendUserMessage,
+	applySessionInfo,
 	hasPendingTurn,
 	hydrateMessages,
 	initialAgentState,
@@ -15,23 +21,20 @@ import {
 } from "./agent-state";
 
 type Action =
-	| {
-			type: "event";
-			sessionId: string;
-			event: import("@/shared/agent-protocol").AgentEvent;
-	  }
+	| { type: "events"; events: AgentEvent[] }
 	| { type: "optimistic-user"; id: string; text: string; modelUsed?: string }
 	| { type: "resolve-permission"; permissionId: string }
 	| { type: "hydrate"; messages: AgentMessage[] }
 	| { type: "set-session-model"; model: string | null }
 	| { type: "set-session-agent"; agent: AgentKind }
+	| { type: "set-session-info"; info: SessionInfoPatch }
 	| { type: "mark-turn-start" }
 	| { type: "reset" };
 
 function reducer(state: AgentState, action: Action): AgentState {
 	switch (action.type) {
-		case "event":
-			return reduceAgentState(state, action.event);
+		case "events":
+			return action.events.reduce(reduceAgentState, state);
 		case "optimistic-user":
 			// Mark the turn as in-flight so the TurnIndicator flips to
 			// "waiting" immediately, without waiting for the first
@@ -55,6 +58,8 @@ function reducer(state: AgentState, action: Action): AgentState {
 			return { ...state, sessionModel: action.model };
 		case "set-session-agent":
 			return { ...state, sessionAgent: action.agent };
+		case "set-session-info":
+			return applySessionInfo(state, action.info);
 		case "mark-turn-start":
 			return markTurnStart(state);
 		case "reset":
@@ -79,10 +84,65 @@ export interface UseAgentChatResult {
 }
 
 /**
+ * Events that must reach the reducer right away instead of waiting for the
+ * next frame: they end a turn or ask the user for something.
+ */
+const URGENT_EVENTS = new Set<AgentEvent["type"]>([
+	"finish",
+	"error",
+	"session-end",
+	"tool-permission-request",
+]);
+
+/**
+ * Coalesces streamed events into one reducer dispatch per animation frame.
+ * A fast model emits dozens of `text-delta`s per frame; dispatching each one
+ * re-rendered the chat dozens of times per frame. `setTimeout` backs up
+ * `requestAnimationFrame`, which is paused while the window is hidden.
+ */
+function createEventBatcher(flush: (events: AgentEvent[]) => void) {
+	let queue: AgentEvent[] = [];
+	let raf: number | null = null;
+	let timer: ReturnType<typeof setTimeout> | null = null;
+
+	const drain = () => {
+		if (raf !== null) cancelAnimationFrame(raf);
+		if (timer !== null) clearTimeout(timer);
+		raf = null;
+		timer = null;
+		if (queue.length === 0) return;
+		const events = queue;
+		queue = [];
+		flush(events);
+	};
+
+	return {
+		push(event: AgentEvent) {
+			queue.push(event);
+			if (URGENT_EVENTS.has(event.type)) {
+				drain();
+				return;
+			}
+			if (raf === null && typeof requestAnimationFrame === "function") {
+				raf = requestAnimationFrame(drain);
+			}
+			if (timer === null) timer = setTimeout(drain, 50);
+		},
+		drain,
+		cancel() {
+			if (raf !== null) cancelAnimationFrame(raf);
+			if (timer !== null) clearTimeout(timer);
+			raf = null;
+			timer = null;
+			queue = [];
+		},
+	};
+}
+
+/**
  * Hook consuming the typed agentEvent stream and exposing command helpers.
- * Runs alongside the legacy `useChatSession` until phase 5 retires the
- * `claudeStreamChunk` channel; does not persist or load messages itself
- * (that still flows through `claudeGetSessionMessages` + StoredMessageV2).
+ * Does not persist anything itself: transcripts load through
+ * `claudeGetSessionMessages` (StoredMessageV2).
  */
 export function useAgentChat(sessionId: string | null): UseAgentChatResult {
 	const [state, dispatch] = useReducer(reducer, undefined, initialAgentState);
@@ -106,6 +166,15 @@ export function useAgentChat(sessionId: string | null): UseAgentChatResult {
 			if (meta) {
 				dispatch({ type: "set-session-model", model: meta.model });
 				dispatch({ type: "set-session-agent", agent: meta.agent ?? "claude" });
+				if (meta.resolvedModel || meta.contextUsage) {
+					dispatch({
+						type: "set-session-info",
+						info: {
+							resolvedModel: meta.resolvedModel,
+							contextUsage: meta.contextUsage,
+						},
+					});
+				}
 			}
 		} catch (err) {
 			console.error("[agent-chat] hydrate failed:", err);
@@ -121,18 +190,26 @@ export function useAgentChat(sessionId: string | null): UseAgentChatResult {
 
 	useEffect(() => {
 		if (!sessionId) return;
+		const batcher = createEventBatcher((events) =>
+			dispatch({ type: "events", events }),
+		);
 		const unsubscribe = onAgentEvent((args) => {
 			if (args.sessionId !== sessionId) return;
-			dispatch({ type: "event", sessionId: args.sessionId, event: args.event });
+			batcher.push(args.event);
 			// After a turn finishes the backend has already appended the complete
-			// assistant message to disk (see streaming.ts — persist BEFORE sendEnd).
-			// Reload from disk so any deltas missed during the window-creation race
-			// (or before `useAgentChat` subscribed) are recovered.
+			// assistant message to disk. Reload from disk so any deltas missed
+			// during the window-creation race (or before `useAgentChat`
+			// subscribed) are recovered. `finish` is urgent, so the batch holding
+			// it has already been dispatched; reconciliation keeps unchanged
+			// messages, so this does not remount the conversation.
 			if (args.event.type === "finish") {
 				hydrate(sessionId);
 			}
 		});
-		return unsubscribe;
+		return () => {
+			unsubscribe();
+			batcher.cancel();
+		};
 	}, [sessionId, hydrate]);
 
 	const sendMessage = useCallback(
