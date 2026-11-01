@@ -268,3 +268,247 @@ describe("package review and credential boundaries", () => {
 		).toHaveLength(2);
 	});
 });
+
+describe("review regressions: complete declarations and safe diagnostics", () => {
+	it("inventories every native and portable manifest with harness provenance and explicit Skill constraints", () => {
+		const result = normalizePackage(
+			records({
+				".claude-plugin/plugin.json": JSON.stringify({
+					name: "demo",
+					skills: ["./skills/one"],
+					mcpServers: "./claude.json",
+				}),
+				".codex-plugin/plugin.json": JSON.stringify({
+					name: "demo",
+					skills: ["./skills/two"],
+					mcpServers: "./codex.json",
+				}),
+				"plugin.json": JSON.stringify({
+					name: "demo",
+					skills: [],
+					commands: "./portable",
+				}),
+				"claude.json": '{"api":{"command":"claude-server"}}',
+				"codex.json": '{"api":{"command":"codex-server"}}',
+				"skills/one/SKILL.md": skill("one"),
+				"skills/two/SKILL.md": skill("two"),
+				"skills/three/SKILL.md": skill("three"),
+				"portable/run.md": "portable",
+			}),
+			"demo",
+		);
+		const skills = result.components.filter((c) => c.kind === "skill");
+		expect(skills.map((c) => c.name)).toEqual(["one", "two"]);
+		expect(skills[0].sources).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					manifest: ".claude-plugin/plugin.json",
+					harness: "claude",
+					skillPaths: ["skills/one"],
+				}),
+			]),
+		);
+		expect(skills[1].sources).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					manifest: ".codex-plugin/plugin.json",
+					harness: "codex",
+					skillPaths: ["skills/two"],
+				}),
+			]),
+		);
+		expect(
+			result.components.find((c) => c.kind === "command")?.sources[0].harness,
+		).toBe("portable");
+		const mcps = result.components.filter((c) => c.kind === "mcp");
+		expect(mcps).toHaveLength(2);
+		expect(new Set(mcps.map((c) => c.id)).size).toBe(2);
+		expect(
+			mcps.every((c) =>
+				c.diagnostics.some((d) => d.code === "component-conflict"),
+			),
+		).toBe(true);
+	});
+	it("applies explicit inline Skill overrides to every native variant without adding implicit siblings", () => {
+		const result = normalizePackage(
+			records({
+				".claude-plugin/plugin.json":
+					'{"name":"demo","skills":["./skills/two"]}',
+				".codex-plugin/plugin.json": '{"name":"demo"}',
+				"skills/one/SKILL.md": skill("one"),
+				"skills/two/SKILL.md": skill("two"),
+			}),
+			"demo",
+			{ name: "suite", strict: false, skills: ["./skills/one"] },
+		);
+		expect(
+			result.components
+				.filter((c) => c.kind === "skill")
+				.every((c) => c.name === "one"),
+		).toBe(true);
+		expect(
+			result.components
+				.filter((c) => c.kind === "skill")
+				.map((c) => c.sources[0].catalogSkillPaths),
+		).toEqual([["skills/one"], ["skills/one"]]);
+		expect(result.manifests[".claude-plugin/plugin.json"].skills).toEqual([
+			"./skills/two",
+		]);
+	});
+	it("scans custom MCP config files referenced only by later or superseded manifests", () => {
+		for (const inline of [{}, { mcpServers: { api: { command: "safe" } } }]) {
+			const result = normalizePackage(
+				records({
+					".claude-plugin/plugin.json":
+						'{"name":"demo","mcpServers":{"api":{"command":"safe"}}}',
+					".codex-plugin/plugin.json":
+						'{"name":"demo","mcpServers":"./custom-codex.json"}',
+					"custom-codex.json":
+						'{"api":{"command":"node","env":{"API_TOKEN":"literal-credential-probe"}}}',
+				}),
+				"demo",
+				inline,
+			);
+			expect(result.diagnostics.some((d) => d.code === "embedded-secret")).toBe(
+				true,
+			);
+		}
+	});
+	it.each([
+		false,
+		true,
+	])("retains default/explicit same-name differing MCP declarations (%s)", (explicit) => {
+		const files = {
+			"plugin.json": JSON.stringify({
+				name: "demo",
+				...(explicit ? { mcpServers: ["./.mcp.json", "./mcp.json"] } : {}),
+			}),
+			".mcp.json": '{"api":{"command":"first"}}',
+			"mcp.json": '{"api":{"command":"second"}}',
+		};
+		const result = normalizePackage(records(files), "demo");
+		const mcps = result.components.filter((c) => c.kind === "mcp");
+		expect(mcps).toHaveLength(2);
+		expect(new Set(mcps.map((c) => c.id)).size).toBe(2);
+		expect(
+			mcps.every((c) =>
+				c.diagnostics.some((d) => d.code === "component-conflict"),
+			),
+		).toBe(true);
+		expect(
+			normalizePackage(records(files), "demo").components.map((c) => c.id),
+		).toEqual(result.components.map((c) => c.id));
+	});
+	it("retains provenance for identical MCP definitions without falsely diagnosing a conflict", () => {
+		const result = normalizePackage(
+			records({
+				"plugin.json": '{"name":"demo"}',
+				".mcp.json": '{"api":{"command":"same"}}',
+				"mcp.json": '{"api":{"command":"same"}}',
+			}),
+			"demo",
+		);
+		const mcps = result.components.filter((c) => c.kind === "mcp");
+		expect(mcps.length).toBeGreaterThan(0);
+		expect(mcps.flatMap((c) => c.sources).map((s) => s.configPath)).toEqual(
+			expect.arrayContaining([".mcp.json", "mcp.json"]),
+		);
+		expect(
+			result.diagnostics.some((d) => d.code === "component-conflict"),
+		).toBe(false);
+	});
+	it("does not put YAML parser source excerpts in public diagnostics", () => {
+		const result = normalizePackage(
+			records({
+				"skills/one/SKILL.md":
+					"---\nname: one\ndescription: test\nsecret: credential-probe: invalid\n---\nbody",
+			}),
+			"demo",
+		);
+		expect(result.diagnostics.some((d) => d.code === "invalid-skill")).toBe(
+			true,
+		);
+		expect(JSON.stringify(result.diagnostics)).not.toContain(
+			"credential-probe",
+		);
+	});
+});
+
+it("diagnoses same-name Skills with different bodies while keeping both stable identities", () => {
+	const files = records({
+		"skills/a/one/SKILL.md": `${skill("one")}\nfirst body`,
+		"skills/b/one/SKILL.md": `${skill("one")}\nsecond body`,
+	});
+	const result = normalizePackage(files, "demo");
+	const skills = result.components.filter((c) => c.kind === "skill");
+	expect(skills).toHaveLength(2);
+	expect(new Set(skills.map((c) => c.id)).size).toBe(2);
+	expect(
+		skills.every((c) =>
+			c.diagnostics.some((d) => d.code === "component-conflict"),
+		),
+	).toBe(true);
+});
+
+it("credential-checks every custom JSON config in declared component path arrays", () => {
+	const result = normalizePackage(
+		records({
+			"plugin.json":
+				'{"name":"demo","apps":["./first-app.json","./second-app.json"]}',
+			"first-app.json": '{"apps":[{"id":"public-app"}]}',
+			"second-app.json":
+				'{"headers":{"Authorization":"Bearer literal-credential-probe"}}',
+		}),
+		"demo",
+	);
+	expect(result.diagnostics.some((d) => d.code === "embedded-secret")).toBe(
+		true,
+	);
+});
+
+it("keeps overridden non-Skill definitions visible as inactive with original source", () => {
+	const result = normalizePackage(
+		records({
+			".codex-plugin/plugin.json":
+				'{"name":"demo","mcpServers":"./native.json"}',
+			"native.json": '{"api":{"command":"original"}}',
+		}),
+		"demo",
+		{ mcpServers: { api: { command: "catalog" } } },
+	);
+	const mcps = result.components.filter((c) => c.kind === "mcp");
+	expect(mcps).toHaveLength(2);
+	expect(
+		mcps.find((c) => c.definition?.config.command === "original")?.sources[0],
+	).toMatchObject({
+		manifest: ".codex-plugin/plugin.json",
+		harness: "codex",
+		effective: false,
+		overriddenBy: "@catalog",
+		configPath: "native.json",
+	});
+	expect(
+		mcps.find((c) => c.definition?.config.command === "catalog")?.sources[0]
+			.effective,
+	).toBe(true);
+	expect(
+		result.diagnostics.some((d) => d.code === "superseded-declaration"),
+	).toBe(true);
+});
+
+it("keeps inline MCP declaration identities stable when their configuration changes", () => {
+	const normalize = (command: string) =>
+		normalizePackage(
+			records({
+				"plugin.json": JSON.stringify({
+					name: "demo",
+					mcpServers: [{ api: { command } }, { api: { command: "sibling" } }],
+				}),
+			}),
+			"demo",
+		);
+	const before = normalize("before").components.filter((c) => c.kind === "mcp");
+	const after = normalize("after").components.filter((c) => c.kind === "mcp");
+	expect(after.map((c) => c.id)).toEqual(before.map((c) => c.id));
+	expect(new Set(after.map((c) => c.id)).size).toBe(2);
+});

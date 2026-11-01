@@ -20,7 +20,21 @@ export type ExtensionComponentKind =
 	| "command"
 	| "agent"
 	| "other";
+export interface ExtensionComponentSource {
+	manifest: string;
+	harness: "claude" | "codex" | "portable" | "catalog" | "directory";
+	declaration: string;
+	configPath?: string;
+	/** Original native selector, before a catalog override. */
+	skillPaths?: string[];
+	/** Explicit catalog selector applies to every native variant. */
+	catalogSkillPaths?: string[];
+	catalogStrict?: boolean;
+	overriddenBy?: "@catalog";
+	effective: boolean;
+}
 export interface ExtensionComponentBase {
+	sources: ExtensionComponentSource[];
 	id: string;
 	name: string;
 	path?: string;

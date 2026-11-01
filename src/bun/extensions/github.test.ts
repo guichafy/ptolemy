@@ -144,3 +144,87 @@ it("rejects a commit response that does not match an explicitly pinned SHA", asy
 		),
 	).rejects.toThrow(/fixada/);
 });
+
+describe("raw immutable downloads without per-file API quota", () => {
+	it("downloads over 60 files using only two metadata API calls and at most six concurrent raw requests", async () => {
+		const fixture = githubFixture(
+			Object.fromEntries(
+				Array.from({ length: 70 }, (_, i) => [`assets/${i}.txt`, `${i}`]),
+			),
+		);
+		let active = 0;
+		let maximum = 0;
+		const fetcher = async (url: string, init?: RequestInit) => {
+			expect(init?.redirect).toBe("error");
+			expect(init?.signal).toBeInstanceOf(AbortSignal);
+			if (new URL(url).hostname !== "raw.githubusercontent.com")
+				return fixture.fetcher(url);
+			active++;
+			maximum = Math.max(active, maximum);
+			await new Promise((resolve) => setTimeout(resolve, 2));
+			const response = await fixture.fetcher(url);
+			active--;
+			return response;
+		};
+		const repo = await GithubRepository.open("https://github.com/o/r", fetcher);
+		expect(await repo.download()).toHaveLength(70);
+		expect(
+			fixture.requests.filter(
+				(url) => new URL(url).hostname === "api.github.com",
+			),
+		).toHaveLength(2);
+		expect(
+			fixture.requests.filter(
+				(url) => new URL(url).hostname === "raw.githubusercontent.com",
+			),
+		).toHaveLength(70);
+		expect(maximum).toBeGreaterThan(1);
+		expect(maximum).toBeLessThanOrEqual(6);
+		expect(
+			fixture.requests
+				.filter((url) => new URL(url).hostname === "raw.githubusercontent.com")
+				.every((url) => url.includes(`/${commit}/`)),
+		).toBe(true);
+	});
+	it("encodes immutable raw paths and validates cache content once", async () => {
+		const fixture = githubFixture({ "assets/a #?.txt": "data" });
+		const repo = await GithubRepository.open(
+			"https://github.com/o/r",
+			fixture.fetcher,
+		);
+		await repo.download();
+		await repo.read("assets/a #?.txt");
+		expect(
+			fixture.requests.filter(
+				(url) => new URL(url).hostname === "raw.githubusercontent.com",
+			),
+		).toEqual([
+			`https://raw.githubusercontent.com/o/r/${commit}/assets/a%20%23%3F.txt`,
+		]);
+	});
+	it("does not echo malformed JSON source text in repository parser errors", async () => {
+		const fixture = githubFixture({ "plugin.json": "credential-probe" });
+		const repo = await GithubRepository.open(
+			"https://github.com/o/r",
+			fixture.fetcher,
+		);
+		let message = "";
+		try {
+			await repo.json("plugin.json");
+		} catch (error) {
+			message = String(error);
+		}
+		expect(message).toMatch(/JSON/);
+		expect(message).not.toContain("credential-probe");
+	});
+});
+
+it("rejects same-length corrupt raw bytes using the pinned Git object hash", async () => {
+	const fixture = githubFixture({ "file.txt": "first" });
+	const fetcher = (url: string) =>
+		new URL(url).hostname === "raw.githubusercontent.com"
+			? Promise.resolve(new Response("other"))
+			: fixture.fetcher(url);
+	const repo = await GithubRepository.open("https://github.com/o/r", fetcher);
+	await expect(repo.download()).rejects.toThrow(/corrompido/);
+});

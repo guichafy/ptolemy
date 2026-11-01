@@ -1,7 +1,9 @@
+import { createHash } from "node:crypto";
 import { basename, dirname } from "node:path";
 import { parseDocument } from "yaml";
 import type {
 	ExtensionComponent,
+	ExtensionComponentSource,
 	ExtensionDiagnostic,
 } from "@/shared/extensions";
 import type { SkillFile } from "@/shared/skills";
@@ -85,10 +87,11 @@ export function containsLiteralCredential(value: unknown, key = ""): boolean {
 }
 
 /** Preserve source declarations; capability/execution decisions belong to session adapters. */
-export function normalizePackage(
+function normalizeManifest(
 	files: SkillFile[],
 	fallbackName: string,
 	inline: Record<string, unknown> = {},
+	selectedManifest?: string,
 ): NormalizedPackage {
 	validatePackageFiles(files);
 	const components: ExtensionComponent[] = [];
@@ -137,7 +140,7 @@ export function normalizePackage(
 		}
 	};
 	let manifest: Record<string, unknown> = {};
-	for (const path of PLUGIN_MANIFESTS) {
+	for (const path of selectedManifest ? [selectedManifest] : []) {
 		if (byPath.has(path)) {
 			const value = json(path);
 			if (value && !Object.keys(manifest).length) manifest = value;
@@ -164,9 +167,10 @@ export function normalizePackage(
 		typeof manifest.description === "string"
 			? manifest.description.slice(0, 8192)
 			: "";
-	const add = (component: ExtensionComponent) => {
+	type LocalComponent<T> = T extends unknown ? Omit<T, "sources"> : never;
+	const add = (component: LocalComponent<ExtensionComponent>) => {
 		if (!components.some((c) => c.id === component.id))
-			components.push(component);
+			components.push({ ...component, sources: [] });
 	};
 	const resolve = (value: unknown, field: string): string | undefined => {
 		if (typeof value !== "string") {
@@ -251,10 +255,10 @@ export function normalizePackage(
 				definition: { metadata: frontmatter(text).metadata },
 				diagnostics: [],
 			});
-		} catch (error) {
+		} catch {
 			const diagnostic = report(
 				"invalid-skill",
-				error instanceof Error ? error.message : "Skill inválida.",
+				"Skill inválida: verifique o frontmatter, nome, descrição e limites de arquivos (128 arquivos, 1 MiB por arquivo, 5 MiB por Skill, 256 KiB por documento).",
 				file.path,
 			);
 			add({
@@ -333,8 +337,10 @@ export function normalizePackage(
 		manifest.mcpServers !== undefined
 			? [manifest.mcpServers]
 			: [...[".mcp.json", "mcp.json"].filter((p) => byPath.has(p))];
+	let mcpDeclarationIndex = 0;
 	for (const input of mcpValues) {
 		for (const value of Array.isArray(input) ? input : [input]) {
+			const declarationIndex = mcpDeclarationIndex++;
 			const loaded = loadDeclaration(value, "mcpServers");
 			if (!loaded) continue;
 			const data = loaded.value;
@@ -358,7 +364,7 @@ export function normalizePackage(
 				continue;
 			}
 			for (const [server, config] of Object.entries(servers)) {
-				const id = `mcp:${server}`;
+				const id = `mcp:${encodeURIComponent(server)}@${encodeURIComponent(loaded.path ?? `inline:${declarationIndex}`)}`;
 				const ds: ExtensionDiagnostic[] = [];
 				if (!object(config)) {
 					ds.push(
@@ -568,6 +574,10 @@ export function normalizePackage(
 	] as const) {
 		if (
 			manifest[field] !== undefined &&
+			!(
+				Array.isArray(manifest[field]) &&
+				(manifest[field] as unknown[]).length === 0
+			) &&
 			!components.some((c) => c.kind === kind)
 		) {
 			const ds = diagnostics.filter((d) => d.path === field);
@@ -588,6 +598,22 @@ export function normalizePackage(
 	)) {
 		if (!manifests[file.path]) json(file.path);
 	}
+	for (const field of [
+		"mcpServers",
+		"hooks",
+		"apps",
+		"lspServers",
+		"outputStyles",
+	]) {
+		const declaration = manifest[field];
+		for (const value of Array.isArray(declaration)
+			? declaration
+			: [declaration]) {
+			if (typeof value !== "string" || !value.endsWith(".json")) continue;
+			const path = resolve(value, field);
+			if (path !== undefined && !manifests[path]) json(path);
+		}
+	}
 	// Scan recognized credential fields in all loaded declarations, including inline metadata.
 	if (
 		Object.values(manifests).some((value) =>
@@ -602,4 +628,200 @@ export function normalizePackage(
 			"error",
 		);
 	return { name, description, components, diagnostics, manifests };
+}
+
+const declarationFor = (component: ExtensionComponent): string =>
+	({
+		skill: "skills",
+		mcp: "mcpServers",
+		hook: "hooks",
+		command: "commands",
+		agent: "agents",
+		other: component.name,
+	})[component.kind];
+function selectors(value: unknown): string[] | undefined {
+	if (value === undefined) return;
+	return (Array.isArray(value) ? value : [value]).flatMap((item) => {
+		if (typeof item !== "string") return [];
+		try {
+			return [relativePath(item, true)];
+		} catch {
+			return [];
+		}
+	});
+}
+function canonicalDefinition(value: unknown): string {
+	if (Array.isArray(value))
+		return `[${value.map(canonicalDefinition).join(",")}]`;
+	if (object(value))
+		return `{${Object.keys(value)
+			.sort()
+			.map((key) => `${JSON.stringify(key)}:${canonicalDefinition(value[key])}`)
+			.join(",")}}`;
+	return JSON.stringify(value) ?? "undefined";
+}
+/** Inventory every harness variant; explicit catalog selectors override all native selectors. */
+export function normalizePackage(
+	files: SkillFile[],
+	fallbackName: string,
+	inline: Record<string, unknown> = {},
+): NormalizedPackage {
+	validatePackageFiles(files);
+	const roots = PLUGIN_MANIFESTS.filter((path) =>
+		files.some((f) => f.path === path),
+	);
+	const scopes = roots.length
+		? roots
+		: [Object.keys(inline).length ? "@catalog" : "@directory"];
+	const result: NormalizedPackage = {
+		name: fallbackName,
+		description: "",
+		components: [],
+		diagnostics: [],
+		manifests: {},
+	};
+	for (const manifest of scopes) {
+		const nativePath = manifest.startsWith("@") ? undefined : manifest;
+		const effective = normalizeManifest(
+			files,
+			fallbackName,
+			inline,
+			nativePath,
+		);
+		const original = nativePath ? (effective.manifests[nativePath] ?? {}) : {};
+		const harness: ExtensionComponentSource["harness"] = manifest.startsWith(
+			".claude-plugin/",
+		)
+			? "claude"
+			: manifest.startsWith(".codex-plugin/")
+				? "codex"
+				: manifest === "@catalog"
+					? "catalog"
+					: manifest === "@directory"
+						? "directory"
+						: "portable";
+		const sourceFor = (
+			component: ExtensionComponent,
+			active: boolean,
+		): ExtensionComponentSource => {
+			const declaration = declarationFor(component);
+			return {
+				manifest,
+				harness,
+				declaration,
+				...(component.path ? { configPath: component.path } : {}),
+				...(selectors(original.skills) !== undefined
+					? { skillPaths: selectors(original.skills) }
+					: {}),
+				...(selectors(inline.skills) !== undefined
+					? { catalogSkillPaths: selectors(inline.skills) }
+					: {}),
+				...(typeof inline.strict === "boolean"
+					? { catalogStrict: inline.strict }
+					: {}),
+				...(declaration in inline ? { overriddenBy: "@catalog" as const } : {}),
+				effective: active,
+			};
+		};
+		const append = (component: ExtensionComponent, active: boolean) => {
+			const source = sourceFor(component, active);
+			result.components.push({
+				...component,
+				id: `${harness}:${manifest}:${active ? "effective" : "superseded"}:${component.id}`,
+				sources: [source],
+			});
+		};
+		for (const component of effective.components) append(component, true);
+		result.diagnostics.push(...effective.diagnostics);
+		Object.assign(result.manifests, effective.manifests);
+		if (result.name === fallbackName) result.name = effective.name;
+		if (!result.description) result.description = effective.description;
+		// Inspect every original declaration even when an inline override supersedes it.
+		// Keep superseded non-Skill declarations reviewable; Skill siblings stay excluded.
+		if (nativePath && Object.keys(inline).length) {
+			const raw = normalizeManifest(files, fallbackName, {}, nativePath);
+			Object.assign(result.manifests, raw.manifests);
+			result.diagnostics.push(
+				...raw.diagnostics.filter((d) => d.severity === "error"),
+			);
+			for (const component of raw.components) {
+				const field = declarationFor(component);
+				if (component.kind === "skill" || !(field in inline)) continue;
+				if (
+					effective.components.some(
+						(c) =>
+							c.kind === component.kind &&
+							c.name === component.name &&
+							canonicalDefinition(c.definition) ===
+								canonicalDefinition(component.definition),
+					)
+				)
+					continue;
+				const diagnostic: ExtensionDiagnostic = {
+					code: "superseded-declaration",
+					message:
+						"Declaração original preservada para revisão; o catálogo a substitui neste item.",
+					severity: "info",
+					path: component.path ?? field,
+				};
+				result.diagnostics.push(diagnostic);
+				append(
+					{ ...component, diagnostics: [...component.diagnostics, diagnostic] },
+					false,
+				);
+			}
+		}
+	}
+	const signatures = new Map(
+		result.components.map((component) => {
+			let definition: unknown = component.definition;
+			if (component.kind === "skill" && component.path) {
+				const root = dirname(component.path);
+				const prefix = root === "." ? "" : `${root}/`;
+				definition = [
+					definition,
+					files
+						.filter((file) => file.path.startsWith(prefix))
+						.map((file) => ({ ...file, path: file.path.slice(prefix.length) })),
+				];
+			}
+			return [
+				component.id,
+				createHash("sha256")
+					.update(canonicalDefinition(definition))
+					.digest("hex"),
+			];
+		}),
+	);
+	// Conflicts are review warnings, not installation failures or cross-harness incompatibility.
+	for (const component of result.components) {
+		if (!component.sources[0].effective || component.kind === "hook") continue;
+		const peers = result.components.filter(
+			(other) =>
+				other !== component &&
+				other.sources[0].effective &&
+				other.kind === component.kind &&
+				other.name === component.name &&
+				signatures.get(other.id) !== signatures.get(component.id),
+		);
+		if (!peers.length) continue;
+		const diagnostic: ExtensionDiagnostic = {
+			code: "component-conflict",
+			message:
+				"Há definições diferentes com o mesmo nome; selecione a variante pela origem e pelo agente.",
+			severity: "warning",
+			path: component.path,
+			componentId: component.id,
+		};
+		component.diagnostics.push(diagnostic);
+		result.diagnostics.push(diagnostic);
+	}
+	result.diagnostics = result.diagnostics.filter(
+		(diagnostic, index, list) =>
+			list.findIndex(
+				(other) =>
+					canonicalDefinition(other) === canonicalDefinition(diagnostic),
+			) === index,
+	);
+	return result;
 }
