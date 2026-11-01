@@ -19,9 +19,10 @@ import type {
 } from "@modelcontextprotocol/sdk/shared/auth.js";
 import { checkResourceAllowed } from "@modelcontextprotocol/sdk/shared/auth-utils.js";
 import type { FetchLike } from "@modelcontextprotocol/sdk/shared/transport.js";
-import type {
-	McpConnectionStatus,
-	McpServerDefinition,
+import {
+	MCP_OAUTH_REGISTERED_REDIRECT_URI,
+	type McpConnectionStatus,
+	type McpServerDefinition,
 } from "../../shared/mcp";
 import { fetchWithProxy } from "../net/proxy";
 import {
@@ -350,7 +351,9 @@ export class McpOAuthService {
 			d.auth.scopes ??
 			[...new Set(info.resourceMetadata?.scopes_supported ?? [])].sort();
 		if (scopes.some((s) => !s || /\s/.test(s))) throw authenticationError();
-		const callbackPath = `/oauth/callback/${randomBytes(24).toString("hex")}`;
+		const callbackPath = d.auth.clientId
+			? new URL(MCP_OAUTH_REGISTERED_REDIRECT_URI).pathname
+			: `/oauth/callback/${randomBytes(24).toString("hex")}`;
 		const server = createServer();
 		flow.server = server;
 		server.headersTimeout = 5000;

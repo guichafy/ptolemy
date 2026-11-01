@@ -453,3 +453,196 @@ describe("credential input validation", () => {
 		}
 	});
 });
+
+describe("registry publication capacity", () => {
+	class CountingVault extends MemorySecretVault {
+		writes = 0;
+		override async set(key: string, value: string): Promise<void> {
+			this.writes++;
+			await super.set(key, value);
+		}
+	}
+	const definitions = (count: number) =>
+		Array.from({ length: count }, (_, i) => ({
+			id: `server-${i}`,
+			name: `Server ${i}`,
+			transport: "stdio" as const,
+			command: "x",
+			defaults: { claude: true, codex: false },
+		}));
+	it.each([
+		"save",
+		"saveEditable",
+	] as const)("rejects a 513th entry through %s before vault or index writes", async (method) => {
+		const root = await mkdtemp(join(tmpdir(), "ptolemy-mcp-capacity-"));
+		try {
+			const path = join(root, "registry.json"),
+				legacyPath = join(root, "legacy.json"),
+				vault = new CountingVault();
+			const bytes = JSON.stringify({ version: 2, servers: definitions(512) });
+			await writeFile(path, bytes);
+			const registry = new McpRegistry({ path, legacyPath, vault });
+			const common = {
+				id: "overflow",
+				name: "Overflow",
+				transport: "stdio" as const,
+				command: "x",
+				defaults: { claude: true, codex: false },
+			};
+			const rejected =
+				method === "save"
+					? registry.save({ ...common, env: { TOKEN: "secret-probe" } })
+					: registry.saveEditable({
+							...common,
+							env: { TOKEN: { value: "secret-probe" } },
+						});
+			await expect(rejected).rejects.toThrow();
+			expect(vault.writes).toBe(0);
+			expect(await readFile(path, "utf8")).toBe(bytes);
+			expect(await registry.list()).toHaveLength(512);
+			const update = { ...definitions(1)[0] };
+			if (method === "save")
+				await registry.save({ ...update, env: { TOKEN: "allowed-probe" } });
+			else
+				await registry.saveEditable({
+					...update,
+					env: { TOKEN: { value: "allowed-probe" } },
+				});
+			expect(vault.writes).toBe(1);
+			expect(await registry.list()).toHaveLength(512);
+			expect(
+				(await registry.resolve(await registry.snapshot(["server-0"])))[0],
+			).toHaveProperty("env.TOKEN", "allowed-probe");
+			await registry.remove("server-511");
+			expect(await registry.list()).toHaveLength(511);
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+	it("rejects initial migration over capacity before vault writes or index creation", async () => {
+		const root = await mkdtemp(
+			join(tmpdir(), "ptolemy-mcp-capacity-migration-"),
+		);
+		try {
+			const path = join(root, "registry.json"),
+				legacyPath = join(root, "legacy.json"),
+				vault = new CountingVault();
+			const source = JSON.stringify({
+				version: 1,
+				servers: definitions(513).map((s) => ({
+					name: s.name,
+					command: s.command,
+					env: { TOKEN: "secret-probe" },
+				})),
+			});
+			await writeFile(legacyPath, source);
+			await expect(
+				new McpRegistry({ path, legacyPath, vault })
+					.list()
+					.then(() => undefined),
+			).rejects.toThrow();
+			expect(vault.writes).toBe(0);
+			expect(await readFile(legacyPath, "utf8")).toBe(source);
+			await expect(readFile(path)).rejects.toMatchObject({ code: "ENOENT" });
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+	it("rejects a reconciliation exceeding total shared capacity before any durable mutation", async () => {
+		const root = await mkdtemp(
+			join(tmpdir(), "ptolemy-mcp-capacity-reconcile-"),
+		);
+		try {
+			const path = join(root, "registry.json"),
+				legacyPath = join(root, "legacy.json"),
+				vault = new CountingVault();
+			const bytes = JSON.stringify({ version: 2, servers: definitions(512) });
+			await writeFile(path, bytes);
+			const source = JSON.stringify({
+				version: 1,
+				servers: [
+					{ name: "new legacy", command: "x", env: { TOKEN: "secret-probe" } },
+				],
+			});
+			await writeFile(legacyPath, source);
+			const registry = new McpRegistry({ path, legacyPath, vault });
+			await expect(registry.reconcileLegacyMigration()).rejects.toThrow();
+			expect(vault.writes).toBe(0);
+			expect(await readFile(path, "utf8")).toBe(bytes);
+			expect(await readFile(legacyPath, "utf8")).toBe(source);
+			expect(await registry.list()).toHaveLength(512);
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+	it.each([
+		"save",
+		"saveEditable",
+	] as const)("preflights %s overflow before an implicit legacy migration can write", async (method) => {
+		const root = await mkdtemp(join(tmpdir(), "ptolemy-mcp-preflight-"));
+		try {
+			const path = join(root, "registry.json"),
+				legacyPath = join(root, "legacy.json"),
+				vault = new CountingVault();
+			const source = JSON.stringify({
+				version: 1,
+				servers: definitions(512).map((s) => ({
+					name: s.name,
+					command: s.command,
+					env: { TOKEN: "legacy-probe" },
+				})),
+			});
+			await writeFile(legacyPath, source);
+			const registry = new McpRegistry({ path, legacyPath, vault });
+			const common = {
+				id: "overflow",
+				name: "Overflow",
+				transport: "stdio" as const,
+				command: "x",
+				defaults: { claude: true, codex: false },
+			};
+			await expect(
+				method === "save"
+					? registry.save(common)
+					: registry.saveEditable(common),
+			).rejects.toThrow();
+			expect(vault.writes).toBe(0);
+			expect(await readFile(legacyPath, "utf8")).toBe(source);
+			await expect(readFile(path)).rejects.toMatchObject({ code: "ENOENT" });
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+	it("validates all separately supplied credential fields before writing any of them", async () => {
+		const root = await mkdtemp(join(tmpdir(), "ptolemy-mcp-preflight-fields-"));
+		try {
+			const path = join(root, "registry.json"),
+				vault = new CountingVault();
+			const registry = new McpRegistry({
+				path,
+				legacyPath: join(root, "legacy.json"),
+				vault,
+			});
+			await registry.save({
+				id: "one",
+				name: "One",
+				transport: "http",
+				url: "https://example.com/mcp",
+				headers: { A: "old-a", B: "old-b" },
+				defaults: { claude: true, codex: false },
+			});
+			vault.writes = 0;
+			const bytes = await readFile(path, "utf8");
+			await expect(
+				registry.save(await registry.get("one"), {
+					"headers.A": "valid-probe",
+					"headers.B": "bad\r\nprobe",
+				}),
+			).rejects.toThrow();
+			expect(vault.writes).toBe(0);
+			expect(await readFile(path, "utf8")).toBe(bytes);
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+});

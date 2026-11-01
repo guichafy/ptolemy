@@ -1,3 +1,8 @@
+/** Register this native loopback URI for a pre-registered OAuth client. RFC 8252
+ * permits its port to vary; scheme, host and path remain exact across attempts. */
+export const MCP_OAUTH_REGISTERED_REDIRECT_URI =
+	"http://127.0.0.1/oauth/callback";
+
 /** Secret values only cross the backend vault boundary; snapshots contain references. */
 export interface McpSecretReference {
 	secretRef: string;
