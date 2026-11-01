@@ -5,6 +5,7 @@ import type {
 	Options,
 	PermissionMode,
 } from "@anthropic-ai/claude-agent-sdk";
+import { localMcpEnv } from "../mcp/runtime";
 import { claudeSkillsPlugin } from "../skills/workspace";
 
 const ALLOWED_TOOLS = ["Read", "Glob", "Grep", "LS"];
@@ -20,6 +21,8 @@ export interface BuildQueryArgs {
 	resumeSdkSessionId?: string;
 	/** Native paths are suppressed only when a new immutable Skill selection exists. */
 	explicitSkillSelection?: boolean;
+	explicitMcpSelection?: boolean;
+	mcpEnv?: Record<string, string>;
 }
 
 /**
@@ -28,8 +31,8 @@ export interface BuildQueryArgs {
  * Optional fields are emitted only when supplied:
  * - `permissionMode` — pass on createSession; omit on resumeSession to honour
  *   the SDK transcript's prior mode.
- * - `mcpServers` — only attached when non-empty so we don't override file-based
- *   config with `{}`.
+ * - `mcpServers` — explicit selections always attach strict config (including
+ *   empty); legacy sessions preserve native file discovery.
  * - `resume` (mapped from `resumeSdkSessionId`) — set only when continuing an
  *   existing SDK session.
  */
@@ -51,7 +54,11 @@ export function buildQueryOptions(args: BuildQueryArgs): Options {
 	if (args.permissionMode) {
 		opts.permissionMode = args.permissionMode;
 	}
-	if (Object.keys(args.mcpServers).length > 0) {
+	if (args.mcpEnv) opts.env = localMcpEnv({ ...process.env, ...args.mcpEnv });
+	if (args.explicitMcpSelection) {
+		opts.strictMcpConfig = true;
+	}
+	if (args.explicitMcpSelection || Object.keys(args.mcpServers).length > 0) {
 		opts.mcpServers = args.mcpServers;
 	}
 	if (args.resumeSdkSessionId) {

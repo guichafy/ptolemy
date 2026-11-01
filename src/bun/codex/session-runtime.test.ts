@@ -193,3 +193,35 @@ describe("CodexSessionRuntime", () => {
 		expect(calls).toHaveLength(0);
 	});
 });
+
+it("passes one owned MCP context through all turns and disposes it when the session closes", async () => {
+	const mcp = {
+		servers: {},
+		codexConfig: {},
+		env: { PTOLEMY_MCP_LOCAL: "local-token" },
+		dispose: vi.fn(async () => {}),
+	};
+	const createThread = vi.fn(
+		async (
+			_id: string | null,
+			_opts: ThreadOptions,
+			_config: Record<string, unknown>,
+			_mcp?: import("../mcp/runtime").PreparedSessionMcp,
+		) => ({
+			id: "thread",
+			async runStreamed() {
+				return {
+					events: (async function* () {
+						yield { type: "turn.completed" as const, usage };
+					})(),
+				};
+			},
+		}),
+	);
+	const { runtime } = makeRuntime({ mcp, createThread });
+	await runtime.enqueue("first");
+	await runtime.enqueue("second");
+	expect(createThread.mock.calls.map((call) => call[3])).toEqual([mcp, mcp]);
+	await runtime.close();
+	expect(mcp.dispose).toHaveBeenCalledTimes(1);
+});

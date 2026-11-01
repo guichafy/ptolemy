@@ -58,6 +58,61 @@ describe("shared MCP registry", () => {
 		});
 		await registry.finalizeLegacyMigration();
 	});
+	it("retains independent legacy provenance across new defaults, edits, reconciliation and plaintext finalization", async () => {
+		await writeFile(
+			legacyPath,
+			JSON.stringify({
+				version: 1,
+				servers: [
+					{
+						name: "old",
+						command: "old-command",
+						env: { KEY: "legacy-secret" },
+					},
+					{ name: "off", command: "off", enabled: false },
+				],
+			}),
+		);
+		const first = await registry.legacySnapshot();
+		expect(first.servers.map((s) => s.name)).toEqual(["old"]);
+		await registry.setDefaults("claude", []);
+		await registry.save({
+			...first.servers[0],
+			command: "new-command",
+			env: { KEY: "new-secret" },
+		} as never);
+		expect(await registry.legacySnapshot()).toEqual(first);
+		first.servers.length = 0;
+		expect((await registry.legacySnapshot()).servers).toHaveLength(1);
+		await registry.finalizeLegacyMigration();
+		expect(
+			(await registry.resolve(await registry.legacySnapshot()))[0],
+		).toMatchObject({ command: "old-command", env: { KEY: "legacy-secret" } });
+		await writeFile(
+			legacyPath,
+			JSON.stringify({
+				version: 1,
+				servers: [
+					{
+						name: "late",
+						command: "late-command",
+						env: { KEY: "late-secret" },
+					},
+				],
+			}),
+		);
+		await registry.reconcileLegacyMigration();
+		await registry.finalizeLegacyMigration();
+		const reloaded = new McpRegistry({ path, legacyPath, vault });
+		expect(
+			(await reloaded.resolve(await reloaded.legacySnapshot()))[0],
+		).toMatchObject({
+			name: "late",
+			command: "late-command",
+			env: { KEY: "late-secret" },
+		});
+		expect(await readFile(path, "utf8")).not.toContain("late-secret");
+	});
 	it("keeps legacy source intact when vault or persistence fails", async () => {
 		const bytes = JSON.stringify({
 			version: 1,

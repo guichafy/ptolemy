@@ -71,6 +71,9 @@ function execTurn(n: number, file: ScenarioFile, usage: ResponseUsage): string {
 		`const r = await tools.exec_command({ cmd: ${JSON.stringify(`cat ${file.name}`)}, login: false });`,
 		"text(r.output);",
 	].join("\n");
+	return scriptTurn(n, script, usage);
+}
+function scriptTurn(n: number, script: string, usage: ResponseUsage): string {
 	const item = {
 		type: "custom_tool_call",
 		id: `ctc_${n}`,
@@ -165,6 +168,22 @@ export function startMockResponsesServer(): MockResponsesServer {
 			);
 			const usage = responseUsage(cached, fresh);
 
+			const mcpMatch = lastUserText.match(
+				/PTOLEMY_MCP_CALL ([a-z0-9_]+) ([a-z0-9_]+)/,
+			);
+			if (mcpMatch) {
+				const payload =
+					toolResultsThisTurn === 0
+						? scriptTurn(
+								n,
+								`const result=await tools.mcp__${mcpMatch[1]}__${mcpMatch[2]}({});text(result);`,
+								usage,
+							)
+						: messageTurn(n, JSON.stringify(input[input.length - 1]), usage);
+				return new Response(payload, {
+					headers: { "content-type": "text/event-stream" },
+				});
+			}
 			// One `exec` call does both the write and the `cat`.
 			const step = nextMockStep({
 				lastUserText,

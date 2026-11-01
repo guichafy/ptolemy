@@ -207,6 +207,25 @@ export function startMockAnthropicServer(): MockAnthropicServer {
 			);
 			const usage = requestUsage(cached, fresh);
 
+			const mcpMatch = lastUserText.match(
+				/PTOLEMY_MCP_CALL ([a-z0-9_]+) ([a-z0-9_]+)/,
+			);
+			if (mcpMatch && body.stream) {
+				const block =
+					toolResultsThisTurn === 0
+						? {
+								type: "tool_use" as const,
+								name: `mcp__${mcpMatch[1]}__${mcpMatch[2]}`,
+								input: {},
+							}
+						: {
+								type: "text" as const,
+								text: JSON.stringify(messages[messages.length - 1]),
+							};
+				return new Response(stream(n, body.model, usage, block), {
+					headers: { "content-type": "text/event-stream" },
+				});
+			}
 			const step = nextMockStep({
 				lastUserText,
 				history: JSON.stringify(messages),

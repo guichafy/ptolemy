@@ -16,10 +16,19 @@ import type {
 	SessionInfoPatch,
 	SessionStats,
 } from "@/shared/agent-protocol";
+import type { McpSnapshot } from "@/shared/mcp";
 import type { SessionSkill, SessionSkillSelection } from "@/shared/skills";
 import { backupCorruptJson, writeJsonAtomic } from "../atomic-json";
 import { readCodexContextBreakdown } from "../codex/rollout-info";
 import { CodexSessionRuntime } from "../codex/session-runtime";
+import { mcpRegistry } from "../mcp/registry";
+import {
+	disposeSessionMcp,
+	localMcpEnv,
+	type PreparedSessionMcp,
+	prepareSessionMcp,
+} from "../mcp/runtime";
+import { publicSessionMcp } from "../mcp/session-selection";
 import { ptolemyDataDir } from "../paths";
 import { loadSettings } from "../settings";
 import { assertSkillSelectionSupport } from "../skills/runtime-support";
@@ -31,7 +40,6 @@ import {
 } from "../skills/workspace";
 import { findClaudeCli } from "./claude-cli";
 import { mapClaudeContextUsage } from "./context-breakdown";
-import { mcpLoader } from "./mcp-loader";
 import { createMessageInbox, type MessageInbox } from "./message-inbox";
 import { PermissionGate } from "./permission-gate";
 import { type Project, ProjectStore } from "./persistence/project-store";
@@ -65,6 +73,8 @@ function previewText(text: string, max = 60): string {
 // ---------------------------------------------------------------------------
 
 export interface SessionMeta {
+	/** Safe logical selection for listings; no credential references. */
+	mcpServerIds?: string[];
 	id: string;
 	/**
 	 * Agent-side conversation id: the Claude SDK session id, or the Codex
@@ -103,9 +113,14 @@ export interface SessionMeta {
  * version is anything other than 2 is discarded — the sessions tree predates
  * the project model and is not worth migrating.
  */
+interface StoredSessionMeta extends SessionMeta {
+	/** Undefined is a pre-selection legacy session; [] is an explicit frozen none. */
+	mcpSelection?: McpSnapshot;
+}
+
 export interface SessionIndex {
 	version: 2;
-	sessions: SessionMeta[];
+	sessions: StoredSessionMeta[];
 }
 
 /** Legacy format (v1): plain text content. */
@@ -181,6 +196,7 @@ const projectStore = new ProjectStore();
 // ---------------------------------------------------------------------------
 
 interface ActiveQuery {
+	mcp: PreparedSessionMcp;
 	query: Query;
 	inbox: MessageInbox;
 	streamingLoop: Promise<void> | null;
@@ -668,6 +684,7 @@ async function deactivateClaude(reason: string): Promise<void> {
 	if (prev.q.streamingLoop) {
 		await prev.q.streamingLoop.catch(() => {});
 	}
+	await prev.q.mcp.dispose();
 	if (active === prev) active = null;
 }
 
@@ -694,12 +711,40 @@ function discardPendingClaude(reason: string): void {
 	pendingNew = null;
 }
 
-function createCodexRuntime(
+async function prepareStoredSessionMcp(
+	sessionId: string,
+	cwd: string,
+	agent: AgentKind,
+): Promise<PreparedSessionMcp> {
+	const meta = (await readIndex()).sessions.find((s) => s.id === sessionId);
+	if (!meta) throw Error("Sessão não encontrada.");
+	const snapshot =
+		meta.mcpSelection ??
+		(agent === "claude"
+			? await mcpRegistry.legacySnapshot()
+			: { version: 1 as const, servers: [] });
+	const context = await prepareSessionMcp(sessionId, cwd, snapshot, agent);
+	context.explicit = meta.mcpSelection !== undefined;
+	return context;
+}
+
+/** App shutdown owns both CLI runtimes, all gateways and pending prompt streams. */
+export async function shutdownSessions(): Promise<void> {
+	discardPendingClaude("application shutdown");
+	pendingCodex = null;
+	await deactivateClaude("application shutdown");
+	await deactivateCodex("application shutdown");
+	await disposeSessionMcp();
+}
+
+async function createCodexRuntime(
 	sessionId: string,
 	cwd: string,
 	threadId: string | null,
-): CodexSessionRuntime {
+): Promise<CodexSessionRuntime> {
+	const mcp = await prepareStoredSessionMcp(sessionId, cwd, "codex");
 	return new CodexSessionRuntime({
+		mcp,
 		sessionId,
 		cwd,
 		threadId,
@@ -745,16 +790,18 @@ async function createCodexSession(
 	project: Project,
 	skills: SessionSkill[],
 	skillSelection: SessionSkillSelection,
+	mcpSelection: McpSnapshot,
 	model?: string,
 ): Promise<string> {
 	const settings = await loadSettings();
 	const now = new Date().toISOString();
-	const meta: SessionMeta = {
+	const meta: StoredSessionMeta = {
 		id,
 		sdkSessionId: "", // filled in when Codex reports thread.started
 		agent: "codex",
 		skills,
 		skillSelection,
+		mcpSelection,
 		title: generateTitle(prompt),
 		projectId: project.id,
 		projectPath: project.path,
@@ -793,9 +840,12 @@ async function createCodexSession(
  */
 export async function listSessions(): Promise<SessionMeta[]> {
 	const index = await readIndex();
-	return [...index.sessions].sort(
-		(a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
-	);
+	return index.sessions
+		.map(publicSessionMcp)
+		.sort(
+			(a, b) =>
+				new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+		);
 }
 
 /**
@@ -813,6 +863,7 @@ export async function createSession(
 		projectId?: string;
 		agent?: AgentKind;
 		skillIds?: string[];
+		mcpServerIds?: string[];
 		model?: string;
 	} = {},
 ): Promise<string> {
@@ -827,6 +878,12 @@ export async function createSession(
 			opts.model.length > 256)
 	)
 		throw new Error("Modelo inválido.");
+	const mcpSelection = await mcpRegistry.snapshot(
+		opts.mcpServerIds ??
+			(await mcpRegistry.list())
+				.filter((server) => server.defaults[opts.agent ?? "claude"])
+				.map((server) => server.id),
+	);
 	const skillIds =
 		opts.skillIds ?? (await skillsStore.defaults(opts.agent ?? "claude"));
 	// Resolve before provisioning a project or mutating the session index.
@@ -865,6 +922,7 @@ export async function createSession(
 			project,
 			skills,
 			skillSelection,
+			mcpSelection,
 			opts.model,
 		);
 	}
@@ -881,14 +939,8 @@ export async function createSession(
 
 	const claudePath = await findClaudeCli();
 	await assertSkillSelectionSupport("claude", claudePath);
-	const mcpServers = await mcpLoader.resolve();
+	const mcpServers = {};
 	const skills = await snapshotSkills(SESSIONS_DIR, id, selectedSkills);
-	const mcpNames = Object.keys(mcpServers);
-	if (mcpNames.length > 0) {
-		verbose(
-			`[claude:session] MCP servers enabled: id=${id} servers=[${mcpNames.join(",")}]`,
-		);
-	}
 
 	// Build the inbox and the first user message; do NOT start query() yet.
 	// Deferred-start (existing invariant): the chat window must be mounted
@@ -898,11 +950,12 @@ export async function createSession(
 	inbox.push(buildUserMessage(prompt));
 
 	const now = new Date().toISOString();
-	const meta: SessionMeta = {
+	const meta: StoredSessionMeta = {
 		id,
 		sdkSessionId: id, // placeholder; gets corrected by sdk-session-id capture in the streaming loop
 		skills,
 		skillSelection,
+		mcpSelection,
 		title: generateTitle(prompt),
 		projectId: project.id,
 		projectPath: project.path,
@@ -945,6 +998,7 @@ export async function createSession(
 		authMode,
 		options: buildQueryOptions({
 			explicitSkillSelection: true,
+			explicitMcpSelection: true,
 			model,
 			permissionMode,
 			claudePath,
@@ -985,7 +1039,7 @@ export async function resumeSession(sessionId: string): Promise<boolean> {
 		await deactivateClaude("switching to Codex session");
 		await deactivateCodex("session changed");
 		await activateSkills(SESSIONS_DIR, sessionId, pending.cwd, "codex");
-		const runtime = createCodexRuntime(pending.id, pending.cwd, null);
+		const runtime = await createCodexRuntime(pending.id, pending.cwd, null);
 		// Activation can fail on a workspace conflict. Retain the deferred
 		// prompt until preparation succeeds so reopening the chat can retry.
 		if (pendingCodex === pending) pendingCodex = null;
@@ -1024,14 +1078,29 @@ export async function resumeSession(sessionId: string): Promise<boolean> {
 			pendingNew.options.cwd as string,
 			"claude",
 		);
+		const mcp = await prepareStoredSessionMcp(
+			sessionId,
+			pendingNew.options.cwd as string,
+			"claude",
+		);
+		pendingNew.options.mcpServers = mcp.servers;
+		pendingNew.options.strictMcpConfig = mcp.explicit;
+		pendingNew.options.env = localMcpEnv({ ...process.env, ...mcp.env });
 		const pendingAuthMode = pendingNew.authMode;
-		const q = query({
-			prompt: pendingNew.inbox.iterable,
-			options: pendingNew.options,
-		});
+		let q: Query;
+		try {
+			q = query({
+				prompt: pendingNew.inbox.iterable,
+				options: pendingNew.options,
+			});
+		} catch {
+			await mcp.dispose();
+			throw Error("Não foi possível iniciar a sessão Claude.");
+		}
 		active = {
 			sessionId,
 			q: {
+				mcp,
 				query: q,
 				inbox: pendingNew.inbox,
 				streamingLoop: null,
@@ -1074,7 +1143,7 @@ export async function resumeSession(sessionId: string): Promise<boolean> {
 			await deactivateCodex("session changed");
 			const cwd = await resolveProjectPath(meta);
 			await activateSkills(SESSIONS_DIR, sessionId, cwd, "codex");
-			activeCodex = createCodexRuntime(
+			activeCodex = await createCodexRuntime(
 				sessionId,
 				cwd,
 				meta.sdkSessionId || null,
@@ -1093,6 +1162,7 @@ export async function resumeSession(sessionId: string): Promise<boolean> {
 	const { permissionMode } = settings.claude;
 	const authMode = meta.authMode ?? "anthropic";
 	let model = meta.model;
+	let preparedMcp: PreparedSessionMcp | undefined;
 
 	try {
 		await deactivateCodex("switching to Claude session");
@@ -1111,14 +1181,16 @@ export async function resumeSession(sessionId: string): Promise<boolean> {
 			if (active.q.streamingLoop) {
 				await active.q.streamingLoop.catch(() => {});
 			}
+			await active.q.mcp.dispose();
 			active = null;
 		}
 
 		const claudePath = await findClaudeCli();
 		if (meta.skillSelection !== undefined)
 			await assertSkillSelectionSupport("claude", claudePath);
-		const mcpServers = await mcpLoader.resolve();
 		const cwd = await resolveProjectPath(meta);
+		const mcp = await prepareStoredSessionMcp(sessionId, cwd, "claude");
+		preparedMcp = mcp;
 		await activateSkills(SESSIONS_DIR, sessionId, cwd, "claude");
 
 		// Downgrade silently when meta.model has been retired.
@@ -1141,18 +1213,20 @@ export async function resumeSession(sessionId: string): Promise<boolean> {
 			prompt: inbox.iterable,
 			options: buildQueryOptions({
 				explicitSkillSelection: meta.skillSelection !== undefined,
+				explicitMcpSelection: mcp.explicit,
+				mcpEnv: mcp.env,
 				model,
 				permissionMode,
 				claudePath,
 				canUseTool: buildCanUseTool(sessionId, cwd),
-				mcpServers,
+				mcpServers: mcp.servers,
 				cwd,
 				resumeSdkSessionId: meta.sdkSessionId,
 			}),
 		});
 		active = {
 			sessionId,
-			q: { query: q, inbox, streamingLoop: null, turnCompletionQueue: [] },
+			q: { mcp, query: q, inbox, streamingLoop: null, turnCompletionQueue: [] },
 		};
 		permissionGate.clearWhitelist(sessionId);
 		void primeModelsCacheFromQuery(q, authMode);
@@ -1162,6 +1236,7 @@ export async function resumeSession(sessionId: string): Promise<boolean> {
 		);
 		return startLoopForActive(sessionId);
 	} catch (err) {
+		await preparedMcp?.dispose();
 		console.error("[claude:session] resumeSession failed:", err);
 		return false;
 	}
@@ -1345,6 +1420,7 @@ export async function deleteSession(sessionId: string): Promise<boolean> {
 		if (active.q.streamingLoop) {
 			await active.q.streamingLoop.catch(() => {});
 		}
+		await active.q.mcp.dispose();
 		active = null;
 	}
 	if (activeCodex && activeCodex.sessionId === sessionId) {

@@ -4,6 +4,12 @@ import type {
 	MessagePersister,
 	StreamMessageSender,
 } from "../claude/streaming";
+import {
+	buildCodexMcpOverrides,
+	inheritedCodexMcpNames,
+	localMcpEnv,
+	type PreparedSessionMcp,
+} from "../mcp/runtime";
 import type { CodexReasoningEffort, CodexSandboxMode } from "../settings";
 import { assertSkillSelectionSupport } from "../skills/runtime-support";
 import { buildCodexEnv, findCodexCli } from "./codex-cli";
@@ -20,6 +26,7 @@ export interface CodexTurnConfig {
 
 export interface CodexRuntimeDeps {
 	sessionId: string;
+	mcp?: PreparedSessionMcp;
 	/** Conversation project directory: Codex's working dir and sandbox root. */
 	cwd: string;
 	/** Codex thread id from a previous run, or null for a brand-new thread. */
@@ -40,6 +47,7 @@ export interface CodexRuntimeDeps {
 		threadId: string | null,
 		options: ThreadOptions,
 		config: NonNullable<CodexOptions["config"]>,
+		mcp?: PreparedSessionMcp,
 	) => Promise<CodexThreadLike>;
 }
 
@@ -74,16 +82,25 @@ async function defaultCreateThread(
 	threadId: string | null,
 	options: ThreadOptions,
 	config: NonNullable<CodexOptions["config"]>,
+	mcp?: PreparedSessionMcp,
 ): Promise<CodexThreadLike> {
 	// Imported lazily so the SDK (and its CLI lookup) only loads when a Codex
 	// session actually runs.
 	const { Codex } = await import("@openai/codex-sdk");
 	const cliPath = await findCodexCli();
-	const env = await buildCodexEnv();
+	const env = localMcpEnv({ ...(await buildCodexEnv()), ...mcp?.env });
+	const configOverrides =
+		mcp && mcp.explicit !== false
+			? buildCodexMcpOverrides(
+					mcp.codexConfig,
+					await inheritedCodexMcpNames(cliPath, options.workingDirectory!, env),
+				)
+			: undefined;
 	if (config.skills)
 		await assertSkillSelectionSupport("codex", cliPath, undefined, env);
 	const codex = new Codex({
 		config,
+		configOverrides,
 		codexPathOverride: cliPath,
 		env,
 	});
@@ -148,6 +165,7 @@ export class CodexSessionRuntime {
 				this.currentThreadId,
 				options,
 				skillConfig,
+				this.deps.mcp,
 			);
 			await runCodexTurn({
 				thread,
@@ -206,5 +224,6 @@ export class CodexSessionRuntime {
 		this.closed = true;
 		this.controller?.abort();
 		await this.chain.catch(() => {});
+		await this.deps.mcp?.dispose();
 	}
 }
