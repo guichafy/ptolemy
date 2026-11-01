@@ -204,7 +204,6 @@ describe("Ptolemy Screenshots", () => {
 		const skills = await driver.$(
 			'//XCUIElementTypeButton[@label="Configurar Skills" or @title="Configurar Skills"]',
 		);
-		await skills.waitForEnabled({ timeout: Timing.RESULTS_WAIT });
 		await clickPaletteElement(skills);
 		const picker = await waitForResults(
 			driver,
