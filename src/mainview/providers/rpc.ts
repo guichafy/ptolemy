@@ -3,6 +3,7 @@ import type {
 	AgentEvent,
 	AgentKind,
 	ContextUsageInfo,
+	SessionStats,
 } from "@/shared/agent-protocol";
 
 export type GitHubSearchType = "repos" | "code" | "issues" | "users";
@@ -213,6 +214,8 @@ export interface SessionMeta {
 	resolvedModel?: string;
 	/** Context window usage after the last turn. */
 	contextUsage?: ContextUsageInfo;
+	/** Conversation totals (cost, compactions). */
+	stats?: SessionStats;
 }
 
 /** Block type for stored messages. */

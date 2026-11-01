@@ -29,6 +29,7 @@ import { ModelPicker } from "@/components/claude/model-picker";
 import type { ProtocolModelInfo } from "@/shared/agent-protocol";
 import { computeTurnStatus, type SessionState } from "../../hooks/agent-state";
 import { useAgentChat } from "../../hooks/use-agent-chat";
+import { describeModel } from "../../lib/model-label";
 import { onAgentEvent, onOpenSession, rpc } from "../../rpc";
 import { ChatHeader } from "../chat-header";
 import { AgentMessageView } from "./agent-message";
@@ -168,6 +169,14 @@ export function ChatPaneV2() {
 		[state.pendingPermissions],
 	);
 	const agentName = agent === "codex" ? "Codex" : "Claude";
+	const sessionModelInfo = describeModel(
+		state.sessionModel,
+		state.resolvedModel,
+		models,
+	);
+	const sessionModelLabel = sessionModelInfo?.isAlias
+		? sessionModelInfo.primary
+		: null;
 	const isEmpty = state.messages.length === 0 && !state.currentMessage;
 
 	return (
@@ -179,6 +188,7 @@ export function ChatPaneV2() {
 				sessionModel={state.sessionModel}
 				resolvedModel={state.resolvedModel}
 				contextUsage={state.contextUsage}
+				stats={state.stats}
 				models={models}
 			/>
 			{agent === "claude" && <PlanModeBanner />}
@@ -289,6 +299,7 @@ export function ChatPaneV2() {
 									}
 									disabled={state.sessionState !== "idle" || !sessionId}
 									placeholder="Modelo do turno"
+									resolvedLabel={overrideModel ? null : sessionModelLabel}
 								/>
 							</PromptInputTools>
 							<PromptInputSubmit

@@ -346,8 +346,15 @@ function scenario(agent: AgentKind, other: AgentKind) {
 			expect(infoIdx).toBeGreaterThan(-1);
 			expect(infoIdx).toBeLessThan(all.findIndex((e) => e.type === "finish"));
 			console.log(
-				`[it] ${agent} session-info: model=${meta.resolvedModel} context=${JSON.stringify(meta.contextUsage ?? null)}`,
+				`[it] ${agent} session-info: model=${meta.resolvedModel} context=${JSON.stringify(meta.contextUsage ?? null)} stats=${JSON.stringify(meta.stats ?? null)}`,
 			);
+			const details = await sm.getContextBreakdown(state.id);
+			console.log(`[it] ${agent} breakdown: ${JSON.stringify(details)}`);
+			expect(details.ok).toBe(true);
+			if (details.ok) {
+				expect(details.breakdown.usedTokens).toBeGreaterThan(0);
+				expect(details.breakdown.categories.length).toBeGreaterThan(0);
+			}
 			state.sdkId = meta.sdkSessionId;
 			expect(state.sdkId).not.toBe("");
 			expect(state.sdkId).not.toBe(state.id);

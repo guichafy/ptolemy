@@ -1,5 +1,9 @@
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import type { AgentEvent, SessionInfoPatch } from "@/shared/agent-protocol";
+import type {
+	AgentEvent,
+	SessionInfoPatch,
+	SessionStats,
+} from "@/shared/agent-protocol";
 import {
 	buildAgentEvents,
 	createEventMapperContext,
@@ -76,6 +80,8 @@ export interface StreamingHooks {
 	onSdkSessionId?: (sdkSessionId: string) => void;
 	/** Fires when the resolved model or the context usage changes. */
 	onSessionInfo?: (patch: SessionInfoPatch) => void;
+	/** Persisted conversation totals the tracker continues from. */
+	loadStats?: () => Promise<SessionStats | undefined>;
 }
 
 // ---------------------------------------------------------------------------
@@ -273,7 +279,16 @@ export async function startStreamingLoop(
 	let chunkCount = 0;
 	let resultCount = 0;
 	const mapperCtx: EventMapperContext = createEventMapperContext();
-	const infoTracker = createSessionInfoTracker();
+	let initialStats: SessionStats | undefined;
+	try {
+		initialStats = await hooks.loadStats?.();
+	} catch (err) {
+		console.warn(
+			`[claude:stream] loadStats failed: sessionId=${sessionId}`,
+			err,
+		);
+	}
+	const infoTracker = createSessionInfoTracker(initialStats);
 
 	function publishSessionInfo(patch: SessionInfoPatch | null): void {
 		if (!patch) return;

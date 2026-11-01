@@ -11,6 +11,7 @@ import type {
 	AgentKind,
 	ContextUsageInfo,
 	SessionInfoPatch,
+	SessionStats,
 	TokenUsage,
 } from "@/shared/agent-protocol";
 
@@ -118,6 +119,8 @@ export interface AgentState {
 	resolvedModel: string | null;
 	/** Context window usage after the last turn. */
 	contextUsage: ContextUsageInfo | null;
+	/** Conversation totals: cost, compactions. */
+	stats: SessionStats | null;
 }
 
 export function initialAgentState(): AgentState {
@@ -137,6 +140,7 @@ export function initialAgentState(): AgentState {
 		sessionAgent: null,
 		resolvedModel: null,
 		contextUsage: null,
+		stats: null,
 	};
 }
 
@@ -158,6 +162,7 @@ export function reduceAgentState(
 				sessionAgent: state.sessionAgent,
 				resolvedModel: state.resolvedModel,
 				contextUsage: state.contextUsage,
+				stats: state.stats,
 			};
 
 		case "session-state-change":
@@ -366,13 +371,15 @@ export function applySessionInfo(
 ): AgentState {
 	const resolvedModel = info.resolvedModel ?? state.resolvedModel;
 	const contextUsage = info.contextUsage ?? state.contextUsage;
+	const stats = info.stats ?? state.stats;
 	if (
 		resolvedModel === state.resolvedModel &&
-		contextUsage === state.contextUsage
+		contextUsage === state.contextUsage &&
+		stats === state.stats
 	) {
 		return state;
 	}
-	return { ...state, resolvedModel, contextUsage };
+	return { ...state, resolvedModel, contextUsage, stats };
 }
 
 /**

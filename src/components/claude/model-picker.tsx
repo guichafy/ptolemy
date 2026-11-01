@@ -66,7 +66,17 @@ export function ModelPicker({
 	const current = models.find((m) => m.value === value) ?? null;
 	const showClear =
 		variant === "turn-override" && value != null && value !== sessionDefault;
-	const triggerLabel = current?.displayName ?? value ?? placeholder;
+	const configuredLabel = current?.displayName ?? value ?? placeholder;
+	// An alias (`default`, `sonnet`...) shows the concrete model as the label
+	// and the alias as a small tag, so the button says what actually runs.
+	const showsResolved = Boolean(
+		resolvedLabel && resolvedLabel !== configuredLabel,
+	);
+	const triggerLabel = showsResolved
+		? (resolvedLabel as string)
+		: configuredLabel;
+	const aliasTag =
+		value === "default" ? "padrão" : (current?.displayName ?? value);
 
 	const handleSelect = (modelValue: string) => {
 		onChange(modelValue);
@@ -91,15 +101,15 @@ export function ModelPicker({
 						className={cn("min-w-0 gap-1", triggerSizing)}
 						aria-label={placeholder}
 						title={
-							resolvedLabel && resolvedLabel !== triggerLabel
-								? `${triggerLabel} (${resolvedLabel})`
-								: triggerLabel
+							showsResolved
+								? `${configuredLabel}: usando ${triggerLabel}`
+								: configuredLabel
 						}
 					>
 						<span className="truncate">{triggerLabel}</span>
-						{resolvedLabel && resolvedLabel !== triggerLabel && (
-							<span className="truncate font-normal text-muted-foreground">
-								· {resolvedLabel}
+						{showsResolved && (
+							<span className="shrink-0 rounded border border-border/80 px-1 py-px font-normal text-[9px] text-muted-foreground uppercase leading-none tracking-wide">
+								{aliasTag}
 							</span>
 						)}
 						<ChevronDownIcon className="size-3 shrink-0 opacity-60" />
@@ -123,7 +133,9 @@ export function ModelPicker({
 											<span className="text-[10px] text-muted-foreground">
 												{[
 													m.description,
-													m.resolvesTo && `atual: ${m.resolvesTo}`,
+													m.value === value && showsResolved
+														? `agora: ${resolvedLabel}`
+														: m.resolvesTo && `atual: ${m.resolvesTo}`,
 												]
 													.filter(Boolean)
 													.join(" · ")}

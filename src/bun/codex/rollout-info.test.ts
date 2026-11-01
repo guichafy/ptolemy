@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+	estimateCodexBreakdown,
 	findRolloutFile,
 	parseConfiguredModel,
 	parseRolloutInfo,
@@ -44,10 +45,12 @@ describe("parseRolloutInfo", () => {
 	it("takes the last turn model and the last request usage", () => {
 		expect(parseRolloutInfo(ROLLOUT, fixedNow)).toEqual({
 			resolvedModel: "gpt-6-astra",
+			stats: { compactions: 0 },
 			contextUsage: {
 				usedTokens: 12500,
 				maxTokens: 272000,
-				inputTokens: 12000,
+				// OpenAI's input includes the cache; normalized to exclude it.
+				inputTokens: 4000,
 				outputTokens: 500,
 				cacheReadTokens: 8000,
 				reasoningTokens: 120,
@@ -60,6 +63,72 @@ describe("parseRolloutInfo", () => {
 		expect(parseRolloutInfo(line({ type: "session_meta", payload: {} }))).toBe(
 			null,
 		);
+	});
+});
+
+describe("compactions and breakdown", () => {
+	const msg = (role: string, text: string) =>
+		line({
+			type: "response_item",
+			payload: {
+				type: "message",
+				role,
+				content: [{ type: "input_text", text }],
+			},
+		});
+	const text = [
+		msg("user", "x".repeat(4000)),
+		line({
+			timestamp: "2026-11-01T09:00:00.000Z",
+			type: "compacted",
+			payload: { message: "y".repeat(400) },
+		}),
+		msg("user", "<environment_context>cwd</environment_context>"),
+		msg("user", "a".repeat(800)),
+		msg("assistant", "b".repeat(1600)),
+		line({
+			type: "response_item",
+			payload: {
+				type: "function_call",
+				name: "shell",
+				call_id: "c1",
+				arguments: "{}",
+			},
+		}),
+		line({
+			type: "response_item",
+			payload: {
+				type: "function_call_output",
+				call_id: "c1",
+				output: "z".repeat(2000),
+			},
+		}),
+		ROLLOUT,
+	].join("\n");
+
+	it("counts compactions", () => {
+		expect(parseRolloutInfo(text, fixedNow)?.stats).toEqual({
+			compactions: 1,
+			lastCompaction: { at: "2026-11-01T09:00:00.000Z" },
+		});
+	});
+
+	it("estimates the slices since the last compaction", () => {
+		const usage = parseRolloutInfo(text, fixedNow)?.contextUsage;
+		const b = estimateCodexBreakdown(text, usage, "gpt-6-astra");
+		expect(b?.source).toBe("codex-estimate");
+		const byName = Object.fromEntries(
+			(b?.categories ?? []).map((c) => [c.name, c.tokens]),
+		);
+		// The 4000-char message before the compaction is gone.
+		expect(byName["Mensagens do usuário"]).toBe(200);
+		expect(byName["Respostas do agente"]).toBe(400);
+		expect(byName["Resumo da compactação"]).toBe(100);
+		expect(byName["Ambiente e AGENTS.md"]).toBeGreaterThan(0);
+		// Slices add up to the usage Codex reported.
+		const sum = (b?.categories ?? []).reduce((a, c) => a + c.tokens, 0);
+		expect(sum).toBe(12500);
+		expect(b?.sections[0].items[0].name).toBe("shell");
 	});
 });
 

@@ -3,9 +3,11 @@ import type {
 	AgentEvent,
 	AgentKind,
 	ApproveBehavior,
+	ContextBreakdown,
 	ContextUsageInfo,
 	ClaudeAuthMode as ProtocolClaudeAuthMode,
 	ProtocolModelInfo,
+	SessionStats,
 } from "@/shared/agent-protocol";
 import { AgentEventBuffer } from "./lib/agent-event-buffer";
 
@@ -160,6 +162,8 @@ export interface SessionMeta {
 	resolvedModel?: string;
 	/** Context window usage after the last turn. */
 	contextUsage?: ContextUsageInfo;
+	/** Conversation totals (cost, compactions). */
+	stats?: SessionStats;
 }
 
 /** Block type for stored messages. */
@@ -277,6 +281,12 @@ interface PtolemyRPCSchema extends ElectrobunRPCSchema {
 					ok: boolean;
 					reason?: "session-not-found" | "session-busy" | "sdk-error";
 				};
+			};
+			agentGetContextBreakdown: {
+				params: { sessionId: string };
+				response:
+					| { ok: true; breakdown: ContextBreakdown }
+					| { ok: false; reason: string };
 			};
 			claudeOpenChat: {
 				params: { sessionId?: string };
