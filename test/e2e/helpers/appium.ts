@@ -140,7 +140,7 @@ export async function selectProvider(
 	driver: WebdriverIO.Browser,
 	provider: ProviderId,
 ): Promise<void> {
-	await ensurePaletteVisible(driver);
+	await ensurePaletteInteractive(driver);
 	const labels: Record<ProviderId, string> = {
 		apps: "Apps",
 		github: "GitHub",
@@ -154,7 +154,7 @@ export async function selectProvider(
 	);
 	await clickPaletteElement(button);
 	await wait(Timing.POST_TAB);
-	await ensurePaletteVisible(driver);
+	await ensurePaletteInteractive(driver);
 	if (provider !== "claude") {
 		// Clicking a mode leaves keyboard focus on its button. Refocus the
 		// search field before typing instead of relying on the previous DOM.
@@ -163,22 +163,35 @@ export async function selectProvider(
 	}
 }
 
-/** Read the webview's screen coordinates, which move far offscreen on hide. */
-async function ensurePaletteVisible(
+/** Electrobun v1.16 mirrors native webviews out of the AX tree when the
+ * pointer leaves their rendered layer, including after centered resizes.
+ * See nativeWrapper.mm toggleMirrorMode/updateActiveWebviewForMousePosition.
+ * Check the real CGWindow's visibility, then move inside it before AX queries. */
+async function ensurePaletteInteractive(
 	driver: WebdriverIO.Browser,
 ): Promise<void> {
-	for (let attempt = 0; attempt < 3; attempt++) {
+	for (let attempt = 0; attempt < 6; attempt++) {
+		const native = execFileSync(compileSwiftHelper(), ["prepare"])
+			.toString()
+			.trim();
+		if (native === "hidden") {
+			activateWindow();
+			await wait(Timing.SETTLE_LOCAL);
+			continue;
+		}
+		await wait(200);
 		const source = await driver.getPageSource();
 		const webview = source.match(/<XCUIElementTypeWebView\b[^>]*>/)?.[0];
 		const x = Number(webview?.match(/\bx="([^"]+)"/)?.[1]);
 		const y = Number(webview?.match(/\by="([^"]+)"/)?.[1]);
-		console.log(`[e2e] palette visibility attempt=${attempt} x=${x} y=${y}`);
+		console.log(`[e2e] palette ${native} AX x=${x} y=${y}`);
 		if (Number.isFinite(x) && Number.isFinite(y) && x > -10_000 && y > -10_000)
 			return;
-		activateWindow();
-		await wait(Timing.SETTLE_LOCAL);
+		await wait(Timing.POST_TAB);
 	}
-	throw new Error("A paleta continua oculta após o atalho global.");
+	throw new Error(
+		"A paleta não tornou os controles acessíveis após posicionar o ponteiro.",
+	);
 }
 
 export function saveNativeWindowLog(): void {
@@ -202,8 +215,7 @@ export function saveNativeWindowLog(): void {
 	}
 }
 
-/** XCTest element.click can activate another native window and hide overlays.
- * Use the observed AX rect with CGEvents, as for the existing global hotkey. */
+/** Click the observed AX rect after restoring Electrobun's interactive layer. */
 export async function clickPaletteElement(
 	element: ChainablePromiseElement,
 ): Promise<void> {
@@ -266,6 +278,27 @@ case "activate":
     let up = CGEvent(keyboardEventSource: nil, virtualKey: 49, keyDown: false)!
     up.flags = [.maskCommand, .maskShift]
     up.post(tap: .cghidEventTap)
+
+case "prepare":
+    let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String:Any]] ?? []
+    var found = false
+    for window in windows {
+        guard (window["kCGWindowOwnerName"] as? String) == "ptolemy-dev",
+              (window["kCGWindowAlpha"] as? Double ?? 0) > 0,
+              let bounds = window["kCGWindowBounds"] as? [String:Any],
+              let x = bounds["X"] as? Double, let y = bounds["Y"] as? Double,
+              let width = bounds["Width"] as? Double, let height = bounds["Height"] as? Double,
+              width >= 600, height >= 100 else { continue }
+        // Owner + bounds also work without Screen Recording permission,
+        // which may omit kCGWindowName. Ignore the app's small tray window.
+        let point = CGPoint(x: x + width / 2, y: y + height / 2)
+        let move = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left)!
+        move.post(tap: .cghidEventTap)
+        print("visible x=\\(x) y=\\(y) w=\\(width) h=\\(height)")
+        found = true
+        break
+    }
+    if !found { print("hidden") }
 
 case "click":
     guard args.count >= 4, let x = Double(args[2]), let y = Double(args[3]) else { exit(1) }
