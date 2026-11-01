@@ -10,13 +10,13 @@ describe("describeTool", () => {
 
 	it("summarizes file tools with a short path", () => {
 		expect(describeTool("Edit", { file_path: "/a/b/c/d/e.ts" }).subtitle).toBe(
-			"…/c/d/e.ts",
+			"…/d/e.ts",
 		);
 		expect(
 			describeTool("ApplyPatch", {
 				changes: [{ path: "/x/y/z/a.ts" }, { path: "/x/b.ts" }],
 			}).subtitle,
-		).toBe("…/y/z/a.ts +1");
+		).toBe("…/z/a.ts +1");
 	});
 
 	it("counts completed plan items", () => {
@@ -44,6 +44,11 @@ describe("describeTool", () => {
 describe("shortPath", () => {
 	it("keeps short paths and trims long ones", () => {
 		expect(shortPath("src/a.ts")).toBe("src/a.ts");
-		expect(shortPath("/Users/me/p/src/a.ts")).toBe("…/p/src/a.ts");
+		expect(shortPath("/Users/me/p/src/a.ts")).toBe("…/src/a.ts");
+		expect(
+			shortPath(
+				"/x/projects/crie-o-arquivo-ola-codex-txt-na-pasta-at-7c338d/ola.txt",
+			),
+		).toBe("…/crie-o-arquivo-ola-code…/ola.txt");
 	});
 });

@@ -4,6 +4,7 @@
 		"includes": [
 			"src/**",
 			"test/**",
+			"!test/e2e-chat/.dist",
 			"vite.config.ts",
 			"vitest.config.e2e.ts",
 			"biome.json",

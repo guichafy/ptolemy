@@ -52,3 +52,4 @@ vite.config.ts.timestamp-*
 .superpowers/
 docs/superpowers/
 .superpowers/
+test/e2e-chat/.dist/

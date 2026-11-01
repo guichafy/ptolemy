@@ -2,7 +2,7 @@ export const SITE = {
 	name: "Ptolemy",
 	tagline: "Seu dia a dia a um atalho de distância",
 	description:
-		"Um app leve que mora na barra de menu do Mac. Abra aplicativos, faça contas, pesquise na web e converse com o Claude sem tirar as mãos do teclado.",
+		"Um app leve que mora na barra de menu do Mac. Abra aplicativos, faça contas, pesquise na web e converse com o Claude ou o Codex sem tirar as mãos do teclado.",
 	githubUrl: "https://github.com/guichafy/ptolemy",
 	releasesUrl: "https://github.com/guichafy/ptolemy/releases",
 	hotkey: "⌘ + Shift + Space",
@@ -15,7 +15,7 @@ export type Plugin = {
 	tagline: string;
 	description: string;
 	example: string;
-	icon: "apps" | "github" | "calc" | "web" | "claude";
+	icon: "apps" | "github" | "calc" | "web" | "claude" | "codex";
 	/** Rótulo opcional para plugins de nicho, exibido como selo no card. */
 	audience?: string;
 };
@@ -55,9 +55,19 @@ export const PLUGINS: readonly Plugin[] = [
 		name: "Claude",
 		tagline: "Um assistente de IA sempre à mão",
 		description:
-			"Abra uma conversa com o Claude numa janela própria para resumir um texto, revisar um e-mail ou tirar uma dúvida. As conversas ficam salvas para você retomar depois.",
+			"Abra uma conversa com o Claude numa janela própria para resumir um texto, revisar um e-mail ou tirar uma dúvida. Você vê o modelo em uso, quanto do contexto já foi ocupado e o custo da conversa. As conversas ficam salvas para você retomar depois.",
 		example: "Nova conversa → janela de chat",
 		icon: "claude",
+	},
+	{
+		id: "codex",
+		name: "Codex",
+		tagline: "O agente da OpenAI na mesma janela",
+		description:
+			"Prefere o Codex? Ative o plugin e converse com ele na mesma janela de chat, com os mesmos recursos. Cada conversa trabalha numa pasta própria, isolada do resto do Mac.",
+		example: "Nova conversa → Codex",
+		icon: "codex",
+		audience: "Opcional",
 	},
 	{
 		id: "github",
@@ -95,8 +105,8 @@ export const USE_CASES: readonly UseCase[] = [
 	},
 	{
 		title: "Para quem programa",
-		body: "Além do básico, um plugin de busca no GitHub com filtros salvos e uma janela do Claude Code com sessões isoladas, MCP servers e suporte a Bedrock.",
-		examples: ["Buscar repositórios", "Sessões do Claude Code"],
+		body: "Além do básico, um plugin de busca no GitHub com filtros salvos e uma janela de agentes (Claude Code ou Codex) com sessões isoladas, MCP servers, suporte a Bedrock e o detalhamento da janela de contexto.",
+		examples: ["Buscar repositórios", "Sessões do Claude Code e do Codex"],
 	},
 ] as const;
 
@@ -132,7 +142,7 @@ export type Faq = {
 export const FAQ: readonly Faq[] = [
 	{
 		q: "Preciso saber programar para usar?",
-		a: "Não. Basta baixar, arrastar para a pasta Aplicativos e apertar ⌘ + Shift + Space. Apps, Calculadora, Busca Web e Claude funcionam para qualquer pessoa; o plugin do GitHub é opcional.",
+		a: "Não. Basta baixar, arrastar para a pasta Aplicativos e apertar ⌘ + Shift + Space. Apps, Calculadora, Busca Web e Claude funcionam para qualquer pessoa; os plugins do GitHub e do Codex são opcionais.",
 	},
 	{
 		q: "Quanto custa?",
@@ -147,8 +157,74 @@ export const FAQ: readonly Faq[] = [
 		a: "Uma conta no Claude. Nas preferências do plugin, o próprio Ptolemy instala a ferramenta de linha de comando do Claude e abre a tela de login para você. Quem usa AWS também pode conectar um perfil do Bedrock.",
 	},
 	{
+		q: "Posso usar o Codex em vez do Claude?",
+		a: "Pode. Ative o plugin Codex nas preferências; o Ptolemy usa o Codex CLI já instalado e o login dele (conta do ChatGPT ou chave de API). A janela de chat é a mesma, e cada conversa trabalha numa pasta própria, sem acesso ao resto do Mac.",
+	},
+	{
+		q: "Como sei quanto do contexto já foi usado e quanto a conversa custou?",
+		a: "O indicador no topo do chat mostra a porcentagem da janela de contexto ocupada. Passe o mouse para ver o custo do último turno, o custo total da conversa e quantas compactações já aconteceram; clique para ver o que ocupa o contexto (prompt do sistema, ferramentas, arquivos de memória, mensagens). O Codex não informa custo, então para ele o detalhamento é uma estimativa.",
+	},
+	{
 		q: "Posso esconder as ferramentas que não uso?",
 		a: "Sim. Nas preferências você ativa, desativa e reordena os plugins. Quem não programa pode simplesmente desligar o GitHub.",
+	},
+] as const;
+
+export type ChatFeature = {
+	title: string;
+	body: string;
+};
+
+/** What the agent chat shows, for the "Chat" section of the landing page. */
+export const CHAT_FEATURES: readonly ChatFeature[] = [
+	{
+		title: "Claude Code ou Codex",
+		body: "Escolha o agente em cada conversa. Os dois usam a mesma janela e as conversas ficam salvas para retomar depois.",
+	},
+	{
+		title: "O modelo que está rodando",
+		body: "O seletor mostra o modelo real por trás do padrão, como Claude Opus 4.5 ou GPT-6 Astra, e cada resposta diz qual modelo a escreveu e quanto tempo levou.",
+	},
+	{
+		title: "Janela de contexto à vista",
+		body: "Um indicador mostra quanto do contexto já foi usado. Um clique abre o detalhamento: prompt do sistema, ferramentas, MCP, arquivos de memória e mensagens.",
+	},
+	{
+		title: "Custo e compactações",
+		body: "Custo do último turno e da conversa inteira, além de quantas vezes o agente precisou compactar o histórico.",
+	},
+	{
+		title: "Cada passo do agente",
+		body: "Comandos, arquivos editados, buscas na web e o plano do agente aparecem como cartões que você abre para ver os detalhes.",
+	},
+	{
+		title: "Seguro por padrão",
+		body: "Cada conversa trabalha numa pasta própria. Ações arriscadas do Claude pedem sua aprovação antes de rodar.",
+	},
+] as const;
+
+export type ChatShot = {
+	src: string;
+	alt: string;
+	caption: string;
+};
+
+/** Generated by `bun run screenshots:chat` (test/e2e-chat). */
+export const CHAT_SCREENSHOTS: readonly ChatShot[] = [
+	{
+		src: "chat-claude.png",
+		alt: "Chat do Ptolemy com o Claude Code: o agente cria um arquivo, roda cat no terminal e responde; abaixo de cada resposta aparecem o modelo, o tempo e o custo",
+		caption: "Claude Code: cartões para cada ferramenta, modelo, tempo e custo por resposta",
+	},
+	{
+		src: "chat-codex.png",
+		alt: "Chat do Ptolemy com o Codex: o agente aplica um patch, roda cat no terminal e responde; o seletor mostra GPT-6.1 Sol como modelo padrão",
+		caption: "Codex: a mesma janela, com o modelo configurado no Codex CLI",
+	},
+	{
+		src: "chat-claude-contexto.png",
+		alt: "Painel Janela de contexto: custo total da conversa, compactações, o uso da janela de contexto e as categorias Ferramentas do sistema, Skills e Mensagens",
+		caption: "O que ocupa o contexto, custo total da conversa e compactações",
 	},
 ] as const;
 

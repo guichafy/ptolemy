@@ -1,0 +1,83 @@
+---
+import { CHAT_FEATURES, CHAT_SCREENSHOTS } from "../data/site";
+
+const baseUrl = import.meta.env.BASE_URL.replace(/\/$/, "");
+const [main, ...rest] = CHAT_SCREENSHOTS;
+---
+
+<section id="chat" class="relative py-20 md:py-28 border-t border-[var(--color-border)]/60">
+	<div class="max-w-6xl mx-auto px-6">
+		<div class="max-w-2xl mb-12">
+			<p class="text-sm font-mono text-[var(--color-accent)] uppercase tracking-wider mb-3">
+				Chat com agentes
+			</p>
+			<h2 class="text-3xl md:text-4xl font-semibold tracking-tight mb-4">
+				Claude Code e Codex, sem surpresas
+			</h2>
+			<p class="text-lg text-[var(--color-fg-muted)] leading-relaxed">
+				Uma janela de chat que mostra o que o agente está fazendo, com qual
+				modelo, quanto do contexto já foi usado e quanto a conversa custou.
+			</p>
+		</div>
+
+		<div class="grid grid-cols-1 lg:grid-cols-5 gap-8 items-start">
+			<ul class="lg:col-span-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-5">
+				{
+					CHAT_FEATURES.map((item) => (
+						<li class="flex gap-3">
+							<span class="mt-1.5 size-2 shrink-0 rounded-full bg-[var(--color-accent)]" aria-hidden="true" />
+							<div>
+								<h3 class="text-sm font-semibold text-[var(--color-fg)] mb-1">{item.title}</h3>
+								<p class="text-sm text-[var(--color-fg-muted)] leading-relaxed">{item.body}</p>
+							</div>
+						</li>
+					))
+				}
+			</ul>
+
+			{main && (
+				<figure class="lg:col-span-3 rounded-[var(--radius-card)] overflow-hidden border border-[var(--color-border)] bg-[var(--color-bg-card)]">
+					<img
+						src={`${baseUrl}/screenshots/${main.src}`}
+						alt={main.alt}
+						loading="lazy"
+						decoding="async"
+						width="1024"
+						height="768"
+						class="w-full h-auto bg-black"
+					/>
+					<figcaption class="p-4 border-t border-[var(--color-border)]/60 text-sm text-[var(--color-fg-muted)]">
+						{main.caption}
+					</figcaption>
+				</figure>
+			)}
+		</div>
+
+		<div class="mt-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+			{
+				rest.map((shot) => (
+					<figure class="rounded-[var(--radius-card)] overflow-hidden border border-[var(--color-border)] bg-[var(--color-bg-card)]">
+						<img
+							src={`${baseUrl}/screenshots/${shot.src}`}
+							alt={shot.alt}
+							loading="lazy"
+							decoding="async"
+							width="1024"
+							height="768"
+							class="w-full h-auto bg-black"
+						/>
+						<figcaption class="p-4 border-t border-[var(--color-border)]/60 text-sm text-[var(--color-fg-muted)]">
+							{shot.caption}
+						</figcaption>
+					</figure>
+				))
+			}
+		</div>
+
+		<p class="mt-6 text-xs text-[var(--color-fg-subtle)] leading-relaxed max-w-3xl">
+			Capturas geradas pelo teste de ponta a ponta do chat: o Claude Code e o
+			Codex de verdade, conversando com servidores locais de teste. Por isso as
+			respostas são curtas e os custos, simbólicos.
+		</p>
+	</div>
+</section>
