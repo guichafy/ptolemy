@@ -1,3 +1,16 @@
+# [0.13.0](https://github.com/guichafy/ptolemy/compare/v0.12.0...v0.13.0) (2026-11-01)
+
+
+### Bug Fixes
+
+* **chat:** show the model once, in the composer's picker ([3ab991c](https://github.com/guichafy/ptolemy/commit/3ab991c967e33e74f599b070041d4367c92c07b3))
+
+
+### Features
+
+* **chat:** context details, conversation cost and compactions ([8490314](https://github.com/guichafy/ptolemy/commit/84903144fb054eb8ecf4fa426e5040457e0bc596))
+* **chat:** rebuild the agent chat on AI Elements with model and context info ([623a20d](https://github.com/guichafy/ptolemy/commit/623a20d2cebc45f7d670ed021836ce1b69fff156))
+
 # [0.12.0](https://github.com/guichafy/ptolemy/compare/v0.11.0...v0.12.0) (2026-11-01)
 
 
