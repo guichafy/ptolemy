@@ -135,6 +135,8 @@ export async function selectProvider(
 	driver: WebdriverIO.Browser,
 	provider: ProviderId,
 ): Promise<void> {
+	activateWindow();
+	await wait(Timing.POST_TAB);
 	const labels: Record<ProviderId, string> = {
 		apps: "Apps",
 		github: "GitHub",
@@ -193,6 +195,16 @@ guard args.count > 1 else { exit(1) }
 
 switch args[1] {
 case "activate":
+    // The overlay orders itself out whenever it resigns key. XCTest and
+    // screenshots can move focus between cases; never blindly toggle a
+    // window that is already visible.
+    let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String:Any]] ?? []
+    let visible = windows.contains { window in
+        (window["kCGWindowOwnerName"] as? String) == "ptolemy-dev" &&
+        (window["kCGWindowName"] as? String) == "Ptolemy" &&
+        (window["kCGWindowAlpha"] as? Double ?? 0) > 0
+    }
+    if visible { break }
     let down = CGEvent(keyboardEventSource: nil, virtualKey: 49, keyDown: true)!
     down.flags = [.maskCommand, .maskShift]
     down.post(tap: .cghidEventTap)
@@ -328,6 +340,12 @@ export async function waitForResults(
 	}
 	const found = expected.filter((s) => lastSource.includes(s));
 	const missing = expected.filter((s) => !lastSource.includes(s));
+	// Preserve the complete tree as a CI artifact, beyond the short assertion
+	// excerpt, so a wrong provider or hidden native window can be diagnosed.
+	writeFileSync(
+		path.join(SCREENSHOTS_DIR, `missing-results-${Date.now()}.xml`),
+		lastSource,
+	);
 	return {
 		found,
 		missing,

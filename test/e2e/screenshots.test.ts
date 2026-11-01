@@ -68,7 +68,6 @@ describe("Ptolemy Screenshots", () => {
 	beforeEach(async () => {
 		// Ensure every test starts with an empty input on the Apps provider.
 		await selectProvider(driver, "apps");
-		await pressEscape(driver);
 		await clearInput(driver);
 		currentProviderIndex = 0;
 		await wait(Timing.SETTLE_LOCAL);
@@ -141,12 +140,7 @@ describe("Ptolemy Screenshots", () => {
 
 	it("Screenshot 3: Calculadora — expressão com resultado", async () => {
 		const calcIndex = Providers.indexOf("calc");
-		await tabToProvider(
-			driver,
-			currentProviderIndex,
-			calcIndex,
-			Providers.length,
-		);
+		await selectProvider(driver, "calc");
 		currentProviderIndex = calcIndex;
 
 		await typeText(driver, "245 * 3 + 17");
