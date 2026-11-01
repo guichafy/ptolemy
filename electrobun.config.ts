@@ -17,7 +17,8 @@ export default {
 			"dist-chat/index.html": "views/chatview/index.html",
 			"dist-chat/assets": "views/chatview/assets",
 			"src/bun/native/liboverlay.dylib": "native/liboverlay.dylib",
-			"src/bun/tray-icon.png": "native/tray-icon.png",
+			"src/bun/mcp/launcher.mjs":"native/mcp-launcher.mjs",
+            "src/bun/tray-icon.png": "native/tray-icon.png",
 		},
 		watchIgnore: [],
 		mac: {

@@ -347,6 +347,27 @@ describe("MCP browser OAuth", () => {
 		expect(await oauth.getAccessToken("one")).toBeUndefined();
 		expect((await oauth.status("one")).state).toBe("disconnected");
 	});
+	it("refreshes a rejected unexpired token once with snapshot binding and coalesces concurrent rejections", async () => {
+		await authorize();
+		const snapshot = (await registry.snapshot(["one"])).servers[0];
+		const rejected = await oauth.getAccessToken("one", snapshot);
+		const tokens = await Promise.all(
+			Array.from({ length: 8 }, () =>
+				oauth.getAccessToken("one", snapshot, rejected),
+			),
+		);
+		expect(tokens).toEqual(Array(8).fill("refreshed-secret-probe"));
+		expect(refreshes).toBe(1);
+		expect(opened).toHaveLength(1);
+		await registry.save({
+			...snapshot,
+			url: `${origin}/changed`,
+		} as McpServerDefinition);
+		await expect(
+			oauth.getAccessToken("one", snapshot, tokens[0]),
+		).rejects.toThrow("alterada");
+		expect(refreshes).toBe(1);
+	});
 	it("rejects wrong resource and issuer discovery before opening browser", async () => {
 		wrongResource = true;
 		await oauth.connect("one");

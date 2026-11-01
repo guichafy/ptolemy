@@ -48,6 +48,16 @@ describe("buildQueryOptions", () => {
 		expect(withMcp.mcpServers).toBeDefined();
 	});
 
+	test("strictly controls MCP even for explicit empty selection and passes only local auth through env", () => {
+		const opts = buildQueryOptions({
+			...baseArgs,
+			explicitMcpSelection: true,
+			mcpEnv: { PTOLEMY_LOCAL: "local-only" },
+		});
+		expect(opts.strictMcpConfig).toBe(true);
+		expect(opts.mcpServers).toEqual({});
+		expect(opts.env).toMatchObject({ PTOLEMY_LOCAL: "local-only" });
+	});
 	test("attaches resume sessionId when provided", () => {
 		const opts = buildQueryOptions({
 			...baseArgs,

@@ -143,6 +143,7 @@ export interface PtolemyRPCSchema extends ElectrobunRPCSchema {
 					projectId?: string;
 					agent?: AgentKind;
 					skillIds?: string[];
+					mcpServerIds?: string[];
 					model?: string;
 				};
 				response: { sessionId: string };
@@ -690,12 +691,14 @@ export const requestHandlers: BunRequestHandlers = {
 		projectId,
 		agent,
 		skillIds,
+		mcpServerIds,
 		model,
 	}) => {
 		const sessionId = await claudeCreateSession(prompt, {
 			projectId,
 			agent,
 			skillIds,
+			mcpServerIds,
 			model,
 		});
 		console.log(

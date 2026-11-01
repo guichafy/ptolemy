@@ -526,6 +526,15 @@ for (const agent of ["codex", "claude"] as const) {
 				skillIds: [],
 			});
 			expect((await metaOf(id)).skillSelection).toBeDefined();
+			expect((await metaOf(id)).mcpServerIds).toEqual([]);
+			expect((await metaOf(id)) as object).not.toHaveProperty("mcpSelection");
+			const persisted = JSON.parse(
+				await readFile(join(TMP, ".ptolomeu/sessions/index.json"), "utf8"),
+			);
+			expect(
+				persisted.sessions.find((s: { id: string }) => s.id === id)
+					.mcpSelection,
+			).toEqual({ version: 1, servers: [] });
 			await sm.resumeSession(id);
 			expectCleanTurn(await waitTurn(id, 0, TURN_TIMEOUT), OK_REASON[agent]);
 			const effective = JSON.stringify(requests.slice(start));

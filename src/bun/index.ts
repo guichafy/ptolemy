@@ -2,7 +2,11 @@ import { dlopen, FFIType, JSCallback } from "bun:ffi";
 import { join } from "node:path";
 import { ApplicationMenu, BrowserWindow, Tray, Utils } from "electrobun/bun";
 import { initAnalytics, shutdownAnalytics, trackEvent } from "./analytics";
-import { listSessions as claudeListSessions } from "./claude/session-manager";
+import {
+	listSessions as claudeListSessions,
+	shutdownSessions,
+} from "./claude/session-manager";
+import { mcpOAuthService } from "./mcp/oauth";
 import { initProxy } from "./net/proxy";
 import {
 	chatRpc,
@@ -258,7 +262,10 @@ tray.on("tray-clicked", (event: any) => {
 		mainRpc.send.openPreferences({});
 	} else if (action === "quit") {
 		trackEvent("app_quit");
-		shutdownAnalytics().finally(() => {
+		Promise.allSettled([
+			shutdownAnalytics(),
+			shutdownSessions().finally(() => mcpOAuthService.dispose()),
+		]).finally(() => {
 			tray.remove();
 			overlayLib.symbols.quitApp();
 		});

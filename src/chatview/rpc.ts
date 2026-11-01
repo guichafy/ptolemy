@@ -144,6 +144,7 @@ export interface BedrockConfig {
 }
 
 export interface SessionMeta {
+	mcpServerIds?: string[];
 	id: string;
 	sdkSessionId: string;
 	/** Backing agent; absent on sessions created before Codex support. */
@@ -253,6 +254,7 @@ interface PtolemyRPCSchema extends ElectrobunRPCSchema {
 					projectId?: string;
 					agent?: AgentKind;
 					skillIds?: string[];
+					mcpServerIds?: string[];
 					model?: string;
 				};
 				response: { sessionId: string };

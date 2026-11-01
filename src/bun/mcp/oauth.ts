@@ -663,6 +663,7 @@ export class McpOAuthService {
 	async getAccessToken(
 		serverId: string,
 		expectedDefinition?: McpServerDefinition,
+		rejectedToken?: string,
 	): Promise<string | undefined> {
 		const epoch = this.epochs.get(serverId) ?? 0;
 		const cancelled = () =>
@@ -681,8 +682,10 @@ export class McpOAuthService {
 			)
 				return undefined;
 			if (
-				record.expiresAt === undefined ||
-				record.expiresAt > this.now() + 30_000
+				(rejectedToken === undefined ||
+					rejectedToken !== record.tokens.access_token) &&
+				(record.expiresAt === undefined ||
+					record.expiresAt > this.now() + 30_000)
 			)
 				return record.tokens.access_token;
 			if (!record.tokens.refresh_token) {

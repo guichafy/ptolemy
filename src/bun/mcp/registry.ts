@@ -20,6 +20,7 @@ interface RegistryFile {
 	servers: McpServerDefinition[];
 	legacyDigest?: string;
 	legacyIds?: string[];
+	legacySnapshot?: McpSnapshot;
 }
 export interface McpRegistryOptions {
 	path?: string;
@@ -250,6 +251,29 @@ export class McpRegistry {
 				new Set(value.legacyIds).size !== value.legacyIds.length)
 		)
 			throw invalid();
+		let legacySnapshot: McpSnapshot | undefined;
+		if (value.legacySnapshot !== undefined) {
+			if (
+				!object(value.legacySnapshot) ||
+				value.legacySnapshot.version !== 1 ||
+				!Array.isArray(value.legacySnapshot.servers) ||
+				value.legacySnapshot.servers.length > 512
+			)
+				throw invalid();
+			const legacyServers = value.legacySnapshot.servers.map(
+				validateMcpDefinition,
+			);
+			this.unique(legacyServers);
+			if (
+				legacyServers.some(
+					(s) =>
+						s.transport !== "stdio" ||
+						Object.values(s.env ?? {}).some((v) => typeof v === "string"),
+				)
+			)
+				throw invalid();
+			legacySnapshot = { version: 1, servers: legacyServers };
+		}
 		const servers = value.servers.map(validateMcpDefinition);
 		this.unique(servers);
 		if (
@@ -264,6 +288,7 @@ export class McpRegistry {
 		return {
 			version: 2,
 			servers,
+			...(legacySnapshot ? { legacySnapshot } : {}),
 			...(value.legacyDigest !== undefined
 				? { legacyDigest: value.legacyDigest as string }
 				: {}),
@@ -281,6 +306,19 @@ export class McpRegistry {
 		const raw = await this.readOptional(this.path);
 		if (raw !== undefined) {
 			const file = this.validateFile(JSON.parse(raw));
+			if (file.legacyDigest && !file.legacySnapshot) {
+				const source = await this.readOptional(this.legacyPath);
+				if (source === undefined || digest(source) !== file.legacyDigest)
+					throw invalid();
+				const originals = await Promise.all(
+					this.parseLegacy(source).map((server) => this.protect(server)),
+				);
+				file.legacySnapshot = {
+					version: 1,
+					servers: originals.filter((server) => server.defaults.claude),
+				};
+				await this.publish(file);
+			}
 			preflight?.(file);
 			return file;
 		}
@@ -299,6 +337,12 @@ export class McpRegistry {
 			file.servers = await Promise.all(
 				servers.map((server) => this.protect(server)),
 			);
+			file.legacySnapshot = {
+				version: 1,
+				servers: structuredClone(
+					file.servers.filter((server) => server.defaults.claude),
+				),
+			};
 			await this.publish(file);
 		} else preflight?.(file);
 		return file;
@@ -696,8 +740,27 @@ export class McpRegistry {
 				...shared,
 				...(await Promise.all(imported.map((server) => this.protect(server)))),
 			];
+			candidate.legacySnapshot = {
+				version: 1,
+				servers: structuredClone(
+					candidate.servers.filter(
+						(server) =>
+							candidate.legacyIds!.includes(server.id) &&
+							server.defaults.claude,
+					),
+				),
+			};
 			await this.publish(candidate);
 		});
+	}
+
+	/** Backend-only provenance, independent of all new shared defaults and edits. */
+	async legacySnapshot(): Promise<McpSnapshot> {
+		return this.serial(async () =>
+			structuredClone(
+				(await this.load()).legacySnapshot ?? { version: 1, servers: [] },
+			),
+		);
 	}
 
 	/** Call only after all v1 consumers are retired. Refuses to erase edits made since migration. */
@@ -707,7 +770,7 @@ export class McpRegistry {
 			const legacy = await this.readOptional(this.legacyPath);
 			if (legacy === undefined) return;
 			if (f.legacyDigest !== digest(legacy)) throw invalid();
-			for (const s of f.servers)
+			for (const s of [...f.servers, ...(f.legacySnapshot?.servers ?? [])])
 				for (const key of refs(s))
 					if ((await this.vault.get(key)) === undefined) throw invalid();
 			await rm(this.legacyPath);
