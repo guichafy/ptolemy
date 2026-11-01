@@ -224,38 +224,65 @@ export class McpRegistry {
 			throw e;
 		}
 	}
-	private async load(): Promise<RegistryFile> {
+
+	/** One schema for disk reads, preflight candidates and final publications. */
+	private validateFile(value: unknown, allowPlaintext = false): RegistryFile {
+		if (
+			!object(value) ||
+			value.version !== 2 ||
+			!Array.isArray(value.servers) ||
+			value.servers.length > 512
+		)
+			throw invalid();
+		if (
+			value.legacyDigest !== undefined &&
+			(typeof value.legacyDigest !== "string" ||
+				!/^[a-f0-9]{64}$/.test(value.legacyDigest))
+		)
+			throw invalid();
+		if (
+			value.legacyIds !== undefined &&
+			(!Array.isArray(value.legacyIds) ||
+				value.legacyIds.length > 512 ||
+				!value.legacyIds.every(
+					(id) => typeof id === "string" && /^[a-zA-Z0-9_.:-]{1,256}$/.test(id),
+				) ||
+				new Set(value.legacyIds).size !== value.legacyIds.length)
+		)
+			throw invalid();
+		const servers = value.servers.map(validateMcpDefinition);
+		this.unique(servers);
+		if (
+			!allowPlaintext &&
+			servers.some((s) =>
+				Object.values(
+					s.transport === "stdio" ? (s.env ?? {}) : (s.headers ?? {}),
+				).some((v) => typeof v === "string"),
+			)
+		)
+			throw invalid();
+		return {
+			version: 2,
+			servers,
+			...(value.legacyDigest !== undefined
+				? { legacyDigest: value.legacyDigest as string }
+				: {}),
+			...(value.legacyIds !== undefined
+				? { legacyIds: [...(value.legacyIds as string[])] }
+				: {}),
+		};
+	}
+	private publish(file: RegistryFile): Promise<void> {
+		return writeJsonAtomic(this.path, this.validateFile(file));
+	}
+	private async load(
+		preflight?: (file: RegistryFile) => void,
+	): Promise<RegistryFile> {
 		const raw = await this.readOptional(this.path);
 		if (raw !== undefined) {
-			const file = JSON.parse(raw);
-			if (
-				!object(file) ||
-				file.version !== 2 ||
-				!Array.isArray(file.servers) ||
-				file.servers.length > 512
-			)
-				throw invalid();
-			const servers = file.servers.map(validateMcpDefinition);
-			this.unique(servers);
-			if (
-				servers.some((s) =>
-					Object.values(
-						s.transport === "stdio" ? (s.env ?? {}) : (s.headers ?? {}),
-					).some((v) => typeof v === "string"),
-				)
-			)
-				throw invalid();
-			return {
-				version: 2,
-				servers,
-				...(typeof file.legacyDigest === "string"
-					? { legacyDigest: file.legacyDigest }
-					: {}),
-				...(Array.isArray(file.legacyIds) &&
-				file.legacyIds.every((id) => typeof id === "string")
-					? { legacyIds: file.legacyIds }
-					: {}),
-			};
+			const file = this.validateFile(JSON.parse(raw));
+			preflight?.(file);
+			return file;
 		}
 		const legacy = await this.readOptional(this.legacyPath);
 		const file: RegistryFile = {
@@ -265,12 +292,15 @@ export class McpRegistry {
 		};
 		if (legacy !== undefined) {
 			const servers = this.parseLegacy(legacy);
+			file.servers = servers;
+			file.legacyIds = servers.map((server) => server.id);
+			this.validateFile(file, true);
+			preflight?.(file);
 			file.servers = await Promise.all(
 				servers.map((server) => this.protect(server)),
 			);
-			file.legacyIds = servers.map((server) => server.id);
-			await writeJsonAtomic(this.path, file);
-		}
+			await this.publish(file);
+		} else preflight?.(file);
 		return file;
 	}
 
@@ -325,6 +355,28 @@ export class McpRegistry {
 		)
 			throw invalid();
 	}
+	private validateSupplied(
+		server: McpServerDefinition,
+		secrets: Record<string, string>,
+	): void {
+		const map = server.transport === "stdio" ? server.env : server.headers;
+		const prefix = server.transport === "stdio" ? "env." : "headers.";
+		const accepted = new Set(Object.keys(map ?? {}).map((key) => prefix + key));
+		if (server.transport === "http" && server.auth)
+			accepted.add("oauth.clientSecret");
+		for (const [slot, value] of Object.entries(secrets)) {
+			if (
+				!accepted.has(slot) ||
+				typeof value !== "string" ||
+				value.length > 65536 ||
+				(slot !== "oauth.clientSecret" &&
+					(value.includes("\0") ||
+						(prefix === "headers." && /[\r\n]/.test(value))))
+			)
+				throw invalid();
+		}
+	}
+
 	private async protect(
 		server: McpServerDefinition,
 		secrets: Record<string, string> = {},
@@ -337,33 +389,32 @@ export class McpRegistry {
 		};
 		const map = result.transport === "stdio" ? result.env : result.headers;
 		const prefix = result.transport === "stdio" ? "env." : "headers.";
-		const accepted = new Set<string>();
-		for (const [key, v] of Object.entries(map ?? {})) {
+
+		this.validateSupplied(result, secrets);
+		const retained = Object.entries(map ?? {}).flatMap(([key, value]) =>
+			!hasOwn(secrets, prefix + key) && typeof value !== "string"
+				? [value.secretRef]
+				: [],
+		);
+		if (
+			result.transport === "http" &&
+			result.auth?.clientSecret &&
+			!hasOwn(secrets, "oauth.clientSecret")
+		)
+			retained.push(result.auth.clientSecret.secretRef);
+		for (const key of retained)
+			if ((await this.vault.get(key)) === undefined) throw invalid();
+		for (const [key, value] of Object.entries(map ?? {})) {
 			const slot = prefix + key;
-			accepted.add(slot);
-			if (hasOwn(secrets, slot)) {
-				if (
-					typeof secrets[slot] !== "string" ||
-					secrets[slot].length > 65536 ||
-					secrets[slot].includes("\0") ||
-					(prefix === "headers." && /[\r\n]/.test(secrets[slot]))
-				)
-					throw invalid();
-				map![key] = await put(secrets[slot]);
-			} else if (typeof v === "string") map![key] = await put(v);
+			if (hasOwn(secrets, slot)) map![key] = await put(secrets[slot]);
+			else if (typeof value === "string") map![key] = await put(value);
 		}
-		if (result.transport === "http" && result.auth) {
-			accepted.add("oauth.clientSecret");
-			if (hasOwn(secrets, "oauth.clientSecret")) {
-				if (
-					typeof secrets["oauth.clientSecret"] !== "string" ||
-					secrets["oauth.clientSecret"].length > 65536
-				)
-					throw invalid();
-				result.auth.clientSecret = await put(secrets["oauth.clientSecret"]);
-			}
-		}
-		if (Object.keys(secrets).some((k) => !accepted.has(k))) throw invalid();
+		if (
+			result.transport === "http" &&
+			result.auth &&
+			hasOwn(secrets, "oauth.clientSecret")
+		)
+			result.auth.clientSecret = await put(secrets["oauth.clientSecret"]);
 		for (const key of refs(result))
 			if ((await this.vault.get(key)) === undefined)
 				throw Error("Credencial MCP indisponível.");
@@ -422,92 +473,113 @@ export class McpRegistry {
 			},
 		};
 	}
-	/** Whole edit is queued. Preserve is resolved against the current definition, never a frontend reference. */
+
+	private prepareEditable(
+		copy: McpEditableServer,
+		existing: McpServerDefinition | undefined,
+	): { clean: McpServerDefinition; supplied: Record<string, string> } {
+		const supplied: Record<string, string> = {};
+		const field = (
+			edit: McpCredentialEdit,
+			prior: McpConfigValue | undefined,
+		): McpConfigValue => {
+			if (!object(edit)) throw invalid();
+			if (
+				"preserve" in edit &&
+				edit.preserve === true &&
+				!hasOwn(edit, "value")
+			) {
+				if (prior === undefined) throw invalid();
+				return prior;
+			}
+			if (
+				"value" in edit &&
+				typeof edit.value === "string" &&
+				!hasOwn(edit, "preserve")
+			)
+				return edit.value;
+			throw invalid();
+		};
+		const map = (
+			input: Record<string, McpCredentialEdit> | undefined,
+			prior: Record<string, McpConfigValue> | undefined,
+		) => {
+			if (input === undefined) return undefined;
+			if (!object(input)) throw invalid();
+			return Object.fromEntries(
+				Object.entries(input).map(([key, edit]) => [
+					key,
+					field(edit, prior?.[key]),
+				]),
+			);
+		};
+		let definition: McpServerDefinition;
+		if (copy.transport === "stdio")
+			definition = {
+				...copy,
+				env: map(
+					copy.env,
+					existing?.transport === "stdio" ? existing.env : undefined,
+				),
+			};
+		else {
+			const { auth, ...rest } = copy;
+			let safeAuth: Extract<McpServerDefinition, { transport: "http" }>["auth"];
+			if (auth) {
+				const { clientSecret, ...config } = auth;
+				safeAuth = { ...config };
+				if (clientSecret) {
+					const prior =
+						existing?.transport === "http"
+							? existing.auth?.clientSecret
+							: undefined;
+					const value = field(clientSecret, prior);
+					if (typeof value === "string") supplied["oauth.clientSecret"] = value;
+					else safeAuth.clientSecret = value;
+				}
+			}
+			definition = {
+				...rest,
+				headers: map(
+					copy.headers,
+					existing?.transport === "http" ? existing.headers : undefined,
+				),
+				...(safeAuth ? { auth: safeAuth } : {}),
+			};
+		}
+		const clean = validateMcpDefinition(definition);
+		this.validateSupplied(clean, supplied);
+		return { clean, supplied };
+	}
+
+	/** Whole edit is queued. Preserve is resolved against current same-field backend data. */
 	async saveEditable(draft: McpEditableServer): Promise<void> {
 		const copy = structuredClone(draft);
 		return this.serial(async () => {
-			const file = await this.load();
-			const existing = file.servers.find((s) => s.id === copy.id);
-			const supplied: Record<string, string> = {};
-			const field = (
-				edit: McpCredentialEdit,
-				prior: McpConfigValue | undefined,
-			): McpConfigValue => {
-				if (!object(edit)) throw invalid();
-				if (
-					"preserve" in edit &&
-					edit.preserve === true &&
-					!hasOwn(edit, "value")
-				) {
-					if (!prior || typeof prior === "string") throw invalid();
-					return prior;
-				}
-				if (
-					"value" in edit &&
-					typeof edit.value === "string" &&
-					!hasOwn(edit, "preserve")
-				)
-					return edit.value;
-				throw invalid();
-			};
-			const map = (
-				input: Record<string, McpCredentialEdit> | undefined,
-				prior: Record<string, McpConfigValue> | undefined,
-			) => {
-				if (input === undefined) return undefined;
-				if (!object(input)) throw invalid();
-				return Object.fromEntries(
-					Object.entries(input).map(([key, edit]) => [
-						key,
-						field(edit, prior?.[key]),
-					]),
+			const prepare = (file: RegistryFile) =>
+				this.prepareEditable(
+					copy,
+					file.servers.find((server) => server.id === copy.id),
 				);
-			};
-			let definition: McpServerDefinition;
-			if (copy.transport === "stdio")
-				definition = {
-					...copy,
-					env: map(
-						copy.env,
-						existing?.transport === "stdio" ? existing.env : undefined,
-					),
-				};
-			else {
-				const { auth, ...rest } = copy;
-				let safeAuth: Extract<
-					McpServerDefinition,
-					{ transport: "http" }
-				>["auth"];
-				if (auth) {
-					const { clientSecret, ...config } = auth;
-					safeAuth = { ...config };
-					if (clientSecret) {
-						const prior =
-							existing?.transport === "http"
-								? existing.auth?.clientSecret
-								: undefined;
-						const value = field(clientSecret, prior);
-						if (typeof value === "string")
-							supplied["oauth.clientSecret"] = value;
-						else safeAuth.clientSecret = value;
-					}
-				}
-				definition = {
-					...rest,
-					headers: map(
-						copy.headers,
-						existing?.transport === "http" ? existing.headers : undefined,
-					),
-					...(safeAuth ? { auth: safeAuth } : {}),
-				};
-			}
-			const clean = validateMcpDefinition(definition);
-			this.unique([...file.servers.filter((s) => s.id !== clean.id), clean]);
+			const file = await this.load((candidate) => {
+				const { clean } = prepare(candidate);
+				this.validateFile(
+					{
+						...candidate,
+						servers: [
+							...candidate.servers.filter((server) => server.id !== clean.id),
+							clean,
+						],
+					},
+					true,
+				);
+			});
+			const { clean, supplied } = prepare(file);
 			const protectedServer = await this.protect(clean, supplied);
-			const index = file.servers.findIndex((s) => s.id === clean.id);
+			const index = file.servers.findIndex((server) => server.id === clean.id);
 			if (index < 0) file.servers.push(protectedServer);
 			else file.servers[index] = protectedServer;
-			await writeJsonAtomic(this.path, file);
+			await this.publish(file);
 		});
 	}
 
@@ -517,23 +589,35 @@ export class McpRegistry {
 	): Promise<void> {
 		const clean = validateMcpDefinition(server); // Fail before touching either durable store.
 		const supplied = structuredClone(secrets);
+		this.validateSupplied(clean, supplied);
 		return this.serial(async () => {
-			const f = await this.load();
+			const f = await this.load((candidate) =>
+				this.validateFile(
+					{
+						...candidate,
+						servers: [
+							...candidate.servers.filter((server) => server.id !== clean.id),
+							clean,
+						],
+					},
+					true,
+				),
+			);
 			const next = f.servers.filter((s) => s.id !== clean.id);
 			next.push(clean);
-			this.unique(next);
+			this.validateFile({ ...f, servers: next }, true);
 			const protectedServer = await this.protect(clean, supplied);
 			const i = f.servers.findIndex((s) => s.id === clean.id);
 			if (i < 0) f.servers.push(protectedServer);
 			else f.servers[i] = protectedServer;
-			await writeJsonAtomic(this.path, f);
+			await this.publish(f);
 		});
 	}
 	async remove(id: string): Promise<void> {
 		return this.serial(async () => {
 			const f = await this.load();
 			f.servers = f.servers.filter((s) => s.id !== id);
-			await writeJsonAtomic(this.path, f);
+			await this.publish(f);
 		});
 	}
 	async setDefaults(agent: "claude" | "codex", ids: string[]): Promise<void> {
@@ -543,7 +627,7 @@ export class McpRegistry {
 			if (ids.some((id) => !f.servers.some((s) => s.id === id)))
 				throw invalid();
 			for (const s of f.servers) s.defaults[agent] = ids.includes(s.id);
-			await writeJsonAtomic(this.path, f);
+			await this.publish(f);
 		});
 	}
 	async snapshot(ids: string[]): Promise<McpSnapshot> {
@@ -601,16 +685,18 @@ export class McpRegistry {
 			const shared = file.servers.filter(
 				(server) => !legacyIds.includes(server.id),
 			);
-			this.unique([...shared, ...imported]);
-			const protectedServers = await Promise.all(
-				imported.map((server) => this.protect(server)),
-			);
-			await writeJsonAtomic(this.path, {
+			const candidate: RegistryFile = {
 				...file,
-				servers: [...shared, ...protectedServers],
+				servers: [...shared, ...imported],
 				legacyDigest: digest(legacy),
 				legacyIds: imported.map((server) => server.id),
-			});
+			};
+			this.validateFile(candidate, true);
+			candidate.servers = [
+				...shared,
+				...(await Promise.all(imported.map((server) => this.protect(server)))),
+			];
+			await this.publish(candidate);
 		});
 	}
 

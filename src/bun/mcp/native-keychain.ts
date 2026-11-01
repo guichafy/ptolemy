@@ -1,4 +1,9 @@
 import { join } from "node:path";
+import {
+	decodeSecret,
+	encodeSecret,
+	MAX_STORED_SECRET_BYTES,
+} from "./secret-encoding";
 
 // This module is imported only when the real vault is first used. Node/Vitest never
 // needs Bun FFI; production never launches a subprocess with credential arguments.
@@ -14,7 +19,7 @@ const lib = dlopen(join(import.meta.dir, "..", "native", "liboverlay.dylib"), {
 	},
 	mcpDeleteSecret: { args: [FFIType.ptr], returns: FFIType.i32 },
 } as const);
-const MAX_BYTES = 1024 * 1024;
+const MAX_BYTES = MAX_STORED_SECRET_BYTES;
 function account(key: string): Buffer {
 	if (!/^[a-zA-Z0-9_.:-]{1,256}$/.test(key))
 		throw Error("Invalid credential reference");
@@ -26,21 +31,15 @@ export function readSecret(key: string): string | undefined {
 		const size = lib.symbols.mcpReadSecret(account(key), output, output.length);
 		if (size === -1) return undefined;
 		if (size < 0 || size > MAX_BYTES) throw Error("Keychain read failed");
-		return output.toString("utf8", 0, size);
+		return decodeSecret(output.subarray(0, size));
 	} finally {
 		output.fill(0);
 	}
 }
 export function writeSecret(key: string, value: string): void {
-	const length = Buffer.byteLength(value, "utf8");
-	if (length > MAX_BYTES) throw Error("Keychain write failed");
-	const bytes = Buffer.alloc(Math.max(length, 1));
-	bytes.write(value, "utf8");
+	const bytes = encodeSecret(value);
 	try {
-		if (
-			length > MAX_BYTES ||
-			lib.symbols.mcpWriteSecret(account(key), bytes, length) !== 0
-		)
+		if (lib.symbols.mcpWriteSecret(account(key), bytes, bytes.length) !== 0)
 			throw Error("Keychain write failed");
 	} finally {
 		bytes.fill(0);

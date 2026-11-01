@@ -28,7 +28,9 @@ describe("MCP browser OAuth", () => {
 	let tokenDelay: number;
 	let deniedRefresh: boolean;
 	let tokenType: string;
-	let tokenScope: string;
+	let tokenScope: string | undefined;
+	const registeredRedirects = new Map<string, string[]>();
+	let authorizationRequests: number;
 	let tokenRequests: number;
 	let registrations: number;
 	let issueRefresh: boolean;
@@ -96,6 +98,11 @@ describe("MCP browser OAuth", () => {
 		issueRefresh = true;
 		lastTokenParams = new URLSearchParams();
 		codes.clear();
+		registeredRedirects.clear();
+		registeredRedirects.set("pre-registered", [
+			"http://127.0.0.1/oauth/callback",
+		]);
+		authorizationRequests = 0;
 		server = createServer(async (req, res) => {
 			const url = new URL(req.url!, origin);
 			res.setHeader("content-type", "application/json");
@@ -130,11 +137,41 @@ describe("MCP browser OAuth", () => {
 				);
 				return;
 			}
+			if (url.pathname === "/authorize") {
+				authorizationRequests++;
+				const redirect = url.searchParams.get("redirect_uri") ?? "";
+				const client = url.searchParams.get("client_id") ?? "";
+				const allowed = registeredRedirects.get(client) ?? [];
+				const matches = allowed.some((registered) => {
+					const expected = new URL(registered),
+						actual = new URL(redirect);
+					if (client === "pre-registered") actual.port = expected.port; // RFC 8252 native loopback port exception only.
+					return actual.href === expected.href;
+				});
+				if (!matches) {
+					res.statusCode = 400;
+					res.end('{"error":"invalid_redirect_uri"}');
+					return;
+				}
+				const callback = new URL(redirect);
+				const code = `authorization-${codes.size}`;
+				codes.set(code, {
+					challenge: url.searchParams.get("code_challenge")!,
+					redirect,
+					resource: url.searchParams.get("resource")!,
+				});
+				callback.searchParams.set("code", code);
+				callback.searchParams.set("state", url.searchParams.get("state")!);
+				res.writeHead(302, { location: callback.href });
+				res.end();
+				return;
+			}
 			let body = "";
 			for await (const b of req) body += b;
 			if (url.pathname === "/register") {
 				registrations++;
 				const metadata = JSON.parse(body);
+				registeredRedirects.set("ptolemy-test", metadata.redirect_uris);
 				res.end(JSON.stringify({ ...metadata, client_id: "ptolemy-test" }));
 				return;
 			}
@@ -186,7 +223,7 @@ describe("MCP browser OAuth", () => {
 						token_type: tokenType,
 						...(issueRefresh ? { refresh_token: "refresh-secret-probe" } : {}),
 						expires_in: 3600,
-						scope: tokenScope,
+						...(tokenScope === undefined ? {} : { scope: tokenScope }),
 					}),
 				);
 				return;
@@ -522,5 +559,50 @@ describe("MCP browser OAuth", () => {
 		deniedRefresh = true;
 		await oauth.getAccessToken("one").catch(() => {});
 		expect((await oauth.status("one")).state).toBe("expired");
+	});
+	it("authenticates twice through an authorization endpoint enforcing one pre-registered callback path", async () => {
+		const definition = await registry.get("one");
+		if (definition.transport !== "http") throw Error("fixture");
+		await registry.save(
+			{
+				...definition,
+				auth: { type: "oauth", clientId: "pre-registered", scopes: ["read"] },
+			},
+			{ "oauth.clientSecret": "client-secret-probe" },
+		);
+		const attempts: URL[] = [];
+		for (let attempt = 0; attempt < 2; attempt++) {
+			opened = [];
+			await start();
+			attempts.push(opened[0]);
+			const redirect = new URL(opened[0].searchParams.get("redirect_uri")!);
+			const authorize = await fetch(opened[0], { redirect: "manual" });
+			expect(authorize.status).toBe(302);
+			expect(redirect.pathname).toBe("/oauth/callback");
+			await fetch(authorize.headers.get("location")!);
+			await waitFor(
+				async () => (await oauth.status("one")).state === "connected",
+			);
+			expect(await oauth.getAccessToken("one")).toBe("access-secret-probe");
+			await oauth.disconnect("one");
+		}
+		expect(authorizationRequests).toBe(2);
+		expect(registrations).toBe(0);
+		expect(exchanges).toBe(2);
+		expect(attempts[0].searchParams.get("state")).not.toBe(
+			attempts[1].searchParams.get("state"),
+		);
+		expect(attempts[0].searchParams.get("code_challenge")).not.toBe(
+			attempts[1].searchParams.get("code_challenge"),
+		);
+	});
+	it("accepts an omitted token scope when code exchange and refresh keep the requested grant", async () => {
+		tokenScope = undefined;
+		await authorize();
+		expect(await oauth.getAccessToken("one")).toBe("access-secret-probe");
+		now += 3600_000;
+		expect(await oauth.getAccessToken("one")).toBe("refreshed-secret-probe");
+		expect(refreshes).toBe(1);
+		expect((await oauth.status("one")).state).toBe("connected");
 	});
 });
