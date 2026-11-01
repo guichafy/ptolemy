@@ -1,5 +1,8 @@
+import { useEffect, useState } from "react";
+import { Shimmer } from "@/components/ai-elements/shimmer";
 import type { AgentKind } from "@/shared/agent-protocol";
 import type { TurnStatus } from "../../hooks/agent-state";
+import { describeTool } from "../../lib/tool-display";
 
 const AGENT_NAMES: Record<AgentKind, string> = {
 	claude: "Claude",
@@ -31,35 +34,52 @@ export interface TurnIndicatorProps {
 	agent?: AgentKind;
 }
 
-export function TurnIndicator({ status, toolName, agent }: TurnIndicatorProps) {
-	const label = turnIndicatorLabel(status, toolName, agent);
-	if (label === null) return null;
-	return (
-		<div
-			className="flex items-center gap-2 px-3 py-1.5 text-xs text-muted-foreground"
-			aria-live="polite"
-		>
-			<BouncingDots />
-			<span>{label}</span>
-		</div>
-	);
+/** Seconds since `active` last became true; 0 while inactive. */
+function useElapsedSeconds(active: boolean): number {
+	const [elapsed, setElapsed] = useState(0);
+	useEffect(() => {
+		if (!active) {
+			setElapsed(0);
+			return;
+		}
+		const startedAt = Date.now();
+		const id = setInterval(() => {
+			setElapsed(Math.floor((Date.now() - startedAt) / 1000));
+		}, 1000);
+		return () => clearInterval(id);
+	}, [active]);
+	return elapsed;
 }
 
-function BouncingDots() {
+/**
+ * Live status under the conversation while a turn runs. Hidden while text
+ * streams (the reply itself shows progress); otherwise a shimmering label
+ * with the elapsed time, so a slow first token never looks like a freeze.
+ */
+export function TurnIndicator({ status, toolName, agent }: TurnIndicatorProps) {
+	const visible = status === "waiting" || status === "tool_running";
+	const elapsed = useElapsedSeconds(status !== "idle");
+	if (!visible) return null;
+	const label = turnIndicatorLabel(
+		status,
+		toolName ? describeTool(toolName, undefined).title : undefined,
+		agent,
+	);
+	if (!label) return null;
 	return (
-		<div className="flex items-center gap-1">
-			<span
-				className="h-1.5 w-1.5 rounded-full bg-muted-foreground/50 animate-bounce"
-				style={{ animationDelay: "0ms" }}
-			/>
-			<span
-				className="h-1.5 w-1.5 rounded-full bg-muted-foreground/50 animate-bounce"
-				style={{ animationDelay: "150ms" }}
-			/>
-			<span
-				className="h-1.5 w-1.5 rounded-full bg-muted-foreground/50 animate-bounce"
-				style={{ animationDelay: "300ms" }}
-			/>
+		<div
+			className="flex items-center gap-2 text-muted-foreground text-xs"
+			aria-live="polite"
+			data-slot="turn-indicator"
+		>
+			<Shimmer as="span" duration={1.6}>
+				{label}
+			</Shimmer>
+			{elapsed >= 2 && (
+				<span className="tabular-nums text-muted-foreground/70">
+					{elapsed}s
+				</span>
+			)}
 		</div>
 	);
 }

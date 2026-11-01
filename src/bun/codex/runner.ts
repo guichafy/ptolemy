@@ -1,5 +1,5 @@
 import type { ThreadEvent } from "@openai/codex-sdk";
-import type { AgentEvent } from "@/shared/agent-protocol";
+import type { AgentEvent, SessionInfoPatch } from "@/shared/agent-protocol";
 import type {
 	MessagePersister,
 	StreamMessageSender,
@@ -32,6 +32,13 @@ export interface RunCodexTurnArgs {
 	turnKey?: string;
 	/** Fires when Codex reveals the thread id (first turn of a new thread). */
 	onThreadId?: (threadId: string) => void;
+	/**
+	 * Reads the resolved model and context usage once the turn's stream is
+	 * over (the JSONL stream does not carry them; see `rollout-info.ts`).
+	 */
+	readSessionInfo?: () => Promise<SessionInfoPatch | null>;
+	/** Fires with the patch from `readSessionInfo`, for persistence. */
+	onSessionInfo?: (patch: SessionInfoPatch) => void;
 	now?: () => number;
 }
 
@@ -129,6 +136,24 @@ export async function runCodexTurn(
 	}
 
 	const durationMs = now() - startedAt;
+
+	let info: SessionInfoPatch | null = null;
+	if (outcome !== "cancelled" && args.readSessionInfo) {
+		try {
+			info = await args.readSessionInfo();
+		} catch (err) {
+			console.warn("[codex:turn] readSessionInfo failed:", err);
+		}
+	}
+	if (info) {
+		send([{ type: "session-info", info }]);
+		try {
+			args.onSessionInfo?.(info);
+		} catch (hookErr) {
+			console.error("[codex:turn] onSessionInfo hook threw:", hookErr);
+		}
+	}
+
 	if (ctx.blocks.length > 0) {
 		try {
 			await args.persister.appendMessage(
@@ -137,6 +162,7 @@ export async function runCodexTurn(
 				ctx.blocks,
 				{
 					durationMs,
+					...(info?.resolvedModel && { model: info.resolvedModel }),
 					...(ctx.usage && {
 						usage: {
 							input: ctx.usage.input_tokens,

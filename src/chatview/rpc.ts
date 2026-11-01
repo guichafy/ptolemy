@@ -3,6 +3,7 @@ import type {
 	AgentEvent,
 	AgentKind,
 	ApproveBehavior,
+	ContextUsageInfo,
 	ClaudeAuthMode as ProtocolClaudeAuthMode,
 	ProtocolModelInfo,
 } from "@/shared/agent-protocol";
@@ -155,6 +156,10 @@ export interface SessionMeta {
 	updatedAt: string;
 	messageCount: number;
 	lastMessage: string;
+	/** Concrete model behind `model` (e.g. the alias `default`), once known. */
+	resolvedModel?: string;
+	/** Context window usage after the last turn. */
+	contextUsage?: ContextUsageInfo;
 }
 
 /** Block type for stored messages. */
@@ -187,6 +192,8 @@ export interface StoredMessage {
 	tokenUsage?: { input: number; output: number };
 	/** Set when a per-turn model override was used for a user message. */
 	modelUsed?: string;
+	/** Assistant messages: concrete model that produced the reply. */
+	model?: string;
 }
 
 interface PtolemyRPCSchema extends ElectrobunRPCSchema {

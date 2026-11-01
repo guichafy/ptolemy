@@ -54,6 +54,43 @@ const usage = {
 };
 
 describe("runCodexTurn", () => {
+	it("publica session-info antes do finish e grava o modelo resolvido", async () => {
+		const h = harness();
+		const onSessionInfo = vi.fn();
+		const info = {
+			resolvedModel: "gpt-6-astra",
+			contextUsage: {
+				usedTokens: 1200,
+				maxTokens: 272000,
+				updatedAt: "2026-11-01T10:00:00.000Z",
+			},
+		};
+		await runCodexTurn({
+			thread: fakeThread([
+				{ type: "thread.started", thread_id: "th_9" },
+				{
+					type: "item.completed",
+					item: { id: "item_0", type: "agent_message", text: "ok" },
+				},
+				{ type: "turn.completed", usage },
+			]),
+			prompt: "oi",
+			sessionId: "s1",
+			sender: h.sender,
+			persister: h.persister,
+			signal: new AbortController().signal,
+			turnKey: "k",
+			readSessionInfo: async () => info,
+			onSessionInfo,
+		});
+		expect(onSessionInfo).toHaveBeenCalledWith(info);
+		expect(h.sent).toContainEqual({ type: "session-info", info });
+		expect(h.order.indexOf("send:session-info")).toBeLessThan(
+			h.order.indexOf("send:finish"),
+		);
+		expect(h.persisted[0].meta).toMatchObject({ model: "gpt-6-astra" });
+	});
+
 	it("transmite eventos, persiste antes do finish e informa o thread id", async () => {
 		const h = harness();
 		const onThreadId = vi.fn();

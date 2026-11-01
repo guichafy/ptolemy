@@ -42,6 +42,11 @@ export interface ProtocolModelInfo {
 	supportsAdaptiveThinking?: boolean;
 	supportsFastMode?: boolean;
 	supportsAutoMode?: boolean;
+	/**
+	 * For sentinel entries such as Codex's `"default"`: the concrete model the
+	 * sentinel currently resolves to, when the backend can tell.
+	 */
+	resolvesTo?: string;
 }
 
 export type ThinkingConfig =
@@ -118,6 +123,43 @@ export interface TokenUsage {
 	outputTokens: number;
 	cacheReadTokens?: number;
 	cacheCreationTokens?: number;
+}
+
+// ---------------------------------------------------------------------------
+// Context window usage
+// ---------------------------------------------------------------------------
+
+/**
+ * Snapshot of how much of the model's context window the conversation
+ * occupies, taken after the last model request of a turn. Persisted on the
+ * session meta so a reopened chat shows it before the next turn.
+ */
+export interface ContextUsageInfo {
+	/** Tokens occupying the context window (prompt + cache + last output). */
+	usedTokens: number;
+	/** Context window size of the model, when the agent reports it. */
+	maxTokens?: number;
+	/** Breakdown of the last request. */
+	inputTokens?: number;
+	outputTokens?: number;
+	cacheReadTokens?: number;
+	cacheCreationTokens?: number;
+	reasoningTokens?: number;
+	/** Cost of the last turn in USD (Claude only). */
+	lastTurnCostUsd?: number;
+	/** ISO timestamp of the snapshot. */
+	updatedAt: string;
+}
+
+/**
+ * Live facts about a session that the agent reveals while running: the
+ * concrete model behind an alias such as `"default"`, and the context usage.
+ * Every field is optional; consumers merge patches.
+ */
+export interface SessionInfoPatch {
+	/** Concrete model id that served the last request (never an alias). */
+	resolvedModel?: string;
+	contextUsage?: ContextUsageInfo;
 }
 
 // ---------------------------------------------------------------------------
@@ -257,6 +299,7 @@ export type AgentEvent =
 			error: { message: string; code?: string; recoverable: boolean };
 	  }
 	| { type: "session-model-changed"; sessionId: string; model: string }
+	| { type: "session-info"; info: SessionInfoPatch }
 	| { type: "models-cache-invalidated"; authMode: ClaudeAuthMode };
 
 // ---------------------------------------------------------------------------

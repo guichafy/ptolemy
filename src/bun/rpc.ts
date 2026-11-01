@@ -43,7 +43,8 @@ import {
 	installCodexCli,
 	openCodexLogin,
 } from "./codex/auth";
-import { CODEX_MODELS } from "./codex/models";
+import { listCodexModels } from "./codex/models";
+import { readConfiguredCodexModel } from "./codex/rollout-info";
 import {
 	type GitHubItem,
 	type GitHubSubType,
@@ -736,7 +737,9 @@ export const requestHandlers: BunRequestHandlers = {
 	codexGetAuthStatus: async () => getCodexAuthStatus(),
 	codexOpenLogin: async () => openCodexLogin(),
 	codexInstallCli: async () => installCodexCli(),
-	codexListModels: async () => ({ models: CODEX_MODELS }),
+	codexListModels: async () => ({
+		models: await listCodexModels(readConfiguredCodexModel),
+	}),
 	agentApproveTool: async ({ permissionId, behavior, modifiedArgs }) => {
 		const ok = getPermissionGate().approve(
 			permissionId,

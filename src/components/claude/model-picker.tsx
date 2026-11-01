@@ -1,4 +1,4 @@
-import { X } from "lucide-react";
+import { ChevronDownIcon, X } from "lucide-react";
 import { useState } from "react";
 import {
 	ModelSelector,
@@ -29,6 +29,11 @@ export interface ModelPickerProps {
 	 * differs from sessionDefault, the picker is rendering an override.
 	 */
 	sessionDefault?: string | null;
+	/**
+	 * Concrete model behind an alias value (e.g. `default` → `GPT-6 Astra`),
+	 * shown muted next to the trigger label.
+	 */
+	resolvedLabel?: string | null;
 }
 
 export function ModelPicker({
@@ -39,6 +44,7 @@ export function ModelPicker({
 	disabled,
 	placeholder = "Selecionar modelo",
 	sessionDefault,
+	resolvedLabel,
 }: ModelPickerProps) {
 	const [open, setOpen] = useState(false);
 
@@ -82,10 +88,21 @@ export function ModelPicker({
 						type="button"
 						variant={variant === "default" ? "outline" : "ghost"}
 						disabled={disabled}
-						className={cn(triggerSizing)}
+						className={cn("min-w-0 gap-1", triggerSizing)}
 						aria-label={placeholder}
+						title={
+							resolvedLabel && resolvedLabel !== triggerLabel
+								? `${triggerLabel} (${resolvedLabel})`
+								: triggerLabel
+						}
 					>
-						{triggerLabel}
+						<span className="truncate">{triggerLabel}</span>
+						{resolvedLabel && resolvedLabel !== triggerLabel && (
+							<span className="truncate font-normal text-muted-foreground">
+								· {resolvedLabel}
+							</span>
+						)}
+						<ChevronDownIcon className="size-3 shrink-0 opacity-60" />
 					</Button>
 				</ModelSelectorTrigger>
 				<ModelSelectorContent title={placeholder}>
@@ -102,9 +119,14 @@ export function ModelPicker({
 								>
 									<div className="flex flex-col">
 										<span className="font-medium">{m.displayName}</span>
-										{m.description && (
+										{(m.description || m.resolvesTo) && (
 											<span className="text-[10px] text-muted-foreground">
-												{m.description}
+												{[
+													m.description,
+													m.resolvesTo && `atual: ${m.resolvesTo}`,
+												]
+													.filter(Boolean)
+													.join(" · ")}
 											</span>
 										)}
 									</div>

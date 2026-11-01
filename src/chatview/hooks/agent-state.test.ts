@@ -11,6 +11,7 @@ import {
 	hydrateMessages,
 	initialAgentState,
 	markTurnStart,
+	reconcileMessages,
 	reduceAgentState,
 	resolvePermission,
 	storedToAgentMessage,
@@ -987,5 +988,110 @@ describe("hydrateMessages", () => {
 		expect(hydrated.sessionId).toBe("s1");
 		expect(hydrated.sessionState).toBe("requires_action");
 		expect(hydrated.pendingPermissions).toHaveLength(1);
+	});
+});
+
+describe("session-info", () => {
+	it("merges the resolved model and context usage", () => {
+		const usage = {
+			usedTokens: 1000,
+			maxTokens: 200000,
+			updatedAt: "2026-11-01T10:00:00.000Z",
+		};
+		const s1 = reduce([
+			{ type: "session-info", info: { resolvedModel: "claude-opus-4-5" } },
+			{ type: "session-info", info: { contextUsage: usage } },
+		]);
+		expect(s1.resolvedModel).toBe("claude-opus-4-5");
+		expect(s1.contextUsage).toEqual(usage);
+	});
+
+	it("returns the same state object for a no-op patch", () => {
+		const s = initialAgentState();
+		expect(reduceAgentState(s, { type: "session-info", info: {} })).toBe(s);
+	});
+
+	it("survives session-start", () => {
+		const s = reduce([
+			{ type: "session-info", info: { resolvedModel: "gpt-6-astra" } },
+			{ type: "session-start", sessionId: "s1" },
+		]);
+		expect(s.resolvedModel).toBe("gpt-6-astra");
+	});
+
+	it("finish stamps the turn's model, duration and per-turn cost", () => {
+		const s = reduce([
+			{ type: "text-start", messageId: "m1", parentToolCallId: null },
+			{ type: "text-delta", messageId: "m1", delta: "oi" },
+			{
+				type: "session-info",
+				info: {
+					resolvedModel: "claude-opus-4-5",
+					contextUsage: {
+						usedTokens: 10,
+						lastTurnCostUsd: 0.02,
+						updatedAt: "x",
+					},
+				},
+			},
+			{
+				type: "finish",
+				reason: "success",
+				usage: { inputTokens: 1, outputTokens: 1 },
+				totalCostUsd: 9.99,
+				durationMs: 4200,
+			},
+		]);
+		expect(s.messages[0].meta).toEqual({
+			model: "claude-opus-4-5",
+			durationMs: 4200,
+			costUsd: 0.02,
+		});
+	});
+});
+
+describe("reconcileMessages", () => {
+	const text = (id: string, role: "user" | "assistant", t: string) =>
+		({
+			id,
+			role,
+			createdAt: 0,
+			parts: [
+				{
+					kind: "text",
+					messageId: id,
+					text: t,
+					streaming: false,
+					parentToolCallId: null,
+				},
+			],
+		}) as AgentMessage;
+
+	it("keeps unchanged messages (and their ids) across a re-read", () => {
+		const live = [
+			text("user-1", "user", "oi"),
+			text("msg_1", "assistant", "olá"),
+		];
+		const stored = [
+			text("stored-0", "user", "oi"),
+			{ ...text("stored-1", "assistant", "olá"), meta: { durationMs: 10 } },
+		];
+		const next = reconcileMessages(live, stored);
+		expect(next[0]).toBe(live[0]);
+		expect(next[1].id).toBe("msg_1");
+		expect(next[1].meta).toEqual({ durationMs: 10 });
+	});
+
+	it("takes the stored message when the content differs", () => {
+		const live = [text("msg_1", "assistant", "parcial")];
+		const stored = [text("stored-0", "assistant", "parcial e completo")];
+		expect(reconcileMessages(live, stored)[0]).toBe(stored[0]);
+	});
+
+	it("hydrateMessages uses reconciliation", () => {
+		const live = text("user-1", "user", "oi");
+		const state = { ...initialAgentState(), messages: [live] };
+		const next = hydrateMessages(state, [text("stored-0", "user", "oi")]);
+		expect(next.messages[0]).toBe(live);
 	});
 });

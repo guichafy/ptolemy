@@ -1,4 +1,5 @@
 import type { ThreadOptions } from "@openai/codex-sdk";
+import type { SessionInfoPatch } from "@/shared/agent-protocol";
 import type {
 	MessagePersister,
 	StreamMessageSender,
@@ -6,6 +7,7 @@ import type {
 import type { CodexReasoningEffort, CodexSandboxMode } from "../settings";
 import { buildCodexEnv, findCodexCli } from "./codex-cli";
 import { toSdkModel } from "./models";
+import { readCodexSessionInfo } from "./rollout-info";
 import { type CodexThreadLike, runCodexTurn } from "./runner";
 
 export interface CodexTurnConfig {
@@ -26,6 +28,10 @@ export interface CodexRuntimeDeps {
 	/** Read fresh before every turn so settings edits apply to the next turn. */
 	loadConfig: () => Promise<CodexTurnConfig>;
 	onThreadId: (threadId: string) => void;
+	/** Persists the resolved model / context usage revealed by a turn. */
+	onSessionInfo?: (patch: SessionInfoPatch) => void;
+	/** Injected in tests; defaults to reading the thread's rollout file. */
+	readSessionInfo?: (threadId: string) => Promise<SessionInfoPatch | null>;
 	/** Injected in tests; defaults to spawning the user's Codex CLI. */
 	createThread?: (
 		threadId: string | null,
@@ -141,6 +147,13 @@ export class CodexSessionRuntime {
 						this.deps.onThreadId(id);
 					}
 				},
+				readSessionInfo: async () => {
+					const threadId = this.currentThreadId;
+					if (!threadId) return null;
+					const read = this.deps.readSessionInfo ?? readCodexSessionInfo;
+					return read(threadId);
+				},
+				onSessionInfo: this.deps.onSessionInfo,
 			});
 		} catch (err) {
 			// Setup failures (CLI missing, settings unreadable) never reach

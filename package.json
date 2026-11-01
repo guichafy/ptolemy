@@ -47,7 +47,7 @@
 		"@radix-ui/react-separator": "^1.1.8",
 		"@radix-ui/react-slot": "^1.2.4",
 		"@radix-ui/react-switch": "^1.2.6",
-		"@types/react-syntax-highlighter": "^15.5.13",
+		"@streamdown/code": "2.0.0",
 		"class-variance-authority": "^0.7.1",
 		"clsx": "^2.1.1",
 		"cmdk": "^1.1.1",
@@ -58,10 +58,9 @@
 		"radix-ui": "^1.4.3",
 		"react": "^19.2.5",
 		"react-dom": "^19.2.5",
-		"react-markdown": "^10.1.0",
-		"react-syntax-highlighter": "^16.1.1",
-		"remark-gfm": "^4.0.1",
-		"tailwind-merge": "^3.5.0"
+		"streamdown": "2.7.1",
+		"tailwind-merge": "^3.5.0",
+		"use-stick-to-bottom": "1.1.6"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.4.10",

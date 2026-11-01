@@ -1,15 +1,25 @@
 /**
- * AI Elements `PromptInput` — textarea with auto-submit via enter, stop
- * button while streaming, and composable toolbar. API mirrors
- * https://elements.ai-sdk.dev/r/prompt-input.json.
+ * AI Elements `PromptInput`: composer with an auto-growing textarea and a
+ * footer of tools + submit. Mirrors the structure of
+ * https://github.com/vercel/ai-elements (`prompt-input.tsx`): `PromptInput`
+ * › `PromptInputBody` › `PromptInputTextarea`, then `PromptInputFooter` with
+ * `PromptInputTools` / `PromptInputButton` and `PromptInputSubmit`.
+ *
+ * Upstream also owns attachments, drag-and-drop and a provider; the chat
+ * keeps those concerns in `ChatPane`, so only the layout primitives are
+ * ported. The textarea grows with JS instead of `field-sizing: content`
+ * because the macOS WebView (WebKit) does not support it on every version.
  */
 
-import { ArrowUp, Square } from "lucide-react";
+import { ArrowUpIcon, LoaderCircleIcon, SquareIcon, XIcon } from "lucide-react";
 import {
 	type ComponentProps,
 	type FormEvent,
 	forwardRef,
 	type KeyboardEvent,
+	useCallback,
+	useLayoutEffect,
+	useRef,
 } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -24,12 +34,14 @@ export const PromptInput = forwardRef<HTMLFormElement, PromptInputProps>(
 	({ className, children, onSubmit, ...props }, ref) => (
 		<form
 			ref={ref}
+			data-slot="prompt-input"
 			onSubmit={(e) => {
 				e.preventDefault();
 				onSubmit?.(e);
 			}}
 			className={cn(
-				"flex flex-col gap-2 rounded-lg border border-border/60 bg-background p-2 shadow-sm",
+				"flex w-full flex-col overflow-hidden rounded-2xl border border-border bg-card/60 shadow-sm transition-colors",
+				"focus-within:border-ring/40 focus-within:ring-2 focus-within:ring-ring/10",
 				className,
 			)}
 			{...props}
@@ -40,53 +52,137 @@ export const PromptInput = forwardRef<HTMLFormElement, PromptInputProps>(
 );
 PromptInput.displayName = "PromptInput";
 
+export const PromptInputBody = ({
+	className,
+	...props
+}: ComponentProps<"div">) => (
+	<div
+		data-slot="prompt-input-body"
+		className={cn("flex flex-col", className)}
+		{...props}
+	/>
+);
+
 export interface PromptInputTextareaProps extends ComponentProps<"textarea"> {
 	/** When true, pressing Enter (without shift) submits the form. Default true. */
 	submitOnEnter?: boolean;
+	/** Max height in px before the textarea scrolls. */
+	maxHeight?: number;
 }
 
 export const PromptInputTextarea = forwardRef<
 	HTMLTextAreaElement,
 	PromptInputTextareaProps
->(({ className, submitOnEnter = true, onKeyDown, ...props }, ref) => {
-	const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-		onKeyDown?.(e);
-		if (e.defaultPrevented) return;
-		if (submitOnEnter && e.key === "Enter" && !e.shiftKey) {
-			e.preventDefault();
-			e.currentTarget.form?.requestSubmit();
-		}
-	};
-	return (
-		<textarea
-			ref={ref}
-			rows={1}
-			onKeyDown={handleKeyDown}
-			className={cn(
-				"max-h-40 min-h-[2.25rem] w-full resize-none bg-transparent px-2 py-1.5 text-sm outline-none placeholder:text-muted-foreground",
-				className,
-			)}
-			{...props}
-		/>
-	);
-});
+>(
+	(
+		{
+			className,
+			submitOnEnter = true,
+			maxHeight = 192,
+			onKeyDown,
+			value,
+			...props
+		},
+		ref,
+	) => {
+		const localRef = useRef<HTMLTextAreaElement | null>(null);
+		const setRefs = useCallback(
+			(node: HTMLTextAreaElement | null) => {
+				localRef.current = node;
+				if (typeof ref === "function") ref(node);
+				else if (ref) ref.current = node;
+			},
+			[ref],
+		);
+
+		// Grow with the content (value changes include programmatic resets).
+		// biome-ignore lint/correctness/useExhaustiveDependencies: value drives the height
+		useLayoutEffect(() => {
+			const el = localRef.current;
+			if (!el) return;
+			el.style.height = "auto";
+			el.style.height = `${Math.min(el.scrollHeight, maxHeight)}px`;
+			el.style.overflowY = el.scrollHeight > maxHeight ? "auto" : "hidden";
+		}, [value, maxHeight]);
+
+		const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+			onKeyDown?.(e);
+			if (e.defaultPrevented) return;
+			// IME composition (e.g. accents on some layouts) must not submit.
+			if (e.nativeEvent.isComposing) return;
+			if (submitOnEnter && e.key === "Enter" && !e.shiftKey) {
+				e.preventDefault();
+				e.currentTarget.form?.requestSubmit();
+			}
+		};
+
+		return (
+			<textarea
+				ref={setRefs}
+				rows={1}
+				value={value}
+				data-slot="prompt-input-textarea"
+				onKeyDown={handleKeyDown}
+				className={cn(
+					"min-h-14 w-full resize-none bg-transparent px-4 pt-3.5 pb-1 text-sm leading-relaxed outline-none placeholder:text-muted-foreground disabled:opacity-60",
+					className,
+				)}
+				{...props}
+			/>
+		);
+	},
+);
 PromptInputTextarea.displayName = "PromptInputTextarea";
 
-export interface PromptInputToolbarProps extends ComponentProps<"div"> {}
-
-export const PromptInputToolbar = forwardRef<
+export const PromptInputFooter = forwardRef<
 	HTMLDivElement,
-	PromptInputToolbarProps
->(({ className, children, ...props }, ref) => (
+	ComponentProps<"div">
+>(({ className, ...props }, ref) => (
 	<div
 		ref={ref}
-		className={cn("flex items-center justify-end gap-1", className)}
+		data-slot="prompt-input-footer"
+		className={cn("flex items-center justify-between gap-1 p-2", className)}
 		{...props}
-	>
-		{children}
-	</div>
+	/>
 ));
-PromptInputToolbar.displayName = "PromptInputToolbar";
+PromptInputFooter.displayName = "PromptInputFooter";
+
+/** @deprecated Kept for older call sites; use `PromptInputFooter`. */
+export const PromptInputToolbar = PromptInputFooter;
+
+export const PromptInputTools = ({
+	className,
+	...props
+}: ComponentProps<"div">) => (
+	<div
+		data-slot="prompt-input-tools"
+		className={cn("flex min-w-0 items-center gap-1", className)}
+		{...props}
+	/>
+);
+
+export type PromptInputButtonProps = ComponentProps<typeof Button>;
+
+export const PromptInputButton = forwardRef<
+	HTMLButtonElement,
+	PromptInputButtonProps
+>(({ variant = "ghost", className, size, children, ...props }, ref) => {
+	const isIconOnly =
+		Array.isArray(children) === false && typeof children !== "string";
+	return (
+		<Button
+			ref={ref}
+			type="button"
+			variant={variant}
+			size={size ?? (isIconOnly ? "icon-sm" : "sm")}
+			className={cn("shrink-0 gap-1.5 text-muted-foreground", className)}
+			{...props}
+		>
+			{children}
+		</Button>
+	);
+});
+PromptInputButton.displayName = "PromptInputButton";
 
 export interface PromptInputSubmitProps extends ComponentProps<typeof Button> {
 	status?: PromptInputStatus;
@@ -96,20 +192,24 @@ export const PromptInputSubmit = forwardRef<
 	HTMLButtonElement,
 	PromptInputSubmitProps
 >(({ status = "ready", className, children, disabled, ...props }, ref) => {
-	const isStreaming = status === "streaming" || status === "submitted";
-	const icon = isStreaming ? (
-		<Square className="h-3.5 w-3.5" />
-	) : (
-		<ArrowUp className="h-3.5 w-3.5" />
-	);
+	let icon = <ArrowUpIcon className="size-4" />;
+	if (status === "submitted") {
+		icon = <LoaderCircleIcon className="size-4 animate-spin" />;
+	} else if (status === "streaming") {
+		icon = <SquareIcon className="size-3.5 fill-current" />;
+	} else if (status === "error") {
+		icon = <XIcon className="size-4" />;
+	}
+	const isBusy = status === "streaming" || status === "submitted";
 	return (
 		<Button
 			ref={ref}
 			type="submit"
-			size="sm"
-			className={cn("h-8 w-8 rounded-full p-0", className)}
+			size="icon-sm"
+			data-slot="prompt-input-submit"
+			className={cn("shrink-0 rounded-full", className)}
 			disabled={disabled}
-			aria-label={isStreaming ? "Parar geração" : "Enviar mensagem"}
+			aria-label={isBusy ? "Parar geração" : "Enviar mensagem"}
 			{...props}
 		>
 			{children ?? icon}

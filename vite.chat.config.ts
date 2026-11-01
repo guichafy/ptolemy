@@ -42,10 +42,19 @@ export default defineConfig(({ mode }) => ({
 				manualChunks(id) {
 					if (!id.includes("node_modules")) return;
 					if (id.includes("@radix-ui")) return "vendor-radix";
-					if (id.includes("react-syntax-highlighter") || id.includes("refractor")) {
-						return "vendor-syntax-highlighter";
-					}
-					if (id.includes("react-markdown") || id.includes("remark") || id.includes("rehype")) {
+					// Shiki grammars/themes are lazy chunks of their own; keep them
+					// out of the markdown vendor chunk.
+					if (id.includes("/shiki/") || id.includes("@shikijs")) return;
+					if (
+						id.includes("streamdown") ||
+						id.includes("remark") ||
+						id.includes("rehype") ||
+						id.includes("micromark") ||
+						id.includes("mdast") ||
+						id.includes("hast") ||
+						id.includes("unified") ||
+						id.includes("/marked/")
+					) {
 						return "vendor-markdown";
 					}
 					if (
@@ -64,8 +73,9 @@ export default defineConfig(({ mode }) => ({
 			"react",
 			"react-dom/client",
 			"react/jsx-runtime",
-			"react-markdown",
-			"react-syntax-highlighter",
+			"streamdown",
+			"@streamdown/code",
+			"use-stick-to-bottom",
 			"lucide-react",
 			"clsx",
 			"tailwind-merge",
@@ -75,6 +85,7 @@ export default defineConfig(({ mode }) => ({
 			"@radix-ui/react-separator",
 			"@radix-ui/react-slot",
 			"@radix-ui/react-tooltip",
+			"radix-ui",
 		],
 		noDiscovery: true,
 	},
