@@ -8,6 +8,7 @@ import {
 	pressEnter,
 	pressEscape,
 	saveScreenshot,
+	selectProvider,
 	startAppiumServer,
 	stopAppiumServer,
 	tabToProvider,
@@ -66,10 +67,9 @@ describe("Ptolemy Screenshots", () => {
 
 	beforeEach(async () => {
 		// Ensure every test starts with an empty input on the Apps provider.
+		await selectProvider(driver, "apps");
 		await pressEscape(driver);
-		await wait(Timing.POST_TAB);
 		await clearInput(driver);
-		await tabToProvider(driver, currentProviderIndex, 0, Providers.length);
 		currentProviderIndex = 0;
 		await wait(Timing.SETTLE_LOCAL);
 	});
@@ -192,5 +192,46 @@ describe("Ptolemy Screenshots", () => {
 
 		const filePath = await saveScreenshot(driver, Screenshots.APPS);
 		console.log(`Salvo: ${filePath} (resultados em ${report.elapsedMs}ms)`);
+	});
+
+	it("Composer de Claude: Skills disponíveis antes da conversa", async () => {
+		await selectProvider(driver, "claude");
+		currentProviderIndex = Providers.indexOf("claude");
+		const composer = await waitForResults(
+			driver,
+			["Mensagem para Claude", "Configurar Skills"],
+			Timing.RESULTS_WAIT,
+			Timing.RESULTS_POLL,
+		);
+		expect(composer.missing, composer.source.slice(0, 1800)).toEqual([]);
+		const skills = await driver.$(
+			'//XCUIElementTypeButton[@label="Configurar Skills" or @title="Configurar Skills"]',
+		);
+		await skills.waitForEnabled({ timeout: Timing.RESULTS_WAIT });
+		await skills.click();
+		const picker = await waitForResults(
+			driver,
+			[
+				"Skills da conversa",
+				"URL da Skill no GitHub",
+				"Usar seleção como padrão",
+			],
+			Timing.RESULTS_WAIT,
+			Timing.RESULTS_POLL,
+		);
+		expect(picker.missing, picker.source.slice(0, 1800)).toEqual([]);
+		await saveScreenshot(driver, "skills-composer.png");
+		await pressEscape(driver);
+		// Returning from the composer must not depend on cycling through its
+		// controls. Prove the ordinary search input is reachable again.
+		await selectProvider(driver, "apps");
+		currentProviderIndex = 0;
+		const apps = await waitForResults(
+			driver,
+			["Buscar aplicativos..."],
+			Timing.RESULTS_WAIT,
+			Timing.RESULTS_POLL,
+		);
+		expect(apps.missing).toEqual([]);
 	});
 });

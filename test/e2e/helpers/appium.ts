@@ -9,6 +9,7 @@ import {
 	BUNDLE_ID,
 	Key,
 	ModifierFlag,
+	type ProviderId,
 	SCREENSHOTS_DIR,
 	Timing,
 } from "./constants";
@@ -127,6 +128,32 @@ export async function pressEscape(driver: WebdriverIO.Browser): Promise<void> {
 export async function clearInput(driver: WebdriverIO.Browser): Promise<void> {
 	await sendKey(driver, "a", ModifierFlag.COMMAND);
 	await sendKey(driver, Key.BACKSPACE);
+}
+
+/** Composer Tab navigates controls, so provider resets must use the mode bar. */
+export async function selectProvider(
+	driver: WebdriverIO.Browser,
+	provider: ProviderId,
+): Promise<void> {
+	const labels: Record<ProviderId, string> = {
+		apps: "Apps",
+		github: "GitHub",
+		calc: "Calc",
+		web: "Web",
+		claude: "Claude Code",
+	};
+	const title = labels[provider];
+	const button = await driver.$(
+		`//XCUIElementTypeButton[@title="${title}" or @label="${title}"]`,
+	);
+	await button.click();
+	await wait(Timing.POST_TAB);
+	if (provider !== "claude") {
+		// Clicking a mode leaves keyboard focus on its button. Refocus the
+		// search field before typing instead of relying on the previous DOM.
+		const input = await driver.$("//XCUIElementTypeTextField");
+		await input.click();
+	}
 }
 
 /**
