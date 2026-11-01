@@ -253,9 +253,29 @@ function PaletteContent() {
 	}, [shouldShowResultsArea, isSettingsOpen, agent]);
 
 	function handleKeyDown(e: React.KeyboardEvent) {
-		// Composer and focused recent-session buttons own their keyboard actions.
-		if (agent && e.target instanceof HTMLElement && e.target.closest("button"))
+		if (
+			e.defaultPrevented ||
+			e.nativeEvent.isComposing ||
+			e.nativeEvent.keyCode === 229
+		)
 			return;
+		const target = e.target;
+		// React portals bubble through the owner tree. Popovers/dialogs have
+		// their own focus scope and must never trigger palette actions.
+		if (!(target instanceof HTMLElement) || !e.currentTarget.contains(target))
+			return;
+		if (e.key === "Tab" && e.ctrlKey && !e.metaKey && !e.altKey) {
+			e.preventDefault();
+			// Reused search inputs keep focus; newly mounted composers autofocus.
+			e.currentTarget
+				.querySelector<HTMLElement>(
+					"[data-palette-search], [data-palette-prompt]",
+				)
+				?.focus();
+			if (e.shiftKey) cyclePrev();
+			else cycleNext();
+			return;
+		}
 		if (activeProvider.id === "github" && e.metaKey) {
 			if (e.key === "f" || e.key === "F") {
 				e.preventDefault();
@@ -279,29 +299,47 @@ function PaletteContent() {
 				}
 			}
 		}
+		if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+		const isSearch = target.matches("[data-palette-search]");
+		const isPrompt = target.matches("[data-palette-prompt]");
+		const result = target.closest<HTMLElement>("[data-palette-result]");
+		if (!isSearch && !isPrompt && !result) return;
 		if (e.key === "Escape") {
 			clearPalette();
 			return;
 		}
-		if (e.key === "Tab") {
+		if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+			// A multiline draft owns its caret; empty prompts can reach recents.
+			if (isPrompt && query.length > 0) return;
+			const items = Array.from(
+				e.currentTarget.querySelectorAll<HTMLElement>("[data-palette-result]"),
+			);
+			if (!items.length) return;
 			e.preventDefault();
-			if (e.shiftKey) cyclePrev();
-			else cycleNext();
-			return;
-		}
-		if (e.key === "ArrowDown") {
-			e.preventDefault();
-			if (results.length > 0) {
-				setSelectedIndex((i) => Math.min(i + 1, results.length - 1));
+			const current = result ? items.indexOf(result) : -1;
+			if (e.key === "ArrowUp" && current === 0) {
+				e.currentTarget
+					.querySelector<HTMLElement>(
+						"[data-palette-search], [data-palette-prompt]",
+					)
+					?.focus();
+			} else {
+				const next =
+					current < 0
+						? e.key === "ArrowDown"
+							? 0
+							: items.length - 1
+						: Math.min(
+								current + (e.key === "ArrowDown" ? 1 : -1),
+								items.length - 1,
+							);
+				items[next].focus();
 			}
 			return;
 		}
-		if (e.key === "ArrowUp") {
+		// Buttons activate via their native click, and the composer submits its form.
+		if (e.key === "Enter" && isSearch) {
 			e.preventDefault();
-			setSelectedIndex((i) => Math.max(i - 1, 0));
-			return;
-		}
-		if (e.key === "Enter") {
 			const resultsAreFresh = resultsQueryRef.current === query;
 			if (resultsAreFresh && results[selectedIndex]) {
 				selectResult(results[selectedIndex]);
@@ -322,109 +360,117 @@ function PaletteContent() {
 			onKeyDown={handleKeyDown}
 		>
 			<ModeBar />
-			{agent ? (
-				<AgentComposer
-					key={agent}
-					agent={agent}
-					value={query}
-					onChange={handleQueryChange}
-					onCreated={clearPalette}
-				/>
-			) : (
-				<div className="border-b px-4 py-3 flex items-center gap-2">
-					{activeProvider.id === "github" && (
-						<SearchTypeCombobox
-							ref={comboboxRef}
-							onOpenChange={setIsComboboxOpen}
-						/>
-					)}
-					<SearchInput
-						placeholder={activeProvider.placeholder}
+			<div
+				role="tabpanel"
+				id={`plugin-panel-${activeProvider.id}`}
+				aria-labelledby={`plugin-tab-${activeProvider.id}`}
+				className="flex min-h-0 flex-1 flex-col"
+			>
+				{agent ? (
+					<AgentComposer
+						key={agent}
+						agent={agent}
 						value={query}
 						onChange={handleQueryChange}
+						onCreated={clearPalette}
 					/>
-				</div>
-			)}
+				) : (
+					<div className="border-b px-4 py-3 flex items-center gap-2">
+						{activeProvider.id === "github" && (
+							<SearchTypeCombobox
+								ref={comboboxRef}
+								onOpenChange={setIsComboboxOpen}
+							/>
+						)}
+						<SearchInput
+							placeholder={activeProvider.placeholder}
+							value={query}
+							onChange={handleQueryChange}
+						/>
+					</div>
+				)}
 
-			{isCalc && shouldShowResultsArea ? (
-				<div className="flex-1">
-					<CalculatorResult
-						expression={query}
-						result={calcResult?.title ?? null}
-						error={
-							calcResult?.id === "calc-error"
-								? (calcResult.subtitle ?? null)
-								: error
-						}
-					/>
-				</div>
-			) : shouldShowResultsArea ? (
-				<div className="flex-1 flex flex-col overflow-hidden">
-					{agent && (
-						<p className="px-5 pt-3 pb-1 text-xs text-muted-foreground">
-							Sessões recentes
-						</p>
-					)}
-					{hasAnyResults ? (
-						<ScrollArea
-							className={cn(
-								"flex-1 transition-opacity duration-150",
-								isLoading && !hasFreshResults && "opacity-70",
-							)}
-						>
-							<div className="p-2">
-								{results.map((result, i) => (
-									<ResultItem
-										key={result.id}
-										result={result}
-										isSelected={i === selectedIndex}
-										onSelect={() => selectResult(result)}
-									/>
-								))}
+				{isCalc && shouldShowResultsArea ? (
+					<div className="flex-1">
+						<CalculatorResult
+							expression={query}
+							result={calcResult?.title ?? null}
+							error={
+								calcResult?.id === "calc-error"
+									? (calcResult.subtitle ?? null)
+									: error
+							}
+						/>
+					</div>
+				) : shouldShowResultsArea ? (
+					<div className="flex-1 flex flex-col overflow-hidden">
+						{agent && (
+							<p className="px-5 pt-3 pb-1 text-xs text-muted-foreground">
+								Sessões recentes
+							</p>
+						)}
+						{hasAnyResults ? (
+							<ScrollArea
+								className={cn(
+									"flex-1 transition-opacity duration-150",
+									isLoading && !hasFreshResults && "opacity-70",
+								)}
+							>
+								<div className="p-2">
+									{results.map((result, i) => (
+										<ResultItem
+											key={result.id}
+											result={result}
+											isSelected={i === selectedIndex}
+											onSelect={() => selectResult(result)}
+											onFocus={() => setSelectedIndex(i)}
+										/>
+									))}
+								</div>
+							</ScrollArea>
+						) : showLoadingState ? (
+							<div className="flex-1 flex items-center justify-center">
+								<p className="text-sm text-muted-foreground animate-pulse">
+									Buscando...
+								</p>
 							</div>
-						</ScrollArea>
-					) : showLoadingState ? (
-						<div className="flex-1 flex items-center justify-center">
-							<p className="text-sm text-muted-foreground animate-pulse">
-								Buscando...
-							</p>
-						</div>
-					) : error ? (
-						<div className="flex-1 flex items-center justify-center px-4">
-							<p className="text-sm text-destructive text-center">{error}</p>
-						</div>
-					) : !isLoading && resultsMatchQuery ? (
-						<div className="flex-1 flex items-center justify-center">
-							<p className="text-sm text-muted-foreground">
-								{agent
-									? "Sua próxima conversa começa acima."
-									: "Nenhum resultado encontrado"}
-							</p>
-						</div>
-					) : (
-						<div className="flex-1" />
-					)}
-				</div>
-			) : null}
+						) : error ? (
+							<div className="flex-1 flex items-center justify-center px-4">
+								<p className="text-sm text-destructive text-center">{error}</p>
+							</div>
+						) : !isLoading && resultsMatchQuery ? (
+							<div className="flex-1 flex items-center justify-center">
+								<p className="text-sm text-muted-foreground">
+									{agent
+										? "Sua próxima conversa começa acima."
+										: "Nenhum resultado encontrado"}
+								</p>
+							</div>
+						) : (
+							<div className="flex-1" />
+						)}
+					</div>
+				) : null}
 
-			{shouldShowResultsArea && (
-				<div className="flex items-center justify-between px-4 py-1.5 border-t border-border/40">
-					<span className="text-[10px] text-muted-foreground/60">
-						{agent ? "Skills preparadas antes da conversa" : "↑↓ navegar"}
-					</span>
-					{activeProvider.id === "github" && lastSearchCached === true && (
-						<span className="text-[10px] text-amber-300/80">⚡ cache</span>
-					)}
-					{activeProvider.id === "github" && lastSearchCached === false && (
-						<span className="text-[10px] text-blue-300/70">🌐 rede</span>
-					)}
-					<span className="text-[10px] text-muted-foreground/60">
-						{agent
-							? "↵ iniciar · ⇧↵ nova linha"
-							: `${isCalc ? "↵ copiar" : "↵ abrir"} · esc fechar`}
-					</span>
-				</div>
-			)}
+				{shouldShowResultsArea && (
+					<div className="flex items-center justify-between px-4 py-1.5 border-t border-border/40">
+						<span className="text-[10px] text-muted-foreground/60">
+							{agent ? "Skills preparadas antes da conversa" : "↑↓ navegar"}
+						</span>
+						{activeProvider.id === "github" && lastSearchCached === true && (
+							<span className="text-[10px] text-amber-300/80">⚡ cache</span>
+						)}
+						{activeProvider.id === "github" && lastSearchCached === false && (
+							<span className="text-[10px] text-blue-300/70">🌐 rede</span>
+						)}
+						<span className="text-[10px] text-muted-foreground/60">
+							{agent
+								? "↵ iniciar · ⇧↵ nova linha"
+								: `${isCalc ? "↵ copiar" : "↵ abrir"} · esc fechar`}
+						</span>
+					</div>
+				)}
+			</div>
 		</div>
 	);
 }

@@ -253,6 +253,7 @@ interface PtolemyRPCSchema extends ElectrobunRPCSchema {
 					projectId?: string;
 					agent?: AgentKind;
 					skillIds?: string[];
+					model?: string;
 				};
 				response: { sessionId: string };
 			};

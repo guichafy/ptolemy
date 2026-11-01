@@ -7,6 +7,7 @@ import {
 	PopoverContent,
 	PopoverTrigger,
 } from "@/components/ui/popover";
+import { navigateOptions } from "@/lib/keyboard-navigation";
 import type { AgentKind } from "@/shared/agent-protocol";
 import type { SkillSummary } from "@/shared/skills";
 import { rpc } from "../providers/rpc";
@@ -96,9 +97,9 @@ export function SkillPicker({
 				</Button>
 			</PopoverTrigger>
 			<PopoverContent
+				onKeyDown={navigateOptions}
 				align="start"
 				className="w-[380px] max-w-[calc(100vw-32px)] max-h-[var(--radix-popover-content-available-height)] overflow-y-auto p-3"
-				onOpenAutoFocus={(event) => event.preventDefault()}
 			>
 				<div className="mb-2 flex items-center justify-between">
 					<h2 className="text-sm font-medium">Skills da conversa</h2>

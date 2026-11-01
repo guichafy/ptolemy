@@ -143,6 +143,7 @@ export interface PtolemyRPCSchema extends ElectrobunRPCSchema {
 					projectId?: string;
 					agent?: AgentKind;
 					skillIds?: string[];
+					model?: string;
 				};
 				response: { sessionId: string };
 			};
@@ -684,11 +685,18 @@ export const requestHandlers: BunRequestHandlers = {
 		return true;
 	},
 	claudeListSessions: async () => claudeListSessions(),
-	claudeCreateSession: async ({ prompt, projectId, agent, skillIds }) => {
+	claudeCreateSession: async ({
+		prompt,
+		projectId,
+		agent,
+		skillIds,
+		model,
+	}) => {
 		const sessionId = await claudeCreateSession(prompt, {
 			projectId,
 			agent,
 			skillIds,
+			model,
 		});
 		console.log(
 			`[claude:rpc] claudeCreateSession: auto-opening chat for sessionId=${sessionId}`,

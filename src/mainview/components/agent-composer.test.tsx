@@ -9,8 +9,16 @@ const request = vi.hoisted(() => ({
 	agentImportSkill: vi.fn(),
 	agentSetDefaultSkills: vi.fn(),
 	claudeCreateSession: vi.fn(),
+	claudeListSupportedModels: vi.fn(),
+	codexListModels: vi.fn(),
 }));
 vi.mock("../providers/rpc", () => ({ rpc: { request } }));
+vi.mock("../settings/settings-context", () => ({
+	useSettings: () => ({
+		settings: { claude: { model: "sonnet" } },
+		codexSettings: { model: "default" },
+	}),
+}));
 vi.mock("../hooks/use-window-shown", () => ({ useWindowShown: vi.fn() }));
 const skill = {
 	id: "review",
@@ -40,9 +48,80 @@ beforeEach(() => {
 	request.agentListSkills.mockResolvedValue([skill]);
 	request.claudeCreateSession.mockResolvedValue({ sessionId: "new" });
 	request.agentSetDefaultSkills.mockResolvedValue(true);
+	request.claudeListSupportedModels.mockResolvedValue({
+		models: [
+			{ value: "sonnet", displayName: "Sonnet", description: "Balanceado" },
+			{ value: "opus", displayName: "Opus", description: "Mais capaz" },
+		],
+	});
+	request.codexListModels.mockResolvedValue({
+		models: [
+			{
+				value: "default",
+				displayName: "Padrão do Codex",
+				description: "CLI",
+				resolvesTo: "GPT-6 Astra",
+			},
+			{
+				value: "gpt-6.1-sol",
+				displayName: "GPT-6.1 Sol",
+				description: "Rápido",
+			},
+		],
+	});
 });
 
 describe("Agent composer", () => {
+	test.each([
+		"claude",
+		"codex",
+	] as const)("selects the %s model before creating the first turn", async (agent) => {
+		render(<Composer agent={agent} />);
+		await waitFor(() =>
+			expect(
+				screen.getByRole("button", { name: "Selecionar modelo" }),
+			).toBeEnabled(),
+		);
+		const picker = screen.getByRole("button", { name: "Selecionar modelo" });
+		expect(picker).toHaveTextContent(
+			agent === "claude" ? "Sonnet" : "GPT-6 Astra",
+		);
+		await userEvent.click(picker);
+		await userEvent.click(
+			await screen.findByRole("option", {
+				name: agent === "claude" ? /Opus/ : /GPT-6.1 Sol/,
+			}),
+		);
+		await userEvent.click(
+			screen.getByRole("button", { name: "Iniciar conversa" }),
+		);
+		expect(request.claudeCreateSession).toHaveBeenCalledWith(
+			expect.objectContaining({
+				agent,
+				model: agent === "claude" ? "opus" : "gpt-6.1-sol",
+			}),
+		);
+	});
+	test("can start with the configured model and retry after model discovery fails", async () => {
+		request.codexListModels.mockRejectedValueOnce(
+			new Error("Falha ao carregar modelos"),
+		);
+		render(<Composer />);
+		expect(await screen.findByRole("alert")).toHaveTextContent(
+			"Falha ao carregar modelos",
+		);
+		expect(
+			screen.getByRole("button", { name: "Iniciar conversa" }),
+		).toBeEnabled();
+		await userEvent.click(
+			screen.getByRole("button", { name: "Tentar carregar modelos novamente" }),
+		);
+		await waitFor(() =>
+			expect(
+				screen.getByRole("button", { name: "Selecionar modelo" }),
+			).toBeEnabled(),
+		);
+	});
 	test("cannot start a conversation while a Skill import is pending", async () => {
 		let finish!: (value: typeof skill) => void;
 		request.agentImportSkill.mockReturnValue(
@@ -86,6 +165,7 @@ describe("Agent composer", () => {
 			agent: "codex",
 			prompt: "Revisar alteração",
 			skillIds: ["review"],
+			model: "default",
 		});
 		await waitFor(() =>
 			expect(

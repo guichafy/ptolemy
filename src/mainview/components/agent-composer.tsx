@@ -5,11 +5,14 @@ import {
 	PromptInputFooter,
 	PromptInputSubmit,
 	PromptInputTextarea,
+	PromptInputTools,
 } from "@/components/ai-elements/prompt-input";
-import type { AgentKind } from "@/shared/agent-protocol";
+import { ModelPicker } from "@/components/claude/model-picker";
+import type { AgentKind, ProtocolModelInfo } from "@/shared/agent-protocol";
 import type { SkillSummary } from "@/shared/skills";
 import { useWindowShown } from "../hooks/use-window-shown";
 import { rpc } from "../providers/rpc";
+import { useSettings } from "../settings/settings-context";
 import { SkillPicker } from "./skill-picker";
 
 interface AgentComposerProps {
@@ -25,6 +28,14 @@ export function AgentComposer({
 	onChange,
 	onCreated,
 }: AgentComposerProps) {
+	const { settings, codexSettings } = useSettings();
+	const [modelOverride, setModelOverride] = useState<string | null>(null);
+	const model =
+		modelOverride ??
+		(agent === "codex" ? codexSettings.model : settings?.claude.model);
+	const [models, setModels] = useState<ProtocolModelInfo[]>([]);
+	const [modelError, setModelError] = useState<string | null>(null);
+	const [modelAttempt, setModelAttempt] = useState(0);
 	const [skills, setSkills] = useState<SkillSummary[]>([]);
 	const [selected, setSelected] = useState<string[]>([]);
 	const [loading, setLoading] = useState(true);
@@ -36,6 +47,34 @@ export function AgentComposer({
 	const inFlight = useRef(false);
 	const mounted = useRef(true);
 	const label = agent === "claude" ? "Claude" : "Codex";
+	const resolvedId = models.find((item) => item.value === model)?.resolvesTo;
+	const resolvedLabel =
+		models.find((item) => item.value === resolvedId)?.displayName ?? resolvedId;
+	// biome-ignore lint/correctness/useExhaustiveDependencies: modelAttempt restarts discovery only after an explicit retry.
+	useEffect(() => {
+		let cancelled = false;
+		setModelError(null);
+		const load = async () => {
+			try {
+				const result =
+					agent === "codex"
+						? await rpc.request.codexListModels()
+						: await rpc.request.claudeListSupportedModels();
+				if (!cancelled) setModels(result.models);
+			} catch (err) {
+				if (!cancelled)
+					setModelError(
+						err instanceof Error
+							? err.message
+							: "Não foi possível carregar os modelos.",
+					);
+			}
+		};
+		void load();
+		return () => {
+			cancelled = true;
+		};
+	}, [agent, modelAttempt]);
 	const loadCatalog = useCallback(async () => {
 		setLoading(true);
 		setCatalogError(null);
@@ -90,6 +129,7 @@ export function AgentComposer({
 				agent,
 				prompt: value.trim(),
 				skillIds: selected,
+				...(model && { model }),
 			});
 			if (mounted.current) onCreated();
 		} catch (err) {
@@ -109,17 +149,15 @@ export function AgentComposer({
 			aria-label={`Nova conversa com ${label}`}
 			data-agent-composer
 			className="min-w-0 border-b px-4 py-3"
-			onKeyDown={(event) => {
-				event.stopPropagation();
-			}}
 		>
 			<PromptInput
 				onSubmit={() => void submit()}
 				className="rounded-xl border-border/70 bg-background/60 p-2.5 shadow-none"
 			>
 				<PromptInputTextarea
+					data-palette-prompt
 					ref={textarea}
-					autoFocus
+					autoFocus={!document.activeElement?.closest('[role="tablist"]')}
 					rows={2}
 					maxHeight={128}
 					aria-label={`Mensagem para ${label}`}
@@ -163,18 +201,29 @@ export function AgentComposer({
 					</div>
 				)}
 				<PromptInputFooter className="justify-between p-0">
-					<SkillPicker
-						agent={agent}
-						skills={skills}
-						selected={selected}
-						onSelect={setSelected}
-						onBusyChange={setConfiguring}
-						onImported={(skill) => {
-							setSkills((items) => [...items, skill]);
-							setSelected((ids) => [...ids, skill.id]);
-						}}
-						disabled={loading || submitting || !!catalogError}
-					/>
+					<PromptInputTools>
+						<ModelPicker
+							variant="turn-override"
+							value={model ?? null}
+							models={models}
+							onChange={setModelOverride}
+							disabled={submitting}
+							resolvedLabel={resolvedLabel}
+							emptyLabel={modelError ? (model ?? "Modelo padrão") : undefined}
+						/>
+						<SkillPicker
+							agent={agent}
+							skills={skills}
+							selected={selected}
+							onSelect={setSelected}
+							onBusyChange={setConfiguring}
+							onImported={(skill) => {
+								setSkills((items) => [...items, skill]);
+								setSelected((ids) => [...ids, skill.id]);
+							}}
+							disabled={loading || submitting || !!catalogError}
+						/>
+					</PromptInputTools>
 					<div className="flex items-center gap-3">
 						<span className="text-[10px] text-muted-foreground">
 							⇧↵ nova linha
@@ -192,6 +241,19 @@ export function AgentComposer({
 					</div>
 				</PromptInputFooter>
 			</PromptInput>
+			{modelError && (
+				<div role="alert" className="mt-2 text-xs text-destructive">
+					{modelError}
+					<button
+						type="button"
+						className="ml-2 underline"
+						aria-label="Tentar carregar modelos novamente"
+						onClick={() => setModelAttempt((attempt) => attempt + 1)}
+					>
+						Tentar novamente
+					</button>
+				</div>
+			)}
 			{(error || catalogError) && (
 				<div role="alert" className="mt-2 text-xs text-destructive">
 					{error || catalogError}

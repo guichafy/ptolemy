@@ -13,6 +13,7 @@ import {
 	PopoverContent,
 	PopoverTrigger,
 } from "@/components/ui/popover";
+import { navigateOptions } from "@/lib/keyboard-navigation";
 import { cn } from "@/lib/utils";
 import type { GitHubSubType } from "../providers/github/types";
 import { NATIVE_TYPES } from "../providers/github/types";
@@ -84,6 +85,7 @@ export const SearchTypeCombobox = forwardRef<
 				</button>
 			</PopoverTrigger>
 			<PopoverContent
+				onKeyDown={navigateOptions}
 				align="start"
 				side="bottom"
 				sideOffset={6}

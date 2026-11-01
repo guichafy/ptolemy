@@ -39,7 +39,7 @@ bun run dev:hmr
 
 ## Skills dos agentes
 
-Claude e Codex usam um composer AI Elements para preparar uma conversa com Skills antes da primeira mensagem. Mantenha os padrões do harness, importe Skills adicionais de um repositório público do GitHub, selecione-as para uma conversa e salve padrões separados por agente. A importação valida o formato Agent Skills e os arquivos de apoio, fixa um commit e mantém os arquivos no workspace de cada conversa. Enter inicia a conversa; Shift+Enter insere uma linha. A configuração de MCP continua nas preferências existentes. Consulte o [guia de Skills](docs/skills.md) para URLs aceitas, limites de validação e persistência.
+Claude e Codex usam um composer AI Elements para escolher o modelo e preparar Skills antes da primeira mensagem. O seletor é o mesmo da janela de conversa e vale desde o primeiro turno, sem alterar o modelo padrão do agente. Mantenha os padrões do harness, importe Skills adicionais de um repositório público do GitHub, selecione-as para uma conversa e salve padrões separados por agente. A importação valida o formato Agent Skills e os arquivos de apoio, fixa um commit e mantém os arquivos no workspace de cada conversa. Enter inicia a conversa; Shift+Enter insere uma linha. A configuração de MCP continua nas preferências existentes. Tab/Shift+Tab percorre os controles; ←/→ muda a aba de plugin em foco; ↑/↓ navega nos resultados e opções; Ctrl+Tab/Ctrl+Shift+Tab troca de plugin a partir dos controles da paleta. Consulte o [guia de Skills](docs/skills.md) para URLs aceitas, limites de validação e persistência.
 
 ## Sistema de plugins
 

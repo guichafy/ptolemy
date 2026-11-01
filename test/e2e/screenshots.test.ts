@@ -191,12 +191,12 @@ describe("Ptolemy Screenshots", () => {
 		console.log(`Salvo: ${filePath} (resultados em ${report.elapsedMs}ms)`);
 	});
 
-	it("Composer de Claude: Skills disponíveis antes da conversa", async () => {
+	it("Composer de Claude: modelo e Skills disponíveis antes da conversa", async () => {
 		await selectProvider(driver, "claude");
 		currentProviderIndex = Providers.indexOf("claude");
 		const composer = await waitForResults(
 			driver,
-			["Mensagem para Claude", "Configurar Skills"],
+			["Mensagem para Claude", "Configurar Skills", "Selecionar modelo"],
 			Timing.RESULTS_WAIT,
 			Timing.RESULTS_POLL,
 		);

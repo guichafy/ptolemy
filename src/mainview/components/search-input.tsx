@@ -31,6 +31,7 @@ export function SearchInput({
 		<div className="relative flex flex-1 items-center">
 			<Search className="absolute left-3 top-1/2 -translate-y-1/2 h-[18px] w-[18px] text-primary" />
 			<Input
+				data-palette-search
 				ref={inputRef}
 				type="text"
 				placeholder={placeholder}
@@ -42,7 +43,7 @@ export function SearchInput({
 					}
 				}}
 				className="h-12 border-0 bg-transparent pl-10 text-[18px] font-normal tracking-[-0.005em] caret-primary shadow-none focus-visible:ring-0 placeholder:text-muted-foreground/60"
-				autoFocus
+				autoFocus={!document.activeElement?.closest('[role="tablist"]')}
 				// Disable WebKit's autofill suggestion panel. It renders in a
 				// separate NSPanel that floats over the palette window — when
 				// visible, ⌘⇧Espaço is captured by that panel instead of our

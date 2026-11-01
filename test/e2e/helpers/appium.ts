@@ -149,9 +149,7 @@ export async function selectProvider(
 		claude: "Claude Code",
 	};
 	const title = labels[provider];
-	const button = await driver.$(
-		`//XCUIElementTypeButton[@title="${title}" or @label="${title}"]`,
-	);
+	const button = await driver.$(`//*[@title="${title}" or @label="${title}"]`);
 	await clickPaletteElement(button);
 	await wait(Timing.POST_TAB);
 	await ensurePaletteInteractive(driver);
@@ -254,7 +252,7 @@ export async function tabToProvider(
 ): Promise<void> {
 	const distance = (targetIndex - currentIndex + providerCount) % providerCount;
 	for (let i = 0; i < distance; i++) {
-		await pressTab(driver);
+		await sendKey(driver, Key.TAB, ModifierFlag.CONTROL);
 		await new Promise((r) => setTimeout(r, Timing.POST_TAB));
 	}
 }
