@@ -1,8 +1,9 @@
 import { cn } from "@/lib/utils";
+import { agentForProviderId } from "../providers/agent-sessions";
 import { useProvider } from "../providers/provider-context";
 
 export function ModeBar() {
-	const { providers, activeIndex, setIndex } = useProvider();
+	const { providers, activeProvider, activeIndex, setIndex } = useProvider();
 
 	return (
 		<div className="flex items-center gap-1 px-3 py-2 border-b border-white/[0.04] bg-black/[0.18]">
@@ -26,7 +27,7 @@ export function ModeBar() {
 				<kbd className="mx-0.5 inline-block rounded border border-white/[0.06] bg-black/30 px-1 py-0.5 text-[10px] font-medium text-foreground/80">
 					Tab
 				</kbd>
-				trocar
+				{agentForProviderId(activeProvider.id) ? "navegar" : "trocar"}
 			</span>
 		</div>
 	);

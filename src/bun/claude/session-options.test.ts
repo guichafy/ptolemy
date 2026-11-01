@@ -11,6 +11,15 @@ const baseArgs = {
 };
 
 describe("buildQueryOptions", () => {
+	test("loads Skills through a local plugin without enabling filesystem settings or bypassing the tool gate", () => {
+		const opts = buildQueryOptions(baseArgs);
+		expect(opts.plugins).toEqual([
+			{ type: "local", path: "/tmp/proj/.ptolemy/claude-harness" },
+		]);
+		expect(opts.settingSources).toBeUndefined();
+		expect(opts.canUseTool).toBe(baseArgs.canUseTool);
+		expect(opts.allowedTools).not.toContain("Skill");
+	});
 	test("includes model, cwd, permissionMode, allowed read-only tools", () => {
 		const opts = buildQueryOptions(baseArgs);
 		expect(opts.model).toBe("claude-sonnet-4-6");

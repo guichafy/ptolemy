@@ -27,7 +27,7 @@
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentEvent, AgentKind } from "@/shared/agent-protocol";
@@ -72,6 +72,9 @@ if (!LIVE) {
 
 const sm = await import("../../src/bun/claude/session-manager");
 const { loadSettings, saveSettings } = await import("../../src/bun/settings");
+const { SkillsStore } = await import("../../src/bun/skills/store");
+let integrationSkillId = "";
+const SKILL_NAME = "ptolemy-integration-review";
 
 const CLAUDE_MODEL = LIVE
 	? (process.env.PTOLEMY_IT_CLAUDE_MODEL ?? "haiku")
@@ -205,6 +208,37 @@ async function metaOf(sessionId: string) {
 // ---------------------------------------------------------------------------
 
 beforeAll(async () => {
+	const catalog = new SkillsStore({
+		download: async () => ({
+			name: SKILL_NAME,
+			description:
+				"Review code when explicitly asked to perform a code review.",
+			source: {
+				kind: "github",
+				url: "https://github.com/ptolemy/test-fixture",
+				commit: "a".repeat(40),
+			},
+			files: [
+				{
+					path: "SKILL.md",
+					content: Buffer.from(
+						`---\nname: ${SKILL_NAME}\ndescription: Review code when explicitly asked to perform a code review.\n---\nRead references/guide.md before reviewing code.`,
+					).toString("base64"),
+					executable: false,
+				},
+				{
+					path: "references/guide.md",
+					content: Buffer.from("Report only actionable findings.").toString(
+						"base64",
+					),
+					executable: false,
+				},
+			],
+		}),
+	});
+	integrationSkillId = (
+		await catalog.importGithub("https://github.com/ptolemy/test-fixture")
+	).id;
 	const settings = await loadSettings();
 	await saveSettings({
 		...settings,
@@ -239,7 +273,7 @@ const LOCAL_TOOLS: Record<AgentKind, string[]> = {
 };
 
 function createOptions(agent: AgentKind) {
-	return agent === "codex" ? { agent } : {};
+	return { agent, skillIds: [integrationSkillId] };
 }
 
 function scenario(agent: AgentKind, other: AgentKind) {
@@ -255,8 +289,19 @@ function scenario(agent: AgentKind, other: AgentKind) {
 			const meta = await metaOf(state.id);
 			state.projectPath = meta.projectPath;
 			expect(sm.sessionAgent(meta)).toBe(agent);
+			expect(meta.skills).toContainEqual(
+				expect.objectContaining({ id: integrationSkillId, name: SKILL_NAME }),
+			);
 			expect(existsSync(state.projectPath)).toBe(true);
 			expect(eventsOf(state.id)).toHaveLength(0);
+			if (agent === "codex" && !LIVE) {
+				// A reversible workspace conflict must not consume the deferred
+				// first turn. The next test retries and expects a real response.
+				const conflict = join(state.projectPath, ".agents/skills", SKILL_NAME);
+				await mkdir(conflict, { recursive: true });
+				await expect(sm.resumeSession(state.id)).rejects.toThrow(/existente/);
+				await rm(conflict, { recursive: true });
+			}
 		});
 
 		test(
@@ -265,6 +310,29 @@ function scenario(agent: AgentKind, other: AgentKind) {
 				expect(await sm.resumeSession(state.id)).toBe(true);
 				const turn = await waitTurn(state.id, 0, TURN_TIMEOUT);
 				expectCleanTurn(turn, OK_REASON[agent]);
+				const skillRoot =
+					agent === "claude"
+						? ".ptolemy/claude-harness/skills"
+						: ".agents/skills";
+				expect(
+					await readFile(
+						join(
+							state.projectPath,
+							skillRoot,
+							SKILL_NAME,
+							"references/guide.md",
+						),
+						"utf8",
+					),
+				).toBe("Report only actionable findings.");
+				if (!LIVE) {
+					const requests =
+						agent === "claude"
+							? localAgents?.anthropicMock.requests
+							: localAgents?.responsesMock.requests;
+					// The actual CLI must discover the Skill, not merely receive files.
+					expect(JSON.stringify(requests)).toContain(SKILL_NAME);
+				}
 
 				const tools = ofType(turn, "tool-call").map((t) => t.toolName);
 				if (LIVE) expect(tools.length).toBeGreaterThan(0);

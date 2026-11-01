@@ -2,6 +2,7 @@ import { readdir, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { defineElectrobunRPC, type ElectrobunRPCSchema } from "electrobun/bun";
+import type { SkillSummary } from "@/shared/skills";
 import type {
 	AgentEvent,
 	AgentKind,
@@ -76,6 +77,7 @@ import {
 	type Settings,
 	saveSettings as saveSettingsToDisk,
 } from "./settings";
+import { skillsStore } from "./skills/store";
 
 export type SettingsSection =
 	| "plugins"
@@ -121,13 +123,27 @@ export interface PtolemyRPCSchema extends ElectrobunRPCSchema {
 				params: { consentGiven: boolean };
 				response: boolean;
 			};
+			agentListSkills: {
+				params: { agent: AgentKind };
+				response: SkillSummary[];
+			};
+			agentImportSkill: { params: { url: string }; response: SkillSummary };
+			agentSetDefaultSkills: {
+				params: { agent: AgentKind; skillIds: string[] };
+				response: boolean;
+			};
 			claudeListSessions: { params: void; response: SessionMeta[] };
 			claudeCreateSession: {
 				// No cwd: the backend auto-provisions a project directory per
 				// conversation. Pass projectId to attach a new session to an
 				// existing project (future multi-session-per-project UI).
 				// `agent` picks the backing agent; omitted means Claude.
-				params: { prompt: string; projectId?: string; agent?: AgentKind };
+				params: {
+					prompt: string;
+					projectId?: string;
+					agent?: AgentKind;
+					skillIds?: string[];
+				};
 				response: { sessionId: string };
 			};
 			claudeResumeSession: {
@@ -661,9 +677,19 @@ export const requestHandlers: BunRequestHandlers = {
 		setAnalyticsEnabled(consentGiven);
 		return true;
 	},
+	agentListSkills: async ({ agent }) => skillsStore.list(agent),
+	agentImportSkill: async ({ url }) => skillsStore.importGithub(url),
+	agentSetDefaultSkills: async ({ agent, skillIds }) => {
+		await skillsStore.setDefaults(agent, skillIds);
+		return true;
+	},
 	claudeListSessions: async () => claudeListSessions(),
-	claudeCreateSession: async ({ prompt, projectId, agent }) => {
-		const sessionId = await claudeCreateSession(prompt, { projectId, agent });
+	claudeCreateSession: async ({ prompt, projectId, agent, skillIds }) => {
+		const sessionId = await claudeCreateSession(prompt, {
+			projectId,
+			agent,
+			skillIds,
+		});
 		console.log(
 			`[claude:rpc] claudeCreateSession: auto-opening chat for sessionId=${sessionId}`,
 		);

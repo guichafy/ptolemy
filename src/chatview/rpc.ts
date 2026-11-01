@@ -9,6 +9,7 @@ import type {
 	ProtocolModelInfo,
 	SessionStats,
 } from "@/shared/agent-protocol";
+import type { SessionSkill, SkillSummary } from "@/shared/skills";
 import { AgentEventBuffer } from "./lib/agent-event-buffer";
 
 const VERBOSE = import.meta.env.VITE_CLAUDE_LOG_VERBOSE === "1";
@@ -147,6 +148,7 @@ export interface SessionMeta {
 	sdkSessionId: string;
 	/** Backing agent; absent on sessions created before Codex support. */
 	agent?: AgentKind;
+	skills?: SessionSkill[];
 	title: string;
 	/** Project this conversation belongs to. */
 	projectId: string;
@@ -235,9 +237,23 @@ interface PtolemyRPCSchema extends ElectrobunRPCSchema {
 				params: { consentGiven: boolean };
 				response: boolean;
 			};
+			agentListSkills: {
+				params: { agent: AgentKind };
+				response: SkillSummary[];
+			};
+			agentImportSkill: { params: { url: string }; response: SkillSummary };
+			agentSetDefaultSkills: {
+				params: { agent: AgentKind; skillIds: string[] };
+				response: boolean;
+			};
 			claudeListSessions: { params: void; response: SessionMeta[] };
 			claudeCreateSession: {
-				params: { prompt: string; projectId?: string; agent?: AgentKind };
+				params: {
+					prompt: string;
+					projectId?: string;
+					agent?: AgentKind;
+					skillIds?: string[];
+				};
 				response: { sessionId: string };
 			};
 			claudeResumeSession: {
@@ -352,7 +368,7 @@ export function onAgentEvent(listener: AgentEventListener): () => void {
 }
 
 const rpcInstance = Electroview.defineRPC<PtolemyRPCSchema>({
-	maxRequestTime: 60_000,
+	maxRequestTime: 90_000,
 	handlers: {
 		messages: {
 			openPreferences: () => {},

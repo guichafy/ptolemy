@@ -5,6 +5,7 @@ import type {
 	Options,
 	PermissionMode,
 } from "@anthropic-ai/claude-agent-sdk";
+import { claudeSkillsPlugin } from "../skills/workspace";
 
 const ALLOWED_TOOLS = ["Read", "Glob", "Grep", "LS"];
 
@@ -38,6 +39,9 @@ export function buildQueryOptions(args: BuildQueryArgs): Options {
 		canUseTool: args.canUseTool,
 		includePartialMessages: true,
 		cwd: args.cwd,
+		// Load only the isolated plugin, without loading arbitrary user/project
+		// settings, hooks or permission grants alongside the selected Skills.
+		plugins: [{ type: "local", path: claudeSkillsPlugin(args.cwd) }],
 	};
 	if (args.permissionMode) {
 		opts.permissionMode = args.permissionMode;
