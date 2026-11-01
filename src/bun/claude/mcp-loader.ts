@@ -10,10 +10,10 @@
 
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import type { McpStdioServerConfig } from "@anthropic-ai/claude-agent-sdk";
 import { backupCorruptJson, writeJsonAtomic } from "../atomic-json";
+import { ptolemyDataDir } from "../paths";
 
 export interface StoredMcpServer {
 	name: string;
@@ -33,7 +33,7 @@ export interface McpLoaderOptions {
 	path?: string;
 }
 
-const CONFIG_DIR = join(homedir(), ".ptolomeu");
+const CONFIG_DIR = ptolemyDataDir();
 const DEFAULT_PATH = join(CONFIG_DIR, "mcp-servers.json");
 
 function defaultFile(): McpServersFile {

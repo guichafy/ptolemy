@@ -27,7 +27,8 @@ bun run test               # Vitest: two projects (node + jsdom), runs both
 bun run test:watch         # Vitest in watch mode
 bun run test:coverage      # Coverage via @vitest/coverage-v8 (thresholds enforced in vitest.config.ts)
 bun run test:e2e           # E2E: Appium Mac2 (requires Xcode + the dev bundle from build:dev-bundle)
-bun run test:integration   # Agent integration (bun test, test/integration/): Codex offline via a local Responses API mock; Claude uses the real `claude` CLI and API (skip with PTOLEMY_IT_SKIP_CLAUDE=1)
+bun run test:integration       # Agent integration, local mode: real SDKs + CLIs against local API mocks (offline, runs in CI)
+bun run test:integration:live  # Same scenario against the real services, using the `claude`/`codex` CLIs signed in on this machine
 bun run screenshots        # Build dev bundle + run E2E + regenerate docs/screenshots/
 bun run typecheck          # tsc --noEmit
 bun run lint               # Biome check
@@ -138,6 +139,17 @@ Built on `@openai/codex-sdk`, which spawns the user's Codex CLI (`codex exec --e
 - **Safety**: there is no per-tool HITL (the SDK runs `codex exec` with `approvalPolicy: "never"`). Workspace isolation comes from the Codex sandbox: `workingDirectory` is always the conversation's project and the sandbox is `workspace-write` or `read-only`. `danger-full-access` is intentionally not exposed; keep it that way.
 - **Models** (`models.ts`): static catalog (the SDK has no listing API). The `"default"` sentinel (`constants.ts`) means "use the CLI's configured model".
 - **Settings**: `settings.codex` (`model`, `sandboxMode`, `reasoningEffort`), validated field by field in `src/bun/settings.ts`; edited in **Plugins → Codex** through `updateCodexSettings` in `SettingsContext`.
+
+### Agent integration tests (`test/integration/`)
+
+`bun test` suite (not Vitest: it needs real Bun APIs and real subprocesses) that drives both agents through the real session manager: create, deferred start, streamed `AgentEvent`s, persistence, follow-up turn, switching agents with a cold resume, delete. One scenario (`helpers/scenario.ts`: create a file, `cat` it, then answer memory questions) runs in two modes:
+
+- **local** (default): the CLIs bundled with each SDK (`@anthropic-ai/claude-agent-sdk-<platform>`, `@openai/codex`) talk to `helpers/mock-anthropic-server.ts` (Messages API, via `ANTHROPIC_BASE_URL` + an isolated `CLAUDE_CONFIG_DIR`) and `helpers/mock-responses-server.ts` (Responses API, via a mock provider in an isolated `CODEX_HOME`). The mocks follow the scenario's prompts literally and answer memory questions only from the history the CLI resends, so a broken resume fails here too. Assertions are exact (tool names, file contents).
+- **live** (`PTOLEMY_IT_MODE=live`): the installed `claude` and `codex` CLIs with the machine's own sign-ins and the real models. An agent whose CLI is missing (or, for Codex, not signed in) is skipped with a printed reason. Assertions are looser where model behaviour varies (any tool call), strict where it matters (file contents, memory across turns and after a cold resume).
+
+Ptolemy's own data always goes to a throwaway `PTOLEMY_HOME` (see `src/bun/paths.ts`), so the real `~/.ptolomeu` and settings are never touched; `$HOME` is left alone so the CLIs keep their sign-ins. Knobs (env vars, or a git-ignored `.env.test.local`, which `bun test` loads): `PTOLEMY_IT_AGENTS=claude,codex`, `PTOLEMY_IT_CLAUDE_MODEL` (live, default `haiku`; use an alias, see below), `PTOLEMY_IT_CODEX_MODEL` (live, default: the CLI's configured model), `PTOLEMY_CLAUDE_PATH` / `PTOLEMY_CODEX_PATH` (force a CLI binary; also honoured by the app).
+
+Known pre-existing issue the suite works around: on a cold resume, the Claude session model is checked against the SDK's model list, which only has aliases (`default`, `sonnet`, `opus`, `haiku`...), so a full model id is silently replaced by `default`.
 
 ### Network / proxy (`src/bun/net/`)
 

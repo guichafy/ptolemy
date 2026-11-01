@@ -1,9 +1,9 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { backupCorruptJson, writeJsonAtomic } from "./atomic-json";
 import { CODEX_DEFAULT_MODEL } from "./codex/constants";
+import { ptolemyHome } from "./paths";
 
 export const KNOWN_PLUGIN_IDS = [
 	"apps",
@@ -406,7 +406,7 @@ export function validateSettings(value: unknown): ValidateResult {
 
 export function getSettingsPath(): string {
 	return join(
-		homedir(),
+		ptolemyHome(),
 		"Library",
 		"Application Support",
 		"com.ptolomeu.app",

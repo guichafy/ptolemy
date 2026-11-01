@@ -178,6 +178,8 @@ bun run test               # Vitest: node + jsdom projects
 bun run test:watch         # Vitest in watch mode
 bun run test:coverage      # Coverage report (HTML in ./coverage/)
 bun run test:e2e           # E2E (Appium Mac2; requires the dev bundle)
+bun run test:integration   # Claude + Codex integration, against local API mocks (offline)
+bun run test:integration:live  # Same, against the real services (uses your signed-in CLIs)
 bun run screenshots        # Build dev bundle + run E2E + regenerate docs/screenshots/
 ```
 
@@ -187,6 +189,8 @@ Vitest runs two projects side by side:
 
 - `node`: backend modules (`src/bun/**`, `src/chatview/lib/**`, `src/chatview/hooks/**`)
 - `jsdom`: React UI (`src/mainview/**`, `src/chatview/components/**`, `src/lib/**`)
+
+The agent integration tests (`test/integration/`) run one conversation per agent through the real session manager: create a file, run a command, then check that the agent remembers the conversation, including after switching agents. `test:integration` uses the real SDKs and CLIs bundled with them, talking to local mocks of the Anthropic and OpenAI APIs, so it needs no network or sign-in and runs in CI. `test:integration:live` runs the same scenario with the `claude` and `codex` CLIs installed and signed in on your machine (`claude /login`, `codex login`); an agent that is missing or signed out is skipped with a message. To run only one agent or pick models, set `PTOLEMY_IT_AGENTS=claude` (or `codex`), `PTOLEMY_IT_CLAUDE_MODEL=sonnet` or `PTOLEMY_IT_CODEX_MODEL=gpt-6-luna`, inline or in a `.env.test.local` file (git-ignored, loaded by `bun test`). Your Ptolemy settings and sessions are never touched: the tests use a temporary data folder.
 
 **Lint and types**
 

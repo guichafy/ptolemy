@@ -15,9 +15,9 @@
 
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rm } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join, relative, resolve, sep } from "node:path";
 import { backupCorruptJson, writeJsonAtomic } from "../../atomic-json";
+import { ptolemyDataDir } from "../../paths";
 
 const SLUG_MAX = 40;
 const SHORTID_LEN = 6;
@@ -62,7 +62,7 @@ export class ProjectStore {
 	private writeQueue: Promise<void> = Promise.resolve();
 
 	constructor(options: ProjectStoreOptions = {}) {
-		this.root = options.root ?? join(homedir(), ".ptolomeu", "projects");
+		this.root = options.root ?? join(ptolemyDataDir(), "projects");
 	}
 
 	get rootPath(): string {

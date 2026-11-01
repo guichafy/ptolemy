@@ -30,12 +30,9 @@ jobs:
       - run: bun run build:native
       - run: bun run build:vite
       - run: bun run test:coverage
-      # Agent integration tests. The Codex half runs offline (real SDK + CLI
-      # against a local Responses API mock); the Claude half needs a signed-in
-      # `claude` CLI and the real API, so it is skipped here.
+      # Agent integration tests (local mode): real SDKs and CLIs for Claude
+      # and Codex against local mocks of their APIs. No network, no sign-in.
       - run: bun run test:integration
-        env:
-          PTOLEMY_IT_SKIP_CLAUDE: "1"
       - uses: actions/upload-artifact@v4
         if: always()
         with:

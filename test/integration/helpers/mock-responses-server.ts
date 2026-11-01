@@ -3,17 +3,13 @@
  * CLI to run full turns offline. It speaks the streaming (SSE) flavour of
  * `POST /v1/responses` and refuses WebSocket upgrades.
  *
- * Behaviour per request, decided from the conversation the CLI sends:
- * - the last item is the user's message and it contains TOOL_MARKER: answer
- *   with an `exec` custom tool call (Codex's code-mode tool) that creates a
- *   file through `apply_patch` and reads it back with `exec_command`;
- * - otherwise (plain question, or right after a tool output): answer with an
- *   assistant message streamed as text deltas.
+ * It plays `scenario.ts`. Codex runs tools in "code mode": one `exec` custom
+ * tool call whose JavaScript calls `tools.apply_patch` (creates the file)
+ * and `tools.exec_command` (runs `cat`); after its output, it answers.
+ * Memory questions are answered from the history the CLI sends back.
  */
 
-export const TOOL_MARKER = "[usar-ferramentas]";
-export const CODEX_FILE_NAME = "ola-codex.txt";
-export const CODEX_FILE_TEXT = "Olá do Codex";
+import { chunk, nextMockStep, type ScenarioFile, sse } from "./scenario";
 
 export interface MockResponsesServer {
 	url: string;
@@ -25,24 +21,11 @@ type InputItem = {
 	type?: string;
 	role?: string;
 	content?: Array<{ type?: string; text?: string }> | string;
-	output?: unknown;
 };
 
-function lastUserText(input: InputItem[]): string {
-	for (let i = input.length - 1; i >= 0; i--) {
-		const item = input[i];
-		if (item.type === "message" && item.role === "user") {
-			const parts = Array.isArray(item.content) ? item.content : [];
-			return parts.map((p) => p.text ?? "").join("");
-		}
-	}
-	return "";
-}
-
-function sse(events: Array<Record<string, unknown>>): string {
-	return events
-		.map((e) => `event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`)
-		.join("");
+function textOf(item: InputItem): string {
+	const parts = Array.isArray(item.content) ? item.content : [];
+	return parts.map((p) => p.text ?? "").join("");
 }
 
 const USAGE = {
@@ -53,10 +36,18 @@ const USAGE = {
 	total_tokens: 150,
 };
 
-function toolCallTurn(n: number): string {
+function completed(n: number) {
+	return {
+		type: "response.completed",
+		response: { id: `resp_${n}`, usage: USAGE },
+	};
+}
+
+function execTurn(n: number, file: ScenarioFile): string {
+	const patch = `*** Begin Patch\n*** Add File: ${file.name}\n+${file.text}\n*** End Patch\n`;
 	const script = [
-		`await tools.apply_patch("*** Begin Patch\\n*** Add File: ${CODEX_FILE_NAME}\\n+${CODEX_FILE_TEXT}\\n*** End Patch\\n");`,
-		`const r = await tools.exec_command({ cmd: "cat ${CODEX_FILE_NAME}", login: false });`,
+		`await tools.apply_patch(${JSON.stringify(patch)});`,
+		`const r = await tools.exec_command({ cmd: ${JSON.stringify(`cat ${file.name}`)}, login: false });`,
 		"text(r.output);",
 	].join("\n");
 	const item = {
@@ -75,16 +66,12 @@ function toolCallTurn(n: number): string {
 			item: { ...item, input: "" },
 		},
 		{ type: "response.output_item.done", output_index: 0, item },
-		{
-			type: "response.completed",
-			response: { id: `resp_${n}`, usage: USAGE },
-		},
+		completed(n),
 	]);
 }
 
 function messageTurn(n: number, text: string): string {
 	const id = `msg_${n}`;
-	const chunks = text.match(/.{1,12}/gs) ?? [text];
 	return sse([
 		{ type: "response.created", response: { id: `resp_${n}` } },
 		{
@@ -92,7 +79,7 @@ function messageTurn(n: number, text: string): string {
 			output_index: 0,
 			item: { type: "message", id, role: "assistant", content: [] },
 		},
-		...chunks.map((delta) => ({
+		...chunk(text).map((delta) => ({
 			type: "response.output_text.delta",
 			item_id: id,
 			output_index: 0,
@@ -110,10 +97,7 @@ function messageTurn(n: number, text: string): string {
 				content: [{ type: "output_text", text, annotations: [] }],
 			},
 		},
-		{
-			type: "response.completed",
-			response: { id: `resp_${n}`, usage: USAGE },
-		},
+		completed(n),
 	]);
 }
 
@@ -134,16 +118,28 @@ export function startMockResponsesServer(): MockResponsesServer {
 			const body = (await req.json()) as Record<string, unknown>;
 			requests.push({ path: url.pathname, body });
 			const input = (body.input ?? []) as InputItem[];
-			const last = input[input.length - 1];
 			const n = ++counter;
-			let payload: string;
-			if (last?.type === "custom_tool_call_output") {
-				payload = messageTurn(n, `Pronto: criei ${CODEX_FILE_NAME}.`);
-			} else if (lastUserText(input).includes(TOOL_MARKER)) {
-				payload = toolCallTurn(n);
-			} else {
-				payload = messageTurn(n, "Continuo na mesma conversa.");
+
+			let toolResultsThisTurn = 0;
+			let lastUserText = "";
+			for (let i = input.length - 1; i >= 0; i--) {
+				const item = input[i];
+				if (item.type === "custom_tool_call_output") toolResultsThisTurn++;
+				if (item.type === "message" && item.role === "user") {
+					lastUserText = textOf(item);
+					break;
+				}
 			}
+			// One `exec` call does both the write and the `cat`.
+			const step = nextMockStep({
+				lastUserText,
+				history: JSON.stringify(input),
+				toolResultsThisTurn: toolResultsThisTurn > 0 ? 2 : 0,
+			});
+			const payload =
+				step.kind === "write-file"
+					? execTurn(n, step.file)
+					: messageTurn(n, step.kind === "reply" ? step.text : "Ok.");
 			return new Response(payload, {
 				headers: { "content-type": "text/event-stream" },
 			});
@@ -156,21 +152,20 @@ export function startMockResponsesServer(): MockResponsesServer {
 	};
 }
 
-/** Codex `--config` overrides that point the CLI at the mock server. */
-export function mockProviderConfig(baseUrl: string) {
-	return {
-		model_provider: "ptolemy_mock",
-		model: "gpt-6.1-sol",
-		model_providers: {
-			ptolemy_mock: {
-				name: "Ptolemy mock",
-				base_url: baseUrl,
-				env_key: "PTOLEMY_MOCK_API_KEY",
-				wire_api: "responses",
-				supports_websockets: false,
-				request_max_retries: 0,
-				stream_max_retries: 0,
-			},
-		},
-	};
+/** `~/.codex/config.toml` contents that point the CLI at the mock server. */
+export function mockCodexConfigToml(baseUrl: string): string {
+	return [
+		'model_provider = "ptolemy_mock"',
+		'model = "gpt-6.1-sol"',
+		"",
+		"[model_providers.ptolemy_mock]",
+		'name = "Ptolemy mock"',
+		`base_url = "${baseUrl}"`,
+		'env_key = "PTOLEMY_MOCK_API_KEY"',
+		'wire_api = "responses"',
+		"supports_websockets = false",
+		"request_max_retries = 0",
+		"stream_max_retries = 0",
+		"",
+	].join("\n");
 }
