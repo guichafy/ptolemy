@@ -10,7 +10,6 @@
 
 import { existsSync } from "node:fs";
 import { mkdir, readFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import type {
 	DecisionRecord,
@@ -18,6 +17,7 @@ import type {
 } from "@/bun/claude/permission-gate";
 import type { RiskLevel } from "@/bun/claude/risk-classifier";
 import { backupCorruptJson, writeJsonAtomic } from "../../atomic-json";
+import { ptolemyDataDir } from "../../paths";
 
 export interface StoredToolDecision {
 	version: 1;
@@ -47,7 +47,7 @@ export class ToolDecisionStore {
 
 	constructor(options: ToolDecisionStoreOptions = {}) {
 		this.sessionsRoot =
-			options.sessionsRoot ?? join(homedir(), ".ptolomeu", "sessions");
+			options.sessionsRoot ?? join(ptolemyDataDir(), "sessions");
 	}
 
 	path(sessionId: string): string {

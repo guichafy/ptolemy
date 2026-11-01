@@ -4,6 +4,9 @@ import { join } from "node:path";
 let cachedClaudePath: string | null = null;
 
 export async function findClaudeCli(): Promise<string> {
+	// Explicit override for unusual installs (and the integration tests).
+	const override = process.env.PTOLEMY_CLAUDE_PATH;
+	if (override) return override;
 	if (cachedClaudePath) return cachedClaudePath;
 	const fromPath = Bun.which("claude");
 	if (fromPath) {

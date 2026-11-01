@@ -178,6 +178,8 @@ bun run test               # Vitest: projetos node + jsdom
 bun run test:watch         # Vitest em modo watch
 bun run test:coverage      # Relatório de cobertura (HTML em ./coverage/)
 bun run test:e2e           # E2E (Appium Mac2; precisa do dev bundle)
+bun run test:integration   # Integração Claude + Codex, contra mocks locais das APIs (offline)
+bun run test:integration:live  # O mesmo, contra os serviços reais (usa os CLIs logados)
 bun run screenshots        # Build do dev bundle + E2E + regenera docs/screenshots/
 ```
 
@@ -187,6 +189,8 @@ O Vitest roda dois projetos lado a lado:
 
 - `node`: módulos de backend (`src/bun/**`, `src/chatview/lib/**`, `src/chatview/hooks/**`)
 - `jsdom`: UI React (`src/mainview/**`, `src/chatview/components/**`, `src/lib/**`)
+
+Os testes de integração dos agentes (`test/integration/`) rodam uma conversa por agente pelo session manager real: criar um arquivo, rodar um comando e conferir que o agente lembra da conversa, inclusive depois de trocar de agente. O `test:integration` usa os SDKs reais e os CLIs que vêm com eles, conversando com mocks locais das APIs da Anthropic e da OpenAI, então não precisa de rede nem de login e roda na CI. O `test:integration:live` roda o mesmo cenário com os CLIs `claude` e `codex` instalados e logados na sua máquina (`claude /login`, `codex login`); um agente ausente ou deslogado é pulado com aviso. Para rodar só um agente ou escolher modelos, use `PTOLEMY_IT_AGENTS=claude` (ou `codex`), `PTOLEMY_IT_CLAUDE_MODEL=sonnet` ou `PTOLEMY_IT_CODEX_MODEL=gpt-6-luna`, na linha de comando ou num arquivo `.env.test.local` (ignorado pelo git e lido pelo `bun test`). Suas configurações e sessões do Ptolemy nunca são tocadas: os testes usam uma pasta de dados temporária.
 
 **Lint e tipos**
 

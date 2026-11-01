@@ -2,6 +2,7 @@ import { mkdir } from "node:fs/promises";
 import { homedir, userInfo } from "node:os";
 import { join } from "node:path";
 import { writeJsonAtomic } from "../atomic-json";
+import { ptolemyDataDir } from "../paths";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -28,7 +29,7 @@ export interface BedrockConfig {
 // Paths
 // ---------------------------------------------------------------------------
 
-const AUTH_DIR = join(homedir(), ".ptolomeu", "auth");
+const AUTH_DIR = join(ptolemyDataDir(), "auth");
 const BEDROCK_PATH = join(AUTH_DIR, "bedrock.json");
 
 // ---------------------------------------------------------------------------

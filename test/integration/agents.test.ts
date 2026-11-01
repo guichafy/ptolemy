@@ -1,19 +1,28 @@
 /**
  * Integration tests for the two chat agents, end to end through the real
- * session manager (the same module the RPC layer calls): create → deferred
- * start on resume → streamed AgentEvents → persistence → follow-up turn on
- * the same conversation → delete.
+ * session manager (the module the RPC layer calls): create → deferred start
+ * on resume → streamed AgentEvents → persistence → follow-up turn → switch
+ * agents and cold-resume → delete.
  *
- * - Codex: real @openai/codex-sdk + real Codex CLI (bundled with the SDK),
- *   pointed at a local mock of the Responses API. Runs offline.
- * - Claude: real @anthropic-ai/claude-agent-sdk + the installed `claude` CLI
- *   against the real model. Skipped when `claude` is not installed, or with
- *   PTOLEMY_IT_SKIP_CLAUDE=1.
+ * Two modes, same scenario (see helpers/scenario.ts):
  *
- * Everything runs under a throwaway HOME, so settings, sessions and project
- * folders never touch the real ~/.ptolomeu or ~/Library.
+ * - local (default, `bun run test:integration`): real SDKs and real CLIs (the
+ *   binaries bundled with each SDK) talking to local mock servers of the
+ *   Anthropic Messages API and the OpenAI Responses API. Offline, no sign-in,
+ *   runs in CI.
+ * - live (`bun run test:integration:live`): the `claude` and `codex` CLIs
+ *   installed and signed in on this machine, against the real services.
  *
- * Run with: bun run test:integration
+ * Ptolemy's own data (settings, sessions, projects) always goes to a
+ * throwaway PTOLEMY_HOME. In live mode the agents keep the real $HOME, which
+ * is where their sign-ins live.
+ *
+ * Environment knobs (inline, or in a git-ignored .env.test.local):
+ *   PTOLEMY_IT_MODE=local|live      (the scripts set this)
+ *   PTOLEMY_IT_AGENTS=claude,codex  (run only some agents)
+ *   PTOLEMY_IT_CLAUDE_MODEL=haiku   (live: Claude model alias)
+ *   PTOLEMY_IT_CODEX_MODEL=...      (live: Codex model; default = CLI config)
+ *   PTOLEMY_CLAUDE_PATH / PTOLEMY_CODEX_PATH (force a CLI binary)
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
@@ -21,387 +30,377 @@ import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AgentEvent } from "@/shared/agent-protocol";
+import type { AgentEvent, AgentKind } from "@/shared/agent-protocol";
 import {
-	CODEX_FILE_NAME,
-	CODEX_FILE_TEXT,
+	type MockAnthropicServer,
+	startMockAnthropicServer,
+} from "./helpers/mock-anthropic-server";
+import {
 	type MockResponsesServer,
-	mockProviderConfig,
+	mockCodexConfigToml,
 	startMockResponsesServer,
-	TOOL_MARKER,
 } from "./helpers/mock-responses-server";
+import {
+	ASK_FILE_NAME,
+	ASK_FILE_TEXT,
+	createFilePrompt,
+	scenarioFile,
+} from "./helpers/scenario";
 
 // ---------------------------------------------------------------------------
-// Isolated environment (must be set before the app modules are imported:
-// session paths are resolved from HOME at import time).
+// Mode and environment. Everything here runs before the app modules are
+// imported: some of them resolve their data paths at import time.
 // ---------------------------------------------------------------------------
 
-const REAL_HOME = process.env.HOME ?? "";
-const HOME = await mkdtemp(join(tmpdir(), "ptolemy-it-"));
-process.env.HOME = HOME;
-for (const key of ["NO_PROXY", "no_proxy"]) {
-	process.env[key] = ["127.0.0.1", "localhost", process.env[key]]
-		.filter(Boolean)
-		.join(",");
-}
+const MODE = process.env.PTOLEMY_IT_MODE === "live" ? "live" : "local";
+const LIVE = MODE === "live";
+const WANTED = new Set(
+	(process.env.PTOLEMY_IT_AGENTS ?? "claude,codex")
+		.split(",")
+		.map((s) => s.trim())
+		.filter(Boolean),
+);
 
-// When the suite itself runs inside a Claude Code session, the spawned
-// `claude` CLI would inherit that session's id and resume the wrong
-// transcript. Drop the inherited ids so each test conversation is its own.
+const TMP = await mkdtemp(join(tmpdir(), "ptolemy-it-"));
+process.env.PTOLEMY_HOME = TMP;
+
+// When the suite itself runs inside a Claude Code session, a spawned
+// `claude` would inherit that session's id and resume the wrong transcript.
 const INHERITED_SESSION_ID = process.env.CLAUDE_CODE_SESSION_ID;
 for (const key of ["CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_REMOTE_SESSION_ID"]) {
 	delete process.env[key];
 }
 
 const REPO = join(import.meta.dir, "..", "..");
-const BUNDLED_CODEX = join(REPO, "node_modules", ".bin", "codex");
-process.env.PTOLEMY_CODEX_PATH ??= BUNDLED_CODEX;
-process.env.PTOLEMY_MOCK_API_KEY = "mock-key";
+let anthropicMock: MockAnthropicServer | null = null;
+let responsesMock: MockResponsesServer | null = null;
 
-// An alias from the SDK's model list: full ids are not in that list, and a
-// cold resume would silently swap them for "default".
-const CLAUDE_MODEL = process.env.PTOLEMY_IT_CLAUDE_MODEL ?? "haiku";
-const CLAUDE_AVAILABLE =
-	process.env.PTOLEMY_IT_SKIP_CLAUDE !== "1" && Bun.which("claude") !== null;
+if (!LIVE) {
+	// Local servers only: bypass any HTTP(S) proxy for loopback.
+	for (const key of ["NO_PROXY", "no_proxy"]) {
+		process.env[key] = ["127.0.0.1", "localhost", process.env[key]]
+			.filter(Boolean)
+			.join(",");
+	}
+
+	// Claude: the CLI bundled with the Agent SDK, isolated config, API key
+	// auth against the mock. Drop anything that could route it elsewhere.
+	for (const key of Object.keys(process.env)) {
+		if (key.startsWith("ANTHROPIC_") || key.startsWith("CLAUDE_CODE_")) {
+			delete process.env[key];
+		}
+	}
+	anthropicMock = startMockAnthropicServer();
+	process.env.ANTHROPIC_BASE_URL = anthropicMock.url;
+	process.env.ANTHROPIC_API_KEY = "mock-key";
+	process.env.CLAUDE_CONFIG_DIR = join(TMP, ".claude");
+	process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1";
+	process.env.PTOLEMY_CLAUDE_PATH ??= join(
+		REPO,
+		"node_modules",
+		"@anthropic-ai",
+		`claude-agent-sdk-${process.platform}-${process.arch}`,
+		"claude",
+	);
+
+	// Codex: the CLI bundled with the SDK, with its own CODEX_HOME pointing
+	// at the mock provider.
+	responsesMock = startMockResponsesServer();
+	const codexHome = join(TMP, ".codex");
+	process.env.CODEX_HOME = codexHome;
+	await mkdir(codexHome, { recursive: true });
+	await writeFile(
+		join(codexHome, "config.toml"),
+		mockCodexConfigToml(responsesMock.url),
+	);
+	process.env.PTOLEMY_MOCK_API_KEY = "mock-key";
+	process.env.PTOLEMY_CODEX_PATH ??= join(
+		REPO,
+		"node_modules",
+		".bin",
+		"codex",
+	);
+}
 
 const sm = await import("../../src/bun/claude/session-manager");
+const { loadSettings, saveSettings } = await import("../../src/bun/settings");
+
+const CLAUDE_MODEL = LIVE
+	? (process.env.PTOLEMY_IT_CLAUDE_MODEL ?? "haiku")
+	: "haiku";
+const CODEX_MODEL = LIVE ? process.env.PTOLEMY_IT_CODEX_MODEL : undefined;
+
+// ---------------------------------------------------------------------------
+// Which agents can run here
+// ---------------------------------------------------------------------------
+
+async function claudeSkipReason(): Promise<string | null> {
+	if (!WANTED.has("claude")) return "fora de PTOLEMY_IT_AGENTS";
+	try {
+		const { findClaudeCli } = await import("../../src/bun/claude/claude-cli");
+		const path = await findClaudeCli();
+		if (!(await Bun.file(path).exists())) return `CLI não encontrado: ${path}`;
+	} catch (err) {
+		return err instanceof Error ? err.message : String(err);
+	}
+	return null;
+}
+
+async function codexSkipReason(): Promise<string | null> {
+	if (!WANTED.has("codex")) return "fora de PTOLEMY_IT_AGENTS";
+	const { getCodexAuthStatus } = await import("../../src/bun/codex/auth");
+	const status = await getCodexAuthStatus();
+	if (status.cliStatus === "not-installed") return "Codex CLI não instalado";
+	if (LIVE && status.cliStatus !== "authenticated") {
+		return "Codex CLI sem login (rode `codex login`)";
+	}
+	return null;
+}
+
+const SKIP: Record<AgentKind, string | null> = {
+	claude: await claudeSkipReason(),
+	codex: await codexSkipReason(),
+};
+for (const [agent, reason] of Object.entries(SKIP)) {
+	if (reason) {
+		console.warn(`[integration] ${agent} pulado (${MODE}): ${reason}`);
+	}
+}
+console.log(`[integration] modo=${MODE} dados=${TMP}`);
 
 // ---------------------------------------------------------------------------
 // Event capture
 // ---------------------------------------------------------------------------
 
 const events = new Map<string, AgentEvent[]>();
-const waiters: Array<() => void> = [];
+const wakers: Array<() => void> = [];
 
 sm.setSender({
 	sendEvent: (sessionId, event) => {
 		const list = events.get(sessionId) ?? [];
 		list.push(event);
 		events.set(sessionId, list);
-		// HITL: approve every tool permission request, like a user clicking
-		// "Permitir" in the chat.
+		// HITL: approve every permission request, like clicking "Permitir".
 		if (event.type === "tool-permission-request") {
 			sm.getPermissionGate().approve(event.permissionId, "allow");
 		}
-		for (const wake of waiters.splice(0)) wake();
+		for (const wake of wakers.splice(0)) wake();
 	},
 });
 
-function eventsOf(sessionId: string): AgentEvent[] {
-	return events.get(sessionId) ?? [];
+type Ev<T extends AgentEvent["type"]> = Extract<AgentEvent, { type: T }>;
+
+function eventsOf(sessionId: string, from = 0): AgentEvent[] {
+	return (events.get(sessionId) ?? []).slice(from);
 }
 
-function countOf(sessionId: string, type: AgentEvent["type"]): number {
-	return eventsOf(sessionId).filter((e) => e.type === type).length;
+function ofType<T extends AgentEvent["type"]>(
+	list: AgentEvent[],
+	type: T,
+): Ev<T>[] {
+	return list.filter((e): e is Ev<T> => e.type === type);
 }
 
-async function waitFor(
-	label: string,
-	predicate: () => boolean,
+function textOf(list: AgentEvent[]): string {
+	return ofType(list, "text-delta")
+		.map((e) => e.delta)
+		.join("");
+}
+
+/**
+ * Waits until the session emits `finish` after index `from` and returns that
+ * turn's events. A timeout reports the errors the agent sent.
+ */
+async function waitTurn(
+	sessionId: string,
+	from: number,
 	timeoutMs: number,
-): Promise<void> {
+): Promise<AgentEvent[]> {
 	const deadline = Date.now() + timeoutMs;
-	while (!predicate()) {
+	while (ofType(eventsOf(sessionId, from), "finish").length === 0) {
 		const remaining = deadline - Date.now();
 		if (remaining <= 0) {
-			throw new Error(`timeout waiting for ${label}`);
+			const errors = ofType(eventsOf(sessionId, from), "error").map(
+				(e) => e.error.message,
+			);
+			throw new Error(
+				`timeout esperando o fim do turno de ${sessionId}${
+					errors.length ? `; erros: ${errors.join(" | ")}` : ""
+				}`,
+			);
 		}
 		await new Promise<void>((resolve) => {
 			const timer = setTimeout(resolve, Math.min(remaining, 1000));
-			waiters.push(() => {
+			wakers.push(() => {
 				clearTimeout(timer);
 				resolve();
 			});
 		});
 	}
+	return eventsOf(sessionId, from);
 }
 
-const waitForFinish = (sessionId: string, n: number, timeoutMs: number) =>
-	waitFor(
-		`finish #${n} of ${sessionId}`,
-		() => countOf(sessionId, "finish") >= n,
-		timeoutMs,
-	);
-
-function streamedText(sessionId: string): string {
-	return eventsOf(sessionId)
-		.filter(
-			(e): e is Extract<AgentEvent, { type: "text-delta" }> =>
-				e.type === "text-delta",
-		)
-		.map((e) => e.delta)
-		.join("");
-}
-
-function finishes(sessionId: string) {
-	return eventsOf(sessionId).filter(
-		(e): e is Extract<AgentEvent, { type: "finish" }> => e.type === "finish",
-	);
+function expectCleanTurn(turn: AgentEvent[], okReason: string) {
+	const errors = ofType(turn, "error").map((e) => e.error.message);
+	expect(errors).toEqual([]);
+	expect(ofType(turn, "finish")[0].reason).toBe(okReason);
 }
 
 async function metaOf(sessionId: string) {
-	const sessions = await sm.listSessions();
-	const meta = sessions.find((s) => s.id === sessionId);
-	if (!meta) throw new Error(`session ${sessionId} not in index`);
+	const meta = (await sm.listSessions()).find((s) => s.id === sessionId);
+	if (!meta) throw new Error(`sessão ${sessionId} não está no índice`);
 	return meta;
-}
-
-function blockTypes(
-	messages: Awaited<ReturnType<typeof sm.getSessionMessages>>,
-) {
-	return messages.map(
-		(m) => `${m.role}:${m.blocks.map((b) => b.type).join("+")}`,
-	);
 }
 
 // ---------------------------------------------------------------------------
 // Setup / teardown
 // ---------------------------------------------------------------------------
 
-let mock: MockResponsesServer;
-
 beforeAll(async () => {
-	mock = startMockResponsesServer();
-
-	// Codex reads its provider from $HOME/.codex/config.toml.
-	const cfg = mockProviderConfig(mock.url);
-	const provider = cfg.model_providers.ptolemy_mock;
-	await mkdir(join(HOME, ".codex"), { recursive: true });
-	await writeFile(
-		join(HOME, ".codex", "config.toml"),
-		[
-			`model_provider = "${cfg.model_provider}"`,
-			`model = "${cfg.model}"`,
-			"",
-			"[model_providers.ptolemy_mock]",
-			`name = "${provider.name}"`,
-			`base_url = "${provider.base_url}"`,
-			`env_key = "${provider.env_key}"`,
-			`wire_api = "${provider.wire_api}"`,
-			`supports_websockets = ${provider.supports_websockets}`,
-			`request_max_retries = ${provider.request_max_retries}`,
-			`stream_max_retries = ${provider.stream_max_retries}`,
-			"",
-		].join("\n"),
-	);
-
-	// App settings: Claude model for the run; Codex defers to the CLI config.
-	const { loadSettings, saveSettings } = await import("../../src/bun/settings");
 	const settings = await loadSettings();
 	await saveSettings({
 		...settings,
 		claude: { ...settings.claude, model: CLAUDE_MODEL },
+		codex: CODEX_MODEL
+			? { ...settings.codex, model: CODEX_MODEL }
+			: settings.codex,
 	});
 });
 
 afterAll(async () => {
-	mock?.stop();
-	process.env.HOME = REAL_HOME;
-	await rm(HOME, { recursive: true, force: true });
+	anthropicMock?.stop();
+	responsesMock?.stop();
+	await rm(TMP, { recursive: true, force: true });
 });
 
 // ---------------------------------------------------------------------------
-// Codex
+// The scenario, per agent
 // ---------------------------------------------------------------------------
 
-describe("Codex (SDK + CLI reais, modelo local)", () => {
-	let sessionId = "";
-	let projectPath = "";
+const TURN_TIMEOUT = LIVE ? 240_000 : 60_000;
+const TEST_TIMEOUT = TURN_TIMEOUT + 30_000;
 
-	test("cria a sessão e só inicia o turno quando o chat retoma", async () => {
-		sessionId = await sm.createSession(
-			`Crie ${CODEX_FILE_NAME} e mostre o conteúdo ${TOOL_MARKER}`,
-			{ agent: "codex" },
-		);
-		const meta = await metaOf(sessionId);
-		projectPath = meta.projectPath;
-		expect(meta.agent).toBe("codex");
-		expect(meta.sdkSessionId).toBe("");
-		expect(existsSync(projectPath)).toBe(true);
-		// Deferred start: nothing has run before resumeSession.
-		expect(eventsOf(sessionId)).toHaveLength(0);
-		expect(mock.requests).toHaveLength(0);
-	});
+const OK_REASON: Record<AgentKind, string> = {
+	claude: "success",
+	codex: "completed",
+};
 
-	test("primeiro turno: arquivo, comando e resposta chegam como AgentEvents", async () => {
-		expect(await sm.resumeSession(sessionId)).toBe(true);
-		await waitForFinish(sessionId, 1, 90_000);
+/** Tools the mock "models" use, as the chat names them. */
+const LOCAL_TOOLS: Record<AgentKind, string[]> = {
+	claude: ["Write", "Bash"],
+	codex: ["ApplyPatch", "Shell"],
+};
 
-		const evs = eventsOf(sessionId);
-		const toolCalls = evs.filter(
-			(e): e is Extract<AgentEvent, { type: "tool-call" }> =>
-				e.type === "tool-call",
-		);
-		expect(toolCalls.map((t) => t.toolName)).toEqual(["ApplyPatch", "Shell"]);
-		expect(toolCalls[1].args).toMatchObject({
-			command: expect.stringContaining(`cat ${CODEX_FILE_NAME}`),
-		});
-		const shellResult = evs.find(
-			(e): e is Extract<AgentEvent, { type: "tool-result" }> =>
-				e.type === "tool-result" && e.toolCallId === toolCalls[1].toolCallId,
-		);
-		expect(String(shellResult?.result)).toContain(CODEX_FILE_TEXT);
-		expect(streamedText(sessionId)).toContain(
-			`Pronto: criei ${CODEX_FILE_NAME}.`,
-		);
-		expect(countOf(sessionId, "error")).toBe(0);
+function createOptions(agent: AgentKind) {
+	return agent === "codex" ? { agent } : {};
+}
 
-		const [finish] = finishes(sessionId);
-		expect(finish.reason).toBe("completed");
-		expect(finish.usage.inputTokens).toBeGreaterThan(0);
+function scenario(agent: AgentKind, other: AgentKind) {
+	const file = scenarioFile(agent);
+	const state = { id: "", projectPath: "", sdkId: "", otherId: "" };
 
-		// The sandbox wrote inside the conversation's project directory.
-		expect(await readFile(join(projectPath, CODEX_FILE_NAME), "utf8")).toBe(
-			`${CODEX_FILE_TEXT}\n`,
-		);
-	});
-
-	test("persiste o thread id e as mensagens antes do finish", async () => {
-		const meta = await metaOf(sessionId);
-		expect(meta.sdkSessionId).not.toBe("");
-		const messages = await sm.getSessionMessages(sessionId);
-		expect(blockTypes(messages)).toEqual([
-			"user:text",
-			"assistant:tool_use+tool_result+tool_use+tool_result+text",
-		]);
-	});
-
-	test("segundo turno retoma o mesmo thread do Codex", async () => {
-		const threadId = (await metaOf(sessionId)).sdkSessionId;
-		const before = mock.requests.length;
-		await sm.sendMessage("E agora, tudo certo?");
-		await waitForFinish(sessionId, 2, 90_000);
-
-		expect(finishes(sessionId)[1].reason).toBe("completed");
-		expect(streamedText(sessionId)).toContain("Continuo na mesma conversa.");
-		expect((await metaOf(sessionId)).sdkSessionId).toBe(threadId);
-		// `codex exec resume` sent the earlier turn back as history.
-		const resumed = JSON.stringify(mock.requests[before].body.input);
-		expect(resumed).toContain(TOOL_MARKER);
-		expect(resumed).toContain("E agora, tudo certo?");
-		expect((await sm.getSessionMessages(sessionId)).length).toBe(4);
-	});
-
-	test("apagar a sessão remove a pasta do projeto", async () => {
-		expect(await sm.deleteSession(sessionId)).toBe(true);
-		expect(existsSync(projectPath)).toBe(false);
-		expect(sm.getActiveSessionId()).toBeNull();
-	});
-});
-
-// ---------------------------------------------------------------------------
-// Claude
-// ---------------------------------------------------------------------------
-
-const CLAUDE_FILE = "ola-claude.txt";
-const CLAUDE_TEXT = "Olá do Claude";
-
-describe.skipIf(!CLAUDE_AVAILABLE)(
-	`Claude (Agent SDK real, ${CLAUDE_MODEL})`,
-	() => {
-		let claudeId = "";
-		let codexId = "";
-		let projectPath = "";
-
-		test("primeiro turno: escreve o arquivo e roda um comando com aprovação", async () => {
-			claudeId = await sm.createSession(
-				[
-					`Use a ferramenta Write para criar o arquivo ${CLAUDE_FILE} na pasta atual com exatamente o texto: ${CLAUDE_TEXT}`,
-					`Depois use a ferramenta Bash para rodar: cat ${CLAUDE_FILE}`,
-					"Por fim responda em uma frase curta.",
-				].join("\n"),
+	describe.skipIf(SKIP[agent] !== null)(`${agent} (${MODE})`, () => {
+		test("cria a sessão e só inicia o agente quando o chat retoma", async () => {
+			state.id = await sm.createSession(
+				createFilePrompt(file),
+				createOptions(agent),
 			);
-			const meta = await metaOf(claudeId);
-			projectPath = meta.projectPath;
-			expect(meta.agent ?? "claude").toBe("claude");
+			const meta = await metaOf(state.id);
+			state.projectPath = meta.projectPath;
+			expect(sm.sessionAgent(meta)).toBe(agent);
+			expect(existsSync(state.projectPath)).toBe(true);
+			expect(eventsOf(state.id)).toHaveLength(0);
+		});
 
-			expect(await sm.resumeSession(claudeId)).toBe(true);
-			await waitForFinish(claudeId, 1, 240_000);
+		test(
+			"turno 1: cria o arquivo e roda um comando na pasta da conversa",
+			async () => {
+				expect(await sm.resumeSession(state.id)).toBe(true);
+				const turn = await waitTurn(state.id, 0, TURN_TIMEOUT);
+				expectCleanTurn(turn, OK_REASON[agent]);
 
-			const evs = eventsOf(claudeId);
-			const toolNames = evs
-				.filter(
-					(e): e is Extract<AgentEvent, { type: "tool-call" }> =>
-						e.type === "tool-call",
-				)
-				.map((e) => e.toolName);
-			expect(toolNames).toContain("Write");
-			expect(toolNames).toContain("Bash");
-			expect(countOf(claudeId, "tool-result")).toBeGreaterThanOrEqual(2);
-			expect(countOf(claudeId, "text-delta")).toBeGreaterThan(0);
-			expect(finishes(claudeId)[0].reason).toBe("success");
+				const tools = ofType(turn, "tool-call").map((t) => t.toolName);
+				if (LIVE) expect(tools.length).toBeGreaterThan(0);
+				else expect(tools).toEqual(LOCAL_TOOLS[agent]);
+				expect(ofType(turn, "tool-result").length).toBeGreaterThan(0);
+				expect(textOf(turn).trim()).not.toBe("");
 
-			const written = await readFile(join(projectPath, CLAUDE_FILE), "utf8");
-			expect(written.trim()).toBe(CLAUDE_TEXT);
+				const written = await readFile(
+					join(state.projectPath, file.name),
+					"utf8",
+				);
+				expect(written.trim()).toBe(file.text);
+			},
+			TEST_TIMEOUT,
+		);
 
-			const messages = await sm.getSessionMessages(claudeId);
+		test("persiste a conversa e o id do agente", async () => {
+			const meta = await metaOf(state.id);
+			state.sdkId = meta.sdkSessionId;
+			expect(state.sdkId).not.toBe("");
+			expect(state.sdkId).not.toBe(state.id);
+			if (INHERITED_SESSION_ID) {
+				expect(state.sdkId).not.toBe(INHERITED_SESSION_ID);
+			}
+
+			const messages = await sm.getSessionMessages(state.id);
 			expect(messages[0].role).toBe("user");
 			expect(messages.at(-1)?.role).toBe("assistant");
-			const sdkId = (await metaOf(claudeId)).sdkSessionId;
-			expect(sdkId).not.toBe(claudeId);
-			if (INHERITED_SESSION_ID) expect(sdkId).not.toBe(INHERITED_SESSION_ID);
-		}, 300_000);
-
-		test("segundo turno lembra o contexto da conversa", async () => {
-			await sm.sendMessage(
-				"Qual é o nome do arquivo que você acabou de criar? Responda só o nome.",
-			);
-			await waitForFinish(claudeId, 2, 180_000);
-			expect(finishes(claudeId)[1].reason).toBe("success");
-			const lastTurn = eventsOf(claudeId).slice(
-				eventsOf(claudeId).indexOf(finishes(claudeId)[0]),
-			);
-			const text = lastTurn
-				.filter(
-					(e): e is Extract<AgentEvent, { type: "text-delta" }> =>
-						e.type === "text-delta",
-				)
-				.map((e) => e.delta)
-				.join("");
-			expect(text).toContain(CLAUDE_FILE);
-		}, 200_000);
-
-		test("alterna para o Codex e volta para o Claude (retomada a frio)", async () => {
-			codexId = await sm.createSession(`Olá ${TOOL_MARKER}`, {
-				agent: "codex",
-			});
-			expect(await sm.resumeSession(codexId)).toBe(true);
-			expect(sm.getActiveSessionId()).toBe(codexId);
-			await waitForFinish(codexId, 1, 90_000);
-			expect(finishes(codexId)[0].reason).toBe("completed");
-
-			// Cold resume: a fresh query() with `resume: <sdk session id>`.
-			expect(await sm.resumeSession(claudeId)).toBe(true);
-			expect(sm.getActiveSessionId()).toBe(claudeId);
-			const before = eventsOf(claudeId).length;
-			await sm.sendMessage(
-				"Qual texto você escreveu no arquivo? Responda só o texto.",
-			);
-			await waitForFinish(claudeId, 3, 180_000);
-			expect(finishes(claudeId)[2].reason).toBe("success");
-			const text = eventsOf(claudeId)
-				.slice(before)
-				.filter(
-					(e): e is Extract<AgentEvent, { type: "text-delta" }> =>
-						e.type === "text-delta",
-				)
-				.map((e) => e.delta)
-				.join("");
-			expect(text).toContain(CLAUDE_TEXT);
-			expect((await metaOf(claudeId)).model).toBe(CLAUDE_MODEL);
-		}, 300_000);
-
-		test("cada plugin vê só as sessões do seu agente", async () => {
-			const sessions = await sm.listSessions();
-			const byId = new Map(sessions.map((s) => [s.id, s]));
-			expect(sm.sessionAgent(byId.get(claudeId) ?? {})).toBe("claude");
-			expect(sm.sessionAgent(byId.get(codexId) ?? {})).toBe("codex");
+			const blocks = messages.slice(1).flatMap((m) => m.blocks);
+			expect(blocks.some((b) => b.type === "tool_use")).toBe(true);
+			expect(blocks.some((b) => b.type === "text")).toBe(true);
 		});
 
-		afterAll(async () => {
-			for (const id of [claudeId, codexId]) {
-				if (id) await sm.deleteSession(id).catch(() => {});
+		test(
+			"turno 2: lembra o primeiro turno na mesma sessão",
+			async () => {
+				const from = eventsOf(state.id).length;
+				await sm.sendMessage(ASK_FILE_NAME);
+				const turn = await waitTurn(state.id, from, TURN_TIMEOUT);
+				expectCleanTurn(turn, OK_REASON[agent]);
+				expect(textOf(turn)).toContain(file.name);
+				expect((await metaOf(state.id)).sdkSessionId).toBe(state.sdkId);
+			},
+			TEST_TIMEOUT,
+		);
+
+		test.skipIf(SKIP[other] !== null)(
+			`troca para ${other} e retoma a frio, lembrando a conversa`,
+			async () => {
+				state.otherId = await sm.createSession(
+					"Responda só: oi",
+					createOptions(other),
+				);
+				expect(await sm.resumeSession(state.otherId)).toBe(true);
+				expect(sm.getActiveSessionId()).toBe(state.otherId);
+				const otherTurn = await waitTurn(state.otherId, 0, TURN_TIMEOUT);
+				expectCleanTurn(otherTurn, OK_REASON[other]);
+
+				// Cold resume: a fresh SDK session/thread from the stored id.
+				expect(await sm.resumeSession(state.id)).toBe(true);
+				expect(sm.getActiveSessionId()).toBe(state.id);
+				const from = eventsOf(state.id).length;
+				await sm.sendMessage(ASK_FILE_TEXT);
+				const turn = await waitTurn(state.id, from, TURN_TIMEOUT);
+				expectCleanTurn(turn, OK_REASON[agent]);
+				expect(textOf(turn)).toContain(file.text);
+
+				const meta = await metaOf(state.id);
+				expect(meta.sdkSessionId).toBe(state.sdkId);
+				if (agent === "claude") expect(meta.model).toBe(CLAUDE_MODEL);
+			},
+			TEST_TIMEOUT * 2,
+		);
+
+		test("apagar a sessão remove a pasta do projeto", async () => {
+			for (const id of [state.otherId, state.id]) {
+				if (id) expect(await sm.deleteSession(id)).toBe(true);
 			}
+			expect(existsSync(state.projectPath)).toBe(false);
+			expect(sm.getActiveSessionId()).toBeNull();
 		});
-	},
-);
+	});
+}
+
+scenario("codex", "claude");
+scenario("claude", "codex");

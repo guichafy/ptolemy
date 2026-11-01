@@ -1,6 +1,5 @@
 import { existsSync } from "node:fs";
 import { mkdir, readFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import type {
 	CanUseTool,
@@ -13,6 +12,7 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { AgentKind } from "@/shared/agent-protocol";
 import { backupCorruptJson, writeJsonAtomic } from "../atomic-json";
 import { CodexSessionRuntime } from "../codex/session-runtime";
+import { ptolemyDataDir } from "../paths";
 import { loadSettings } from "../settings";
 import { findClaudeCli } from "./claude-cli";
 import { mcpLoader } from "./mcp-loader";
@@ -143,7 +143,7 @@ function migrateStoredMessage(msg: StoredMessage): StoredMessageV2 {
 // Paths
 // ---------------------------------------------------------------------------
 
-const SESSIONS_DIR = join(homedir(), ".ptolomeu", "sessions");
+const SESSIONS_DIR = join(ptolemyDataDir(), "sessions");
 const INDEX_PATH = join(SESSIONS_DIR, "index.json");
 
 const projectStore = new ProjectStore();
