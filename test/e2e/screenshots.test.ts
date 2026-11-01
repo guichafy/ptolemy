@@ -3,6 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
 	activateWindow,
 	clearInput,
+	clickPaletteElement,
 	createDriver,
 	indexOfInSource,
 	pressEnter,
@@ -202,7 +203,7 @@ describe("Ptolemy Screenshots", () => {
 			'//XCUIElementTypeButton[@label="Configurar Skills" or @title="Configurar Skills"]',
 		);
 		await skills.waitForEnabled({ timeout: Timing.RESULTS_WAIT });
-		await skills.click();
+		await clickPaletteElement(skills);
 		const picker = await waitForResults(
 			driver,
 			[
