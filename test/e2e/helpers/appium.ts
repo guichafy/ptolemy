@@ -6,7 +6,7 @@ import {
 } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import path from "node:path";
-import { remote } from "webdriverio";
+import { type ChainablePromiseElement, remote } from "webdriverio";
 import {
 	APP_PATH,
 	APPIUM_HOST,
@@ -182,7 +182,7 @@ async function ensurePaletteVisible(
 /** XCTest element.click can activate another native window and hide overlays.
  * Use the observed AX rect with CGEvents, as for the existing global hotkey. */
 export async function clickPaletteElement(
-	element: Pick<WebdriverIO.Element, "getLocation" | "getSize">,
+	element: ChainablePromiseElement,
 ): Promise<void> {
 	const [location, size] = await Promise.all([
 		element.getLocation(),
