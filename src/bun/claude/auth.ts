@@ -148,7 +148,8 @@ export async function getClaudeAuthStatus(): Promise<ClaudeAuthStatus> {
 	};
 }
 
-async function runOsascriptTerminal(
+/** Runs `command` in a new Terminal window (shared with the Codex flow). */
+export async function runOsascriptTerminal(
 	command: string,
 ): Promise<{ ok: boolean; error?: string }> {
 	try {

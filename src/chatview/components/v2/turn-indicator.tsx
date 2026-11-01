@@ -1,14 +1,21 @@
+import type { AgentKind } from "@/shared/agent-protocol";
 import type { TurnStatus } from "../../hooks/agent-state";
+
+const AGENT_NAMES: Record<AgentKind, string> = {
+	claude: "Claude",
+	codex: "Codex",
+};
 
 export function turnIndicatorLabel(
 	status: TurnStatus,
 	toolName?: string,
+	agent: AgentKind = "claude",
 ): string | null {
 	switch (status) {
 		case "idle":
 			return null;
 		case "waiting":
-			return "Aguardando resposta do Claude...";
+			return `Aguardando resposta do ${AGENT_NAMES[agent]}...`;
 		case "receiving":
 			return "Recebendo resposta...";
 		case "tool_running":
@@ -21,10 +28,11 @@ export function turnIndicatorLabel(
 export interface TurnIndicatorProps {
 	status: TurnStatus;
 	toolName?: string;
+	agent?: AgentKind;
 }
 
-export function TurnIndicator({ status, toolName }: TurnIndicatorProps) {
-	const label = turnIndicatorLabel(status, toolName);
+export function TurnIndicator({ status, toolName, agent }: TurnIndicatorProps) {
+	const label = turnIndicatorLabel(status, toolName, agent);
 	if (label === null) return null;
 	return (
 		<div

@@ -1,6 +1,7 @@
 import { type ElectrobunRPCSchema, Electroview } from "electrobun/view";
 import type {
 	AgentEvent,
+	AgentKind,
 	ApproveBehavior,
 	ClaudeAuthMode as ProtocolClaudeAuthMode,
 	ProtocolModelInfo,
@@ -141,13 +142,15 @@ export interface BedrockConfig {
 export interface SessionMeta {
 	id: string;
 	sdkSessionId: string;
+	/** Backing agent; absent on sessions created before Codex support. */
+	agent?: AgentKind;
 	title: string;
 	/** Project this conversation belongs to. */
 	projectId: string;
 	/** Snapshot of the project directory (agent's cwd for the session). */
 	projectPath: string;
 	model: string;
-	authMode: "anthropic" | "bedrock";
+	authMode?: "anthropic" | "bedrock";
 	createdAt: string;
 	updatedAt: string;
 	messageCount: number;
@@ -223,7 +226,7 @@ interface PtolemyRPCSchema extends ElectrobunRPCSchema {
 			};
 			claudeListSessions: { params: void; response: SessionMeta[] };
 			claudeCreateSession: {
-				params: { prompt: string; projectId?: string };
+				params: { prompt: string; projectId?: string; agent?: AgentKind };
 				response: { sessionId: string };
 			};
 			claudeResumeSession: {
@@ -271,6 +274,10 @@ interface PtolemyRPCSchema extends ElectrobunRPCSchema {
 			claudeOpenChat: {
 				params: { sessionId?: string };
 				response: boolean;
+			};
+			codexListModels: {
+				params: void;
+				response: { models: ProtocolModelInfo[] };
 			};
 			agentApproveTool: {
 				params: {

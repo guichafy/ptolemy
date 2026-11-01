@@ -1,12 +1,14 @@
-import { Bot } from "lucide-react";
+import { Bot, SquareTerminal } from "lucide-react";
 import { ModelPicker } from "@/components/claude/model-picker";
 import { cn } from "@/lib/utils";
-import type { ProtocolModelInfo } from "@/shared/agent-protocol";
+import type { AgentKind, ProtocolModelInfo } from "@/shared/agent-protocol";
 import { rpc } from "../rpc";
 
 type SessionState = "idle" | "streaming" | "tool_running" | "error";
 
 interface ChatHeaderProps {
+	/** Defaults to Claude, the agent of every pre-Codex session. */
+	agent?: AgentKind;
 	sessionId: string | null;
 	sessionState: SessionState;
 	sessionModel: string | null;
@@ -20,13 +22,20 @@ const stateConfig: Record<SessionState, { color: string; pulse: boolean }> = {
 	error: { color: "bg-red-500", pulse: false },
 };
 
+const agentConfig: Record<AgentKind, { title: string; icon: typeof Bot }> = {
+	claude: { title: "Claude Code", icon: Bot },
+	codex: { title: "Codex", icon: SquareTerminal },
+};
+
 export function ChatHeader({
+	agent = "claude",
 	sessionId,
 	sessionState,
 	sessionModel,
 	models,
 }: ChatHeaderProps) {
 	const { color, pulse } = stateConfig[sessionState];
+	const { title, icon: AgentIcon } = agentConfig[agent];
 	const handleChange = async (model: string) => {
 		if (!sessionId) return;
 		try {
@@ -38,8 +47,8 @@ export function ChatHeader({
 
 	return (
 		<div className="flex items-center gap-3 border-b border-border/40 px-4 py-2.5">
-			<Bot className="h-4 w-4 text-muted-foreground" />
-			<h1 className="text-sm font-semibold">Claude Code</h1>
+			<AgentIcon className="h-4 w-4 text-muted-foreground" />
+			<h1 className="text-sm font-semibold">{title}</h1>
 			<span
 				className={cn(
 					"inline-block h-2 w-2 rounded-full",

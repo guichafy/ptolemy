@@ -23,7 +23,7 @@ const {
 describe("plugin registry", () => {
 	it("exposes all known plugins", () => {
 		expect(KNOWN_PLUGIN_IDS.sort()).toEqual(
-			["apps", "calc", "claude", "github", "web"].sort(),
+			["apps", "calc", "claude", "codex", "github", "web"].sort(),
 		);
 	});
 

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { defineElectrobunRPC, type ElectrobunRPCSchema } from "electrobun/bun";
 import type {
 	AgentEvent,
+	AgentKind,
 	ApproveBehavior,
 	ClaudeAuthMode,
 	ProtocolModelInfo,
@@ -36,6 +37,13 @@ import {
 	type SessionMeta,
 	type StoredMessageV2,
 } from "./claude/session-manager";
+import {
+	type CodexAuthStatus,
+	getCodexAuthStatus,
+	installCodexCli,
+	openCodexLogin,
+} from "./codex/auth";
+import { CODEX_MODELS } from "./codex/models";
 import {
 	type GitHubItem,
 	type GitHubSubType,
@@ -115,7 +123,8 @@ export interface PtolemyRPCSchema extends ElectrobunRPCSchema {
 				// No cwd: the backend auto-provisions a project directory per
 				// conversation. Pass projectId to attach a new session to an
 				// existing project (future multi-session-per-project UI).
-				params: { prompt: string; projectId?: string };
+				// `agent` picks the backing agent; omitted means Claude.
+				params: { prompt: string; projectId?: string; agent?: AgentKind };
 				response: { sessionId: string };
 			};
 			claudeResumeSession: {
@@ -160,6 +169,19 @@ export interface PtolemyRPCSchema extends ElectrobunRPCSchema {
 			claudeOpenChat: {
 				params: { sessionId?: string };
 				response: boolean;
+			};
+			codexGetAuthStatus: { params: void; response: CodexAuthStatus };
+			codexOpenLogin: {
+				params: void;
+				response: { ok: boolean; error?: string };
+			};
+			codexInstallCli: {
+				params: void;
+				response: { ok: boolean; error?: string };
+			};
+			codexListModels: {
+				params: void;
+				response: { models: ProtocolModelInfo[] };
 			};
 			// HITL tool-permission commands (phase 4).
 			agentApproveTool: {
@@ -631,8 +653,8 @@ export const requestHandlers: BunRequestHandlers = {
 		return true;
 	},
 	claudeListSessions: async () => claudeListSessions(),
-	claudeCreateSession: async ({ prompt, projectId }) => {
-		const sessionId = await claudeCreateSession(prompt, { projectId });
+	claudeCreateSession: async ({ prompt, projectId, agent }) => {
+		const sessionId = await claudeCreateSession(prompt, { projectId, agent });
 		console.log(
 			`[claude:rpc] claudeCreateSession: auto-opening chat for sessionId=${sessionId}`,
 		);
@@ -711,6 +733,10 @@ export const requestHandlers: BunRequestHandlers = {
 		openChatCallback?.(sessionId);
 		return true;
 	},
+	codexGetAuthStatus: async () => getCodexAuthStatus(),
+	codexOpenLogin: async () => openCodexLogin(),
+	codexInstallCli: async () => installCodexCli(),
+	codexListModels: async () => ({ models: CODEX_MODELS }),
 	agentApproveTool: async ({ permissionId, behavior, modifiedArgs }) => {
 		const ok = getPermissionGate().approve(
 			permissionId,

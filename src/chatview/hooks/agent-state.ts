@@ -6,7 +6,11 @@
  */
 
 import type { StoredBlock, StoredMessage } from "@/chatview/rpc";
-import type { AgentEvent, TokenUsage } from "@/shared/agent-protocol";
+import type {
+	AgentEvent,
+	AgentKind,
+	TokenUsage,
+} from "@/shared/agent-protocol";
 
 // ---------------------------------------------------------------------------
 // Domain model
@@ -96,6 +100,8 @@ export interface AgentState {
 	durationMs: number | null;
 	suggestions: string[];
 	sessionModel: string | null;
+	/** Agent backing the open session (null until the session meta loads). */
+	sessionAgent: AgentKind | null;
 }
 
 export function initialAgentState(): AgentState {
@@ -112,6 +118,7 @@ export function initialAgentState(): AgentState {
 		durationMs: null,
 		suggestions: [],
 		sessionModel: null,
+		sessionAgent: null,
 	};
 }
 

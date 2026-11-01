@@ -4,7 +4,7 @@ Guidance for AI coding agents (Claude Code, Codex, Cursor and others) working in
 
 ## Project overview
 
-**Ptolemy** is a macOS menu bar app: a global command palette (`⌘+Shift+Space`) with a plugin-based search architecture and an embedded Claude chat window. Built with Electrobun (Bun runtime, not Electron), React 19, Tailwind CSS 4 and Vite. Native Objective-C handles the window overlay, the global hotkey and tray sizing.
+**Ptolemy** is a macOS menu bar app: a global command palette (`⌘+Shift+Space`) with a plugin-based search architecture and an embedded agent chat window backed by Claude Code or OpenAI Codex. Built with Electrobun (Bun runtime, not Electron), React 19, Tailwind CSS 4 and Vite. Native Objective-C handles the window overlay, the global hotkey and tray sizing.
 
 The project was called **Ptolomeu** until v0.10.x. See [Naming and data identifiers](#naming-and-data-identifiers) before touching anything that still carries the old name.
 
@@ -43,19 +43,22 @@ bun run build:site         # Build the landing page to site/dist/
 
 ### Process model
 
-1. **Main process** (`src/bun/index.ts`): runs in Bun. Hides the dock icon (`Utils.setDockIconVisible(false)`) so the app lives in the menu bar only. Owns the system tray, two `BrowserWindow`s (palette + chat), the native FFI bridge, the Claude session manager and the proxy-aware fetch layer. The palette window is created hidden and toggled by the global hotkey; the chat window is lazy and created on first open.
+1. **Main process** (`src/bun/index.ts`): runs in Bun. Hides the dock icon (`Utils.setDockIconVisible(false)`) so the app lives in the menu bar only. Owns the system tray, two `BrowserWindow`s (palette + chat), the native FFI bridge, the agent session manager (Claude and Codex) and the proxy-aware fetch layer. The palette window is created hidden and toggled by the global hotkey; the chat window is lazy and created on first open.
 2. **Palette renderer** (`src/mainview/`): React command palette. Vite root is `src/mainview/`, output `dist/`, copied to `views/mainview/` per `electrobun.config.ts`.
 3. **Chat renderer** (`src/chatview/`): separate React app for the Claude chat surface. Vite config is `vite.chat.config.ts`, root `src/chatview/`, output `dist-chat/`, copied to `views/chatview/`. Both webviews run in the same Bun process with isolated transports.
 
 ### Provider system
 
-Plugin-based search in `src/mainview/providers/`. Each plugin implements `SearchProvider` (`id`, `label`, `icon`, `placeholder`, `search`, optional `useSearchContext`, optional `configComponent`). Five built-ins:
+Plugin-based search in `src/mainview/providers/`. Each plugin implements `SearchProvider` (`id`, `label`, `icon`, `placeholder`, `search`, optional `useSearchContext`, optional `configComponent`). Six built-ins:
 
 - `apps`: macOS application launcher (`scanApps` over `/Applications`, `/System/Applications`, `~/Applications`)
 - `github`: repos / code / issues / users with custom filters, qualifier builder and team repos
 - `calc`: math expression evaluator
 - `web`: Google / DuckDuckGo / Stack Overflow / YouTube
 - `claude`: Claude session list + create-new (opens the chat window)
+- `codex`: same for Codex sessions; opt-in (not in the default `enabledOrder`)
+
+`claude` and `codex` are thin instances of `createAgentSessionProvider` (`agent-sessions.ts`). Both read the same session list and filter by `SessionMeta.agent`; `App.tsx` treats any id from `agentForProviderId` as an agent plugin (recent sessions on empty query, `claudeSessionsUpdate` push).
 
 Registry in `registry.ts` (`PLUGIN_REGISTRY`, `PLUGIN_META`); the active plugin is managed by `ProviderContextProvider`.
 
@@ -77,8 +80,9 @@ Request handler families (renderer → bun):
 - Window: `resizeWindow`
 - Settings: `loadSettings`, `saveSettings`
 - GitHub: `githubGetTokenStatus`, `githubSetToken`, `githubDeleteToken`, `githubFetchSearch`, `githubInvalidateCache`
-- Claude session: `claudeListSessions`, `claudeCreateSession`, `claudeResumeSession`, `claudeSendMessage`, `claudeStopGeneration`, `claudeDeleteSession`, `claudeGetSessionMessages`, `claudeOpenChat`
+- Agent session (named `claude*` for history, they serve both agents; `claudeCreateSession` takes `agent?: "claude" | "codex"`): `claudeListSessions`, `claudeCreateSession`, `claudeResumeSession`, `claudeSendMessage`, `claudeStopGeneration`, `claudeDeleteSession`, `claudeGetSessionMessages`, `claudeOpenChat`
 - Claude auth and models: `claudeGetAuthStatus`, `claudeOpenLogin`, `claudeInstallCli`, `claudeSetBedrock`, `claudeGetBedrock`, `claudeListSupportedModels`, `claudeSetSessionModel`
+- Codex auth and models: `codexGetAuthStatus`, `codexOpenLogin`, `codexInstallCli`, `codexListModels`
 - Agent HITL and MCP: `agentApproveTool`, `agentRejectTool`, `agentListMcpServers`, `agentSaveMcpServers`
 - Proxy: `getProxyStatus`, `reloadProxyFromSystem`, `saveManualProxy`, `clearManualProxy`, `testProxyConnection`
 - Analytics: `trackAnalyticsEvent`, `setAnalyticsConsent`
@@ -122,6 +126,17 @@ Built on `@anthropic-ai/claude-agent-sdk` using the stable `query()` API. Authen
 - **Workspace jail** (`workspace-jail.ts`): hard pre-check that rejects Write/Edit/NotebookEdit/Bash invocations whose target path escapes the project workspace, *before* the permission gate sees them. `cwd` alone is not sufficient because the SDK accepts absolute paths.
 - **MCP loader** (`mcp-loader.ts`): runtime registry of user-declared stdio MCP servers, persisted in `~/.ptolomeu/mcp-servers.json` and editable in **Plugins → Claude → MCP Servers**. Distinct from the repo's `.mcp.json`, which is for agents working on this codebase.
 - **Auth** (`auth.ts`): reports CLI status (`not-installed` / `not-authenticated` / `authenticated`), opens the CLI login flow, and stores Bedrock config (endpoint, profile, region) in `~/.ptolomeu/auth/bedrock.json`.
+
+### Codex integration (`src/bun/codex/`)
+
+Built on `@openai/codex-sdk`, which spawns the user's Codex CLI (`codex exec --experimental-json`) and streams JSONL `ThreadEvent`s. Authentication is delegated to the CLI (`codex login`, ChatGPT or API key). Sessions share the Claude store: same `~/.ptolomeu/sessions/index.json` (entries carry `agent: "codex"`; absent means Claude), same `messages.json` format, same per-conversation project directory. The session manager keeps at most one live agent session: `active` (Claude) and `activeCodex` are mutually exclusive.
+
+- **CLI lookup** (`codex-cli.ts`): resolves `codex` and the login-shell `PATH` through `zsh -lc`, because a menu bar app inherits launchd's minimal `PATH` and the npm-installed `codex` is a `node` script. `buildCodexEnv()` is rebuilt per turn from the live `process.env`, so proxy changes apply on the next turn.
+- **Session runtime** (`session-runtime.ts`): each turn is a separate CLI run (new thread on the first turn, `resume <threadId>` after). Turns are serialized through a promise chain; `stop()` aborts the running turn. Thread options are rebuilt per turn from settings + session model, which is how model changes and per-turn overrides apply. The thread id is stored in `SessionMeta.sdkSessionId` (empty until `thread.started`).
+- **Event mapper** (`event-mapper.ts`) + **runner** (`runner.ts`): translate Codex items into the shared `AgentEvent` protocol (agent message → `text-*`, reasoning → `reasoning-*`, command → `Shell` tool, file change → `ApplyPatch`, MCP call → `mcp__server__tool`, web search → `WebSearch`, to-do list → `TodoWrite`) and accumulate the persisted blocks. Item ids restart at `item_0` on every CLI run, so they are namespaced per turn. Top-level `error` events are transient notices (e.g. "Reconnecting... 2/5"), not terminal; only `turn.completed` / `turn.failed` (or a CLI exit) end a turn. The runner persists before sending `finish`, same invariant as the Claude streaming loop.
+- **Safety**: there is no per-tool HITL (the SDK runs `codex exec` with `approvalPolicy: "never"`). Workspace isolation comes from the Codex sandbox: `workingDirectory` is always the conversation's project and the sandbox is `workspace-write` or `read-only`. `danger-full-access` is intentionally not exposed; keep it that way.
+- **Models** (`models.ts`): static catalog (the SDK has no listing API). The `"default"` sentinel (`constants.ts`) means "use the CLI's configured model".
+- **Settings**: `settings.codex` (`model`, `sandboxMode`, `reasoningEffort`), validated field by field in `src/bun/settings.ts`; edited in **Plugins → Codex** through `updateCodexSettings` in `SettingsContext`.
 
 ### Network / proxy (`src/bun/net/`)
 
@@ -175,7 +190,7 @@ These identifiers intentionally keep the old **ptolomeu** spelling because exist
 | `com.ptolomeu.app.github.pat` | `src/bun/github-token.ts` | GitHub token (Keychain service) |
 | `com.ptolomeu.app.proxy` | `src/bun/net/proxy.ts` | Manual proxy password (Keychain service) |
 | `"ptolomeu"` (account fallback) | `src/bun/github-token.ts` | Keychain account when `$USER` is unset |
-| `~/.ptolomeu/` | `src/bun/claude/*` | Sessions, projects, tool decisions, auth, `mcp-servers.json` |
+| `~/.ptolomeu/` | `src/bun/claude/*` | Sessions (Claude and Codex), projects, tool decisions, auth, `mcp-servers.json` |
 | `~/.ptolomeu_install_id` | `scripts/release_analytics.py` | Anonymous install id for release analytics |
 
 `CHANGELOG.md` and the dated files under `docs/` are historical records and keep the old name.
@@ -188,6 +203,6 @@ These identifiers intentionally keep the old **ptolomeu** spelling because exist
 - Linter/formatter is Biome: run `bun run lint:fix` before committing (lefthook also runs it on staged files).
 - Commit messages follow Conventional Commits, `type(scope): description`; semantic-release uses them to generate `CHANGELOG.md` and pick the next version.
 - Skip lefthook once with `LEFTHOOK=0 git commit ...` if needed; do not commit with hooks bypassed by default.
-- Workspace isolation is a security boundary, not a hint. When adding tools to the Claude integration, make sure paths stay inside the conversation's project directory.
+- Workspace isolation is a security boundary, not a hint. When adding tools to the Claude integration, make sure paths stay inside the conversation's project directory. For Codex, never widen the sandbox beyond the project directory.
 - The settings schema tolerates unknown keys in the `claude` block: the validator in `src/bun/settings.ts` reads only known fields and re-serializes without extras. Retiring a setting is safe; users on older `settings.json` files won't hit validation errors, and their obsolete keys drop on the next save.
 - Keep `README.md` and `README.pt-BR.md` in sync: same sections, same facts, one per language.

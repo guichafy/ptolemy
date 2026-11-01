@@ -10,7 +10,9 @@ import type {
 	SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import { query } from "@anthropic-ai/claude-agent-sdk";
+import type { AgentKind } from "@/shared/agent-protocol";
 import { backupCorruptJson, writeJsonAtomic } from "../atomic-json";
+import { CodexSessionRuntime } from "../codex/session-runtime";
 import { loadSettings } from "../settings";
 import { findClaudeCli } from "./claude-cli";
 import { mcpLoader } from "./mcp-loader";
@@ -48,14 +50,21 @@ function previewText(text: string, max = 60): string {
 
 export interface SessionMeta {
 	id: string;
+	/**
+	 * Agent-side conversation id: the Claude SDK session id, or the Codex
+	 * thread id. Codex sessions start with "" until the first turn reveals it.
+	 */
 	sdkSessionId: string;
+	/** Which agent backs this session. Absent on pre-Codex sessions = claude. */
+	agent?: AgentKind;
 	title: string;
 	/** Project this conversation belongs to. Many sessions can share one project. */
 	projectId: string;
 	/** Snapshot of the project path — agent's cwd for this session. */
 	projectPath: string;
 	model: string;
-	authMode: "anthropic" | "bedrock";
+	/** Claude auth mode at creation time. Absent on Codex sessions. */
+	authMode?: "anthropic" | "bedrock";
 	createdAt: string;
 	updatedAt: string;
 	messageCount: number;
@@ -163,6 +172,16 @@ let pendingNew: {
 	authMode: SessionMeta["authMode"];
 	options: ReturnType<typeof buildQueryOptions>;
 } | null = null;
+
+/** Live Codex conversation. Mutually exclusive with `active` (Claude). */
+let activeCodex: CodexSessionRuntime | null = null;
+
+/** Codex counterpart of `pendingNew`: first turn deferred until resume. */
+let pendingCodex: { id: string; prompt: string; cwd: string } | null = null;
+
+export function sessionAgent(meta: Pick<SessionMeta, "agent">): AgentKind {
+	return meta.agent ?? "claude";
+}
 
 function buildUserMessage(text: string): SDKUserMessage {
 	return {
@@ -574,6 +593,122 @@ function startLoopForActive(sessionId: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Agent switching (only one live agent session at a time)
+// ---------------------------------------------------------------------------
+
+async function deactivateClaude(reason: string): Promise<void> {
+	if (!active) return;
+	const prev = active;
+	console.log(
+		`[claude:session] tearing down active Claude session ${prev.sessionId} (${reason})`,
+	);
+	clearSessionPermissionState(prev.sessionId, reason);
+	try {
+		prev.q.inbox.close();
+		prev.q.query.close();
+	} catch {
+		// best-effort cleanup
+	}
+	if (prev.q.streamingLoop) {
+		await prev.q.streamingLoop.catch(() => {});
+	}
+	if (active === prev) active = null;
+}
+
+async function deactivateCodex(reason: string): Promise<void> {
+	if (!activeCodex) return;
+	const prev = activeCodex;
+	activeCodex = null;
+	console.log(
+		`[codex:session] tearing down active Codex session ${prev.sessionId} (${reason})`,
+	);
+	await prev.close();
+}
+
+function discardPendingClaude(reason: string): void {
+	if (!pendingNew) return;
+	console.warn(
+		`[claude:session] discarding unrealized pendingNew id=${pendingNew.id} (${reason})`,
+	);
+	try {
+		pendingNew.inbox.close();
+	} catch {
+		// best-effort
+	}
+	pendingNew = null;
+}
+
+function createCodexRuntime(
+	sessionId: string,
+	cwd: string,
+	threadId: string | null,
+): CodexSessionRuntime {
+	return new CodexSessionRuntime({
+		sessionId,
+		cwd,
+		threadId,
+		// Late-bound: `sender` is swapped by setSender after module load.
+		sender: { sendEvent: (sid, event) => sender.sendEvent?.(sid, event) },
+		persister,
+		loadConfig: async () => {
+			const [settings, index] = await Promise.all([
+				loadSettings(),
+				readIndex(),
+			]);
+			const meta = index.sessions.find((s) => s.id === sessionId);
+			return {
+				model: meta?.model ?? settings.codex.model,
+				sandboxMode: settings.codex.sandboxMode,
+				reasoningEffort: settings.codex.reasoningEffort,
+			};
+		},
+		onThreadId: (threadId) => {
+			void recordSdkSessionId(sessionId, threadId);
+		},
+	});
+}
+
+async function createCodexSession(
+	id: string,
+	prompt: string,
+	project: Project,
+): Promise<string> {
+	const settings = await loadSettings();
+	const now = new Date().toISOString();
+	const meta: SessionMeta = {
+		id,
+		sdkSessionId: "", // filled in when Codex reports thread.started
+		agent: "codex",
+		title: generateTitle(prompt),
+		projectId: project.id,
+		projectPath: project.path,
+		model: settings.codex.model,
+		createdAt: now,
+		updatedAt: now,
+		messageCount: 1,
+		lastMessage: prompt.slice(0, 100),
+	};
+	await mutateIndex((index) => {
+		index.sessions.push(meta);
+	});
+	await appendStoredMessageV2(id, {
+		version: 2,
+		role: "user",
+		blocks: [{ type: "text", text: prompt }],
+		timestamp: now,
+	});
+
+	discardPendingClaude("new Codex session created");
+	// Same deferred start as Claude: the first turn runs on the chat window's
+	// resumeSession, once its transport is wired.
+	pendingCodex = { id, prompt, cwd: project.path };
+	console.log(
+		`[codex:session] createSession done: id=${id} model=${meta.model}; first turn deferred until resumeSession`,
+	);
+	return id;
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -598,7 +733,7 @@ export async function listSessions(): Promise<SessionMeta[]> {
  */
 export async function createSession(
 	prompt: string,
-	opts: { projectId?: string } = {},
+	opts: { projectId?: string; agent?: AgentKind } = {},
 ): Promise<string> {
 	const t0 = Date.now();
 	const id = crypto.randomUUID();
@@ -618,8 +753,12 @@ export async function createSession(
 	}
 
 	console.log(
-		`[claude:session] createSession start: id=${id} projectId=${project.id} path=${project.path} promptLength=${prompt.length}`,
+		`[claude:session] createSession start: id=${id} agent=${opts.agent ?? "claude"} projectId=${project.id} path=${project.path} promptLength=${prompt.length}`,
 	);
+
+	if (opts.agent === "codex") {
+		return createCodexSession(id, prompt, project);
+	}
 	verbose(
 		`[claude:session] createSession prompt preview: id=${id} prompt="${previewText(prompt)}"`,
 	);
@@ -685,6 +824,7 @@ export async function createSession(
 			// best-effort cleanup
 		}
 	}
+	pendingCodex = null;
 	pendingNew = {
 		id,
 		inbox,
@@ -719,6 +859,29 @@ export async function createSession(
 export async function resumeSession(sessionId: string): Promise<boolean> {
 	console.log(`[claude:session] resumeSession start: id=${sessionId}`);
 
+	// Codex: already live (deferred start fired, or resumed earlier).
+	if (activeCodex && activeCodex.sessionId === sessionId) {
+		return true;
+	}
+
+	// Codex: deferred new session, run its first turn now.
+	if (pendingCodex && pendingCodex.id === sessionId) {
+		const pending = pendingCodex;
+		pendingCodex = null;
+		await deactivateClaude("switching to Codex session");
+		await deactivateCodex("session changed");
+		const runtime = createCodexRuntime(pending.id, pending.cwd, null);
+		activeCodex = runtime;
+		void runtime.enqueue(pending.prompt);
+		return true;
+	}
+	if (pendingCodex && pendingCodex.id !== sessionId) {
+		console.warn(
+			`[codex:session] resumeSession: discarding stale pendingCodex id=${pendingCodex.id}`,
+		);
+		pendingCodex = null;
+	}
+
 	// Case 1: same session already active (deferred-start has already fired)
 	if (active && active.sessionId === sessionId) {
 		if (active.q.streamingLoop) {
@@ -734,6 +897,8 @@ export async function resumeSession(sessionId: string): Promise<boolean> {
 
 	// Case 2: deferred new session — first resume from chat window after createSession
 	if (pendingNew && pendingNew.id === sessionId) {
+		await deactivateCodex("switching to Claude session");
+		if (!pendingNew || pendingNew.id !== sessionId) return false;
 		const pendingAuthMode = pendingNew.authMode;
 		const q = query({
 			prompt: pendingNew.inbox.iterable,
@@ -778,11 +943,33 @@ export async function resumeSession(sessionId: string): Promise<boolean> {
 		return false;
 	}
 
+	if (sessionAgent(meta) === "codex") {
+		try {
+			await deactivateClaude("switching to Codex session");
+			await deactivateCodex("session changed");
+			const cwd = await resolveProjectPath(meta);
+			activeCodex = createCodexRuntime(
+				sessionId,
+				cwd,
+				meta.sdkSessionId || null,
+			);
+			console.log(
+				`[codex:session] resumeSession ready: id=${sessionId} threadId=${meta.sdkSessionId || "(new)"} model=${meta.model}`,
+			);
+			return true;
+		} catch (err) {
+			console.error("[codex:session] resumeSession failed:", err);
+			return false;
+		}
+	}
+
 	const settings = await loadSettings();
 	const { permissionMode } = settings.claude;
+	const authMode = meta.authMode ?? "anthropic";
 	let model = meta.model;
 
 	try {
+		await deactivateCodex("switching to Claude session");
 		if (active && active.sessionId !== sessionId) {
 			const previousSessionId = active.sessionId;
 			console.log(
@@ -806,7 +993,7 @@ export async function resumeSession(sessionId: string): Promise<boolean> {
 		const cwd = await resolveProjectPath(meta);
 
 		// Downgrade silently when meta.model has been retired.
-		const cached = await tryGetCachedModels(meta.authMode);
+		const cached = await tryGetCachedModels(authMode);
 		if (cached && cached.length > 0 && !cached.some((m) => m.value === model)) {
 			console.warn(
 				`[claude:session] meta.model="${model}" not in cache — downgrading to "${cached[0].value}"`,
@@ -838,7 +1025,7 @@ export async function resumeSession(sessionId: string): Promise<boolean> {
 			q: { query: q, inbox, streamingLoop: null, turnCompletionQueue: [] },
 		};
 		permissionGate.clearWhitelist(sessionId);
-		void primeModelsCacheFromQuery(q, meta.authMode);
+		void primeModelsCacheFromQuery(q, authMode);
 
 		console.log(
 			`[claude:session] resumeSession ready: id=${sessionId} sdkSessionId=${meta.sdkSessionId} model=${model}`,
@@ -866,6 +1053,23 @@ export async function sendMessage(
 	message: string,
 	opts: { modelOverride?: string } = {},
 ): Promise<void> {
+	if (activeCodex) {
+		const runtime = activeCodex;
+		console.log(
+			`[codex:session] sendMessage: sessionId=${runtime.sessionId} length=${message.length} override=${opts.modelOverride ?? "(none)"} busy=${runtime.busy}`,
+		);
+		await appendStoredMessageV2(runtime.sessionId, {
+			version: 2,
+			role: "user",
+			blocks: [{ type: "text", text: message }],
+			timestamp: new Date().toISOString(),
+			...(opts.modelOverride && { modelUsed: opts.modelOverride }),
+		});
+		// Queued behind any running turn; the model override applies only to
+		// this turn because each Codex turn builds its own thread options.
+		void runtime.enqueue(message, opts.modelOverride);
+		return;
+	}
 	if (!active) {
 		console.error("[claude:session] sendMessage: no active session");
 		throw new Error("No active session");
@@ -896,7 +1100,7 @@ export async function sendMessage(
 
 	let restore: string | null = null;
 	if (opts.modelOverride && opts.modelOverride !== meta.model) {
-		const cached = await tryGetCachedModels(meta.authMode);
+		const cached = await tryGetCachedModels(meta.authMode ?? "anthropic");
 		// If we have a cache and the override isn't in it, ignore.
 		// If we have no cache, allow it (best-effort).
 		if (!cached || cached.some((m) => m.value === opts.modelOverride)) {
@@ -943,8 +1147,9 @@ export async function sendMessage(
  */
 export async function stopGeneration(): Promise<boolean> {
 	console.log(
-		`[claude:session] stopGeneration: activeId=${active?.sessionId ?? "null"}`,
+		`[claude:session] stopGeneration: activeId=${active?.sessionId ?? activeCodex?.sessionId ?? "null"}`,
 	);
+	if (activeCodex) return activeCodex.stop();
 	if (!active) return false;
 
 	// Release any tool-permission promises the SDK is awaiting. The interrupt
@@ -1012,6 +1217,12 @@ export async function deleteSession(sessionId: string): Promise<boolean> {
 		}
 		active = null;
 	}
+	if (activeCodex && activeCodex.sessionId === sessionId) {
+		await deactivateCodex("session deleted");
+	}
+	if (pendingCodex && pendingCodex.id === sessionId) {
+		pendingCodex = null;
+	}
 
 	const removal = await mutateIndex((current) => {
 		const currentIdx = current.sessions.findIndex((s) => s.id === sessionId);
@@ -1043,7 +1254,8 @@ export async function deleteSession(sessionId: string): Promise<boolean> {
 	// currently active in memory — still needs it. The in-memory check
 	// matters once multiple sessions share a project: a sibling session
 	// might be mid-flight and not yet persisted.
-	const activeSessionIdSnap = active?.sessionId ?? null;
+	const activeSessionIdSnap =
+		active?.sessionId ?? activeCodex?.sessionId ?? null;
 	const activeOnProject =
 		activeSessionIdSnap !== null
 			? removal.find((s) => s.id === activeSessionIdSnap)?.projectId ===
@@ -1077,7 +1289,7 @@ export async function getSessionMessages(
  * Returns the ID of the currently active session, or null.
  */
 export function getActiveSessionId(): string | null {
-	return active?.sessionId ?? null;
+	return active?.sessionId ?? activeCodex?.sessionId ?? null;
 }
 
 /** Lists all known projects. Exposed for future project-picker UI. */
@@ -1097,6 +1309,24 @@ export async function setSessionModel(
 	const index = await readIndex();
 	const meta = index.sessions.find((s) => s.id === sessionId);
 	if (!meta) return { ok: false, reason: "session-not-found" };
+
+	if (sessionAgent(meta) === "codex") {
+		// Codex builds thread options per turn, so the new model simply
+		// applies from the next turn on.
+		if (
+			activeCodex &&
+			activeCodex.sessionId === sessionId &&
+			activeCodex.busy
+		) {
+			return { ok: false, reason: "session-busy" };
+		}
+		await mutateIndex((idx) => {
+			const latest = idx.sessions.find((s) => s.id === sessionId);
+			if (latest) latest.model = model;
+		});
+		notifySessionModelChanged(sessionId, model);
+		return { ok: true };
+	}
 
 	if (active && active.sessionId === sessionId) {
 		if (active.q.streamingLoop) {

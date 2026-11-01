@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_GITHUB_SETTINGS, validateSettings } from "./settings";
+import {
+	DEFAULT_CODEX_SETTINGS,
+	DEFAULT_GITHUB_SETTINGS,
+	validateSettings,
+} from "./settings";
 
 describe("validateSettings", () => {
 	it("aceita settings válidas sem github (retro-compat)", () => {
@@ -204,5 +208,49 @@ describe("validateSettings → proxy", () => {
 		const r = validateSettings(base);
 		expect(r.ok).toBe(true);
 		expect(r.value?.proxy.mode).toBe("auto");
+	});
+});
+
+describe("validateSettings: bloco codex", () => {
+	const base = { version: 1, plugins: { enabledOrder: ["apps", "codex"] } };
+
+	it("usa os padrões quando o bloco não existe (settings antigos)", () => {
+		const result = validateSettings(base);
+		expect(result.ok).toBe(true);
+		expect(result.value?.codex).toEqual(DEFAULT_CODEX_SETTINGS);
+		expect(result.value?.plugins.enabledOrder).toEqual(["apps", "codex"]);
+	});
+
+	it("preserva valores válidos", () => {
+		const result = validateSettings({
+			...base,
+			codex: {
+				model: "gpt-6-luna",
+				sandboxMode: "read-only",
+				reasoningEffort: "high",
+			},
+		});
+		expect(result.value?.codex).toEqual({
+			model: "gpt-6-luna",
+			sandboxMode: "read-only",
+			reasoningEffort: "high",
+		});
+	});
+
+	it("reverte só o campo inválido, sem descartar o resto", () => {
+		const result = validateSettings({
+			...base,
+			codex: {
+				model: "gpt-6-luna",
+				sandboxMode: "danger-full-access",
+				reasoningEffort: "ultra",
+			},
+		});
+		expect(result.ok).toBe(true);
+		expect(result.value?.codex).toEqual({
+			model: "gpt-6-luna",
+			sandboxMode: DEFAULT_CODEX_SETTINGS.sandboxMode,
+			reasoningEffort: DEFAULT_CODEX_SETTINGS.reasoningEffort,
+		});
 	});
 });

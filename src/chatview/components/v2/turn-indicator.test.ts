@@ -12,6 +12,12 @@ describe("turnIndicatorLabel", () => {
 		);
 	});
 
+	it("names Codex when the session is backed by Codex", () => {
+		expect(turnIndicatorLabel("waiting", undefined, "codex")).toBe(
+			"Aguardando resposta do Codex...",
+		);
+	});
+
 	it("labels receiving as 'Recebendo resposta...'", () => {
 		expect(turnIndicatorLabel("receiving")).toBe("Recebendo resposta...");
 	});

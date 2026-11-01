@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useReducer, useRef } from "react";
-import type { ApproveBehavior } from "@/shared/agent-protocol";
+import type { AgentKind, ApproveBehavior } from "@/shared/agent-protocol";
 import { onAgentEvent, rpc } from "../rpc";
 import {
 	type AgentMessage,
@@ -24,6 +24,7 @@ type Action =
 	| { type: "resolve-permission"; permissionId: string }
 	| { type: "hydrate"; messages: AgentMessage[] }
 	| { type: "set-session-model"; model: string | null }
+	| { type: "set-session-agent"; agent: AgentKind }
 	| { type: "mark-turn-start" }
 	| { type: "reset" };
 
@@ -52,6 +53,8 @@ function reducer(state: AgentState, action: Action): AgentState {
 		}
 		case "set-session-model":
 			return { ...state, sessionModel: action.model };
+		case "set-session-agent":
+			return { ...state, sessionAgent: action.agent };
 		case "mark-turn-start":
 			return markTurnStart(state);
 		case "reset":
@@ -100,7 +103,10 @@ export function useAgentChat(sessionId: string | null): UseAgentChatResult {
 			const messages = stored.map((m, i) => storedToAgentMessage(m, i));
 			dispatch({ type: "hydrate", messages });
 			const meta = sessions.find((s) => s.id === sid);
-			if (meta) dispatch({ type: "set-session-model", model: meta.model });
+			if (meta) {
+				dispatch({ type: "set-session-model", model: meta.model });
+				dispatch({ type: "set-session-agent", agent: meta.agent ?? "claude" });
+			}
 		} catch (err) {
 			console.error("[agent-chat] hydrate failed:", err);
 		}

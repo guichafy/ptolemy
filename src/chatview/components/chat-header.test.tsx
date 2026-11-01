@@ -64,4 +64,28 @@ describe("<ChatHeader>", () => {
 			screen.getByRole("button", { name: /selecionar modelo/i }),
 		).toBeDisabled();
 	});
+
+	test("shows the agent name in the title", () => {
+		const { rerender } = render(
+			<ChatHeader
+				sessionId="abc"
+				sessionState="idle"
+				sessionModel="claude-sonnet-4-6"
+				models={MODELS}
+			/>,
+		);
+		expect(screen.getByRole("heading", { name: "Claude Code" })).toBeTruthy();
+		rerender(
+			<ChatHeader
+				agent="codex"
+				sessionId="abc"
+				sessionState="idle"
+				sessionModel="default"
+				models={[
+					{ value: "default", displayName: "Padrão do Codex", description: "" },
+				]}
+			/>,
+		);
+		expect(screen.getByRole("heading", { name: "Codex" })).toBeTruthy();
+	});
 });
