@@ -80,7 +80,7 @@ function requestUsage(cached: number, fresh: number): RequestUsage {
 	};
 }
 
-function stream(
+export function stream(
 	n: number,
 	model: string,
 	usage: RequestUsage,
@@ -144,7 +144,10 @@ function stream(
 	]);
 }
 
-export function startMockAnthropicServer(): MockAnthropicServer {
+export function startMockAnthropicServer(probe?: {
+	tool: string;
+	input: Record<string, unknown>;
+}): MockAnthropicServer {
 	const requests: MockAnthropicServer["requests"] = [];
 	const promptCache = createPromptCache();
 	let counter = 0;
@@ -236,8 +239,8 @@ export function startMockAnthropicServer(): MockAnthropicServer {
 				step.kind === "write-file"
 					? {
 							type: "tool_use" as const,
-							name: "Write",
-							input: {
+							name: probe?.tool ?? "Write",
+							input: probe?.input ?? {
 								file_path: `${cwd}/${step.file.name}`,
 								content: step.file.text,
 							},

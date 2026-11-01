@@ -73,6 +73,8 @@ export interface ExtensionSummary {
 	diagnostics: ExtensionDiagnostic[];
 }
 export interface ExtensionOrigin {
+	/** Local CLI installation provenance; no Git commit is claimed for these snapshots. */
+	native?: { agent: "claude" | "codex"; id: string; path: string };
 	repository: string;
 	path: string;
 	commit: string;

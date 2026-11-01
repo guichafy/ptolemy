@@ -2,6 +2,7 @@ import { readdir, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { defineElectrobunRPC, type ElectrobunRPCSchema } from "electrobun/bun";
+import type { ExtensionSelection } from "@/shared/extensions";
 import type { SkillSummary } from "@/shared/skills";
 import type {
 	AgentEvent,
@@ -143,6 +144,8 @@ export interface PtolemyRPCSchema extends ElectrobunRPCSchema {
 					projectId?: string;
 					agent?: AgentKind;
 					skillIds?: string[];
+					extensionSelections?: ExtensionSelection[];
+					builtinCommandNames?: string[];
 					mcpServerIds?: string[];
 					model?: string;
 				};
@@ -691,6 +694,8 @@ export const requestHandlers: BunRequestHandlers = {
 		projectId,
 		agent,
 		skillIds,
+		extensionSelections,
+		builtinCommandNames,
 		mcpServerIds,
 		model,
 	}) => {
@@ -698,6 +703,8 @@ export const requestHandlers: BunRequestHandlers = {
 			projectId,
 			agent,
 			skillIds,
+			extensionSelections,
+			builtinCommandNames,
 			mcpServerIds,
 			model,
 		});

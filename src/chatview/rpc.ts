@@ -9,6 +9,7 @@ import type {
 	ProtocolModelInfo,
 	SessionStats,
 } from "@/shared/agent-protocol";
+import type { ExtensionSelection } from "@/shared/extensions";
 import type { SessionSkill, SkillSummary } from "@/shared/skills";
 import { AgentEventBuffer } from "./lib/agent-event-buffer";
 
@@ -254,6 +255,8 @@ interface PtolemyRPCSchema extends ElectrobunRPCSchema {
 					projectId?: string;
 					agent?: AgentKind;
 					skillIds?: string[];
+					extensionSelections?: ExtensionSelection[];
+					builtinCommandNames?: string[];
 					mcpServerIds?: string[];
 					model?: string;
 				};

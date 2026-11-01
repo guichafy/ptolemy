@@ -88,7 +88,7 @@ async function checkPath(cwd: string, path: string): Promise<void> {
 }
 
 /** Skill metadata cannot grant tool permissions independently of the gate. */
-function withoutToolGrants(content: Buffer): Buffer {
+export function withoutToolGrants(content: Buffer): Buffer {
 	const text = content.toString("utf8");
 	const match = text
 		.replace(/^\uFEFF/, "")
