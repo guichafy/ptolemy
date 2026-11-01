@@ -12,7 +12,6 @@ import {
 	ContextReasoningUsage,
 	ContextTrigger,
 } from "@/components/ai-elements/context";
-import { ModelPicker } from "@/components/claude/model-picker";
 import { Button } from "@/components/ui/button";
 import {
 	Tooltip,
@@ -28,7 +27,6 @@ import type {
 	SessionStats,
 } from "@/shared/agent-protocol";
 import { describeModel } from "../lib/model-label";
-import { rpc } from "../rpc";
 import { ContextDetailsDialog, describeCompactions } from "./context-details";
 
 type SessionState = "idle" | "streaming" | "tool_running" | "error";
@@ -87,14 +85,6 @@ export function ChatHeader({
 	const { color, pulse, label: stateLabel } = stateConfig[sessionState];
 	const { title, icon: AgentIcon } = agentConfig[agent];
 	const model = describeModel(sessionModel, resolvedModel, models);
-	const handleChange = async (next: string) => {
-		if (!sessionId) return;
-		try {
-			await rpc.request.claudeSetSessionModel({ sessionId, model: next });
-		} catch (err) {
-			console.error("[chat-header] setSessionModel failed:", err);
-		}
-	};
 
 	return (
 		<header className="flex h-11 shrink-0 items-center gap-2 border-b border-border/60 px-3">
@@ -118,18 +108,6 @@ export function ChatHeader({
 					<TooltipContent>{stateLabel}</TooltipContent>
 				</Tooltip>
 			</TooltipProvider>
-			<span className="h-4 w-px shrink-0 bg-border" />
-			<div className="min-w-0">
-				<ModelPicker
-					variant="session"
-					value={sessionModel}
-					models={models}
-					onChange={handleChange}
-					disabled={sessionState !== "idle" || !sessionId}
-					placeholder="Selecionar modelo"
-					resolvedLabel={model?.isAlias ? model.primary : null}
-				/>
-			</div>
 			<span className="flex-1" />
 			{contextUsage && contextUsage.usedTokens > 0 && (
 				<Context

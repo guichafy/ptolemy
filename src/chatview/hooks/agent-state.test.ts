@@ -1095,3 +1095,21 @@ describe("reconcileMessages", () => {
 		expect(next.messages[0]).toBe(live);
 	});
 });
+
+describe("session-model-changed", () => {
+	it("drops the resolved model of the previous choice", () => {
+		const s = reduce([
+			{ type: "session-model-changed", sessionId: "s", model: "default" },
+			{ type: "session-info", info: { resolvedModel: "claude-opus-4-5" } },
+			{ type: "session-model-changed", sessionId: "s", model: "default" },
+		]);
+		expect(s.resolvedModel).toBe("claude-opus-4-5");
+		const next = reduceAgentState(s, {
+			type: "session-model-changed",
+			sessionId: "s",
+			model: "sonnet",
+		});
+		expect(next.sessionModel).toBe("sonnet");
+		expect(next.resolvedModel).toBeNull();
+	});
+});
