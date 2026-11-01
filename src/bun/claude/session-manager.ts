@@ -11,14 +11,18 @@ import type {
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import type {
 	AgentKind,
+	ContextBreakdown,
 	ContextUsageInfo,
 	SessionInfoPatch,
+	SessionStats,
 } from "@/shared/agent-protocol";
 import { backupCorruptJson, writeJsonAtomic } from "../atomic-json";
+import { readCodexContextBreakdown } from "../codex/rollout-info";
 import { CodexSessionRuntime } from "../codex/session-runtime";
 import { ptolemyDataDir } from "../paths";
 import { loadSettings } from "../settings";
 import { findClaudeCli } from "./claude-cli";
+import { mapClaudeContextUsage } from "./context-breakdown";
 import { mcpLoader } from "./mcp-loader";
 import { createMessageInbox, type MessageInbox } from "./message-inbox";
 import { PermissionGate } from "./permission-gate";
@@ -77,6 +81,8 @@ export interface SessionMeta {
 	resolvedModel?: string;
 	/** Context window usage after the last turn. */
 	contextUsage?: ContextUsageInfo;
+	/** Conversation totals (cost, compactions). */
+	stats?: SessionStats;
 }
 
 /**
@@ -477,6 +483,7 @@ async function recordSessionInfo(
 			if (!m) return;
 			if (patch.resolvedModel) m.resolvedModel = patch.resolvedModel;
 			if (patch.contextUsage) m.contextUsage = patch.contextUsage;
+			if (patch.stats) m.stats = patch.stats;
 		});
 	} catch (err) {
 		console.error("[claude:session] recordSessionInfo failed:", err);
@@ -618,6 +625,8 @@ function startLoopForActive(sessionId: string): boolean {
 			onSessionInfo: (patch) => {
 				void recordSessionInfo(sessionId, patch);
 			},
+			loadStats: async () =>
+				(await readIndex()).sessions.find((s) => s.id === sessionId)?.stats,
 		},
 	).finally(() => {
 		if (active && active.sessionId === sessionId) {
@@ -1385,4 +1394,76 @@ export async function setSessionModel(
 	});
 	notifySessionModelChanged(sessionId, model);
 	return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// Context breakdown ("what fills the context window")
+// ---------------------------------------------------------------------------
+
+const CONTEXT_USAGE_TIMEOUT_MS = 8000;
+
+export type ContextBreakdownResult =
+	| { ok: true; breakdown: ContextBreakdown }
+	| { ok: false; reason: string };
+
+/**
+ * Detailed context usage of a session. Claude asks the live CLI process
+ * (`getContextUsage`, the data behind `/context`), so the session must be the
+ * active one; Codex is estimated from the thread's rollout file.
+ */
+export async function getContextBreakdown(
+	sessionId: string,
+): Promise<ContextBreakdownResult> {
+	const meta = (await readIndex()).sessions.find((s) => s.id === sessionId);
+	if (!meta) return { ok: false, reason: "Sessão não encontrada." };
+
+	if (sessionAgent(meta) === "codex") {
+		if (!meta.sdkSessionId) {
+			return {
+				ok: false,
+				reason: "O Codex ainda não respondeu nesta conversa.",
+			};
+		}
+		try {
+			const breakdown = await readCodexContextBreakdown(meta.sdkSessionId);
+			return breakdown
+				? { ok: true, breakdown }
+				: {
+						ok: false,
+						reason:
+							"Não encontrei o histórico desta thread em ~/.codex/sessions.",
+					};
+		} catch (err) {
+			return {
+				ok: false,
+				reason: `Falha ao ler o histórico do Codex: ${err instanceof Error ? err.message : String(err)}`,
+			};
+		}
+	}
+
+	if (!active || active.sessionId !== sessionId) {
+		return {
+			ok: false,
+			reason: "A sessão não está ativa. Envie uma mensagem e tente de novo.",
+		};
+	}
+	const q = active.q.query;
+	try {
+		const res = await Promise.race([
+			q.getContextUsage(),
+			new Promise<never>((_, reject) =>
+				setTimeout(
+					() => reject(new Error("tempo esgotado")),
+					CONTEXT_USAGE_TIMEOUT_MS,
+				),
+			),
+		]);
+		return { ok: true, breakdown: mapClaudeContextUsage(res) };
+	} catch (err) {
+		console.warn("[claude:session] getContextUsage failed:", err);
+		return {
+			ok: false,
+			reason: `O Claude não informou o uso do contexto (${err instanceof Error ? err.message : String(err)}).`,
+		};
+	}
 }

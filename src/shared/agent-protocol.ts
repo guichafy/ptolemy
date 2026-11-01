@@ -160,6 +160,54 @@ export interface SessionInfoPatch {
 	/** Concrete model id that served the last request (never an alias). */
 	resolvedModel?: string;
 	contextUsage?: ContextUsageInfo;
+	/** Totals for the whole conversation (absolute values, not deltas). */
+	stats?: SessionStats;
+}
+
+/** Conversation-wide totals, persisted on the session meta. */
+export interface SessionStats {
+	/** Sum of the per-turn costs in USD. Claude only: Codex reports no cost. */
+	totalCostUsd?: number;
+	/** How many times the agent compacted the context. */
+	compactions: number;
+	/** The most recent compaction, when known. */
+	lastCompaction?: {
+		trigger?: "manual" | "auto";
+		/** Tokens in the context right before compacting. */
+		preTokens?: number;
+		at: string;
+	};
+}
+
+/** One slice of the context window ("System prompt", "Messages", ...). */
+export interface ContextCategory {
+	name: string;
+	tokens: number;
+	/** Not loaded until used (deferred tools); excluded from the bar. */
+	isDeferred?: boolean;
+}
+
+export interface ContextDetailSection {
+	title: string;
+	items: { name: string; tokens: number; hint?: string }[];
+}
+
+/**
+ * What occupies the context window, for the "details" view. Claude comes from
+ * the CLI's own accounting (`getContextUsage`); Codex is estimated from the
+ * thread rollout (text length per item kind, scaled to the reported usage).
+ */
+export interface ContextBreakdown {
+	source: "claude" | "codex-estimate";
+	model?: string;
+	usedTokens: number;
+	maxTokens?: number;
+	/** Claude: usage at which auto-compaction kicks in. */
+	autoCompactThreshold?: number;
+	categories: ContextCategory[];
+	sections: ContextDetailSection[];
+	/** Shown under the chart, e.g. why the numbers are estimates. */
+	note?: string;
 }
 
 // ---------------------------------------------------------------------------

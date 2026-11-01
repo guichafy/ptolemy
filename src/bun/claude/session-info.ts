@@ -12,6 +12,7 @@ import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import type {
 	ContextUsageInfo,
 	SessionInfoPatch,
+	SessionStats,
 } from "@/shared/agent-protocol";
 
 interface RequestUsage {
@@ -37,6 +38,8 @@ export interface SessionInfoTracker {
 	readonly model: string | null;
 	/** Cost of the turn closed by the last `onResult`, in USD. */
 	readonly lastTurnCostUsd: number | null;
+	/** Conversation totals, seeded from the persisted meta. */
+	readonly stats: SessionStats;
 }
 
 function num(value: number | null | undefined): number {
@@ -69,7 +72,16 @@ export function pickContextWindow(
 	return windows.length > 0 ? Math.max(...windows) : undefined;
 }
 
-export function createSessionInfoTracker(): SessionInfoTracker {
+export function createSessionInfoTracker(
+	initialStats?: SessionStats,
+	now: () => Date = () => new Date(),
+): SessionInfoTracker {
+	// Totals carry over from earlier CLI processes (the persisted meta); the
+	// tracker only adds what this process reports.
+	let stats: SessionStats = {
+		compactions: 0,
+		...initialStats,
+	};
 	let model: string | null = null;
 	let lastUsage: RequestUsage | null = null;
 	// `total_cost_usd` is cumulative for the CLI process, which lives as long
@@ -92,10 +104,33 @@ export function createSessionInfoTracker(): SessionInfoTracker {
 			return lastTurnCost;
 		},
 
+		get stats() {
+			return stats;
+		},
+
 		observe(msg) {
 			if (msg.type === "system") {
-				const sys = msg as { subtype?: string; model?: unknown };
+				const sys = msg as {
+					subtype?: string;
+					model?: unknown;
+					compact_metadata?: {
+						trigger?: "manual" | "auto";
+						pre_tokens?: number;
+					};
+				};
 				if (sys.subtype === "init") return setModel(sys.model);
+				if (sys.subtype === "compact_boundary") {
+					stats = {
+						...stats,
+						compactions: stats.compactions + 1,
+						lastCompaction: {
+							trigger: sys.compact_metadata?.trigger,
+							preTokens: sys.compact_metadata?.pre_tokens,
+							at: now().toISOString(),
+						},
+					};
+					return { stats };
+				}
 				return null;
 			}
 			if (msg.type === "stream_event") {
@@ -129,7 +164,7 @@ export function createSessionInfoTracker(): SessionInfoTracker {
 			return null;
 		},
 
-		onResult(msg, now = () => new Date()) {
+		onResult(msg, resultNow = now) {
 			if (msg.type !== "result") return null;
 			const result = msg as {
 				total_cost_usd?: number;
@@ -139,10 +174,14 @@ export function createSessionInfoTracker(): SessionInfoTracker {
 			if (typeof result.total_cost_usd === "number") {
 				lastTurnCost = Math.max(0, result.total_cost_usd - costSoFar);
 				costSoFar = Math.max(costSoFar, result.total_cost_usd);
+				stats = {
+					...stats,
+					totalCostUsd: (stats.totalCostUsd ?? 0) + lastTurnCost,
+				};
 			}
 			const usage = lastUsage;
 			lastUsage = null;
-			if (!usage) return null;
+			if (!usage) return lastTurnCost === null ? null : { stats };
 			const input = num(usage.input_tokens);
 			const output = num(usage.output_tokens);
 			const cacheRead = num(usage.cache_read_input_tokens);
@@ -153,13 +192,14 @@ export function createSessionInfoTracker(): SessionInfoTracker {
 				outputTokens: output,
 				cacheReadTokens: cacheRead,
 				cacheCreationTokens: cacheCreation,
-				updatedAt: now().toISOString(),
+				updatedAt: resultNow().toISOString(),
 			};
 			const maxTokens = pickContextWindow(result.modelUsage, model);
 			if (maxTokens) contextUsage.maxTokens = maxTokens;
 			if (lastTurnCost !== null) contextUsage.lastTurnCostUsd = lastTurnCost;
 			return {
 				contextUsage,
+				stats,
 				...(model ? { resolvedModel: model } : {}),
 			};
 		},

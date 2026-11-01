@@ -7,6 +7,7 @@ import type {
 	AgentKind,
 	ApproveBehavior,
 	ClaudeAuthMode,
+	ContextBreakdown,
 	ProtocolModelInfo,
 } from "../shared/agent-protocol";
 // Value import (not type-only) — keep the path relative so Bun's bundler can
@@ -33,6 +34,7 @@ import {
 	sendMessage as claudeSendMessage,
 	setSender as claudeSetSender,
 	stopGeneration as claudeStopGeneration,
+	getContextBreakdown,
 	getPermissionGate,
 	type SessionMeta,
 	type StoredMessageV2,
@@ -166,6 +168,12 @@ export interface PtolemyRPCSchema extends ElectrobunRPCSchema {
 					ok: boolean;
 					reason?: "session-not-found" | "session-busy" | "sdk-error";
 				};
+			};
+			agentGetContextBreakdown: {
+				params: { sessionId: string };
+				response:
+					| { ok: true; breakdown: ContextBreakdown }
+					| { ok: false; reason: string };
 			};
 			claudeOpenChat: {
 				params: { sessionId?: string };
@@ -712,6 +720,8 @@ export const requestHandlers: BunRequestHandlers = {
 		const models = await getModels(authMode);
 		return { models, authMode };
 	},
+	agentGetContextBreakdown: async ({ sessionId }) =>
+		getContextBreakdown(sessionId),
 	claudeSetSessionModel: async ({ sessionId, model }) => {
 		const { setSessionModel } = await import("./claude/session-manager");
 		const result = await setSessionModel(sessionId, model);

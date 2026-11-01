@@ -166,12 +166,13 @@ export function useAgentChat(sessionId: string | null): UseAgentChatResult {
 			if (meta) {
 				dispatch({ type: "set-session-model", model: meta.model });
 				dispatch({ type: "set-session-agent", agent: meta.agent ?? "claude" });
-				if (meta.resolvedModel || meta.contextUsage) {
+				if (meta.resolvedModel || meta.contextUsage || meta.stats) {
 					dispatch({
 						type: "set-session-info",
 						info: {
 							resolvedModel: meta.resolvedModel,
 							contextUsage: meta.contextUsage,
+							stats: meta.stats,
 						},
 					});
 				}

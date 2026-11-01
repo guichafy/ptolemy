@@ -77,6 +77,7 @@ describe("createSessionInfoTracker", () => {
 				lastTurnCostUsd: 0.12,
 				updatedAt: "2026-11-01T10:00:00.000Z",
 			},
+			stats: { compactions: 0, totalCostUsd: 0.12 },
 		});
 	});
 
@@ -104,9 +105,42 @@ describe("createSessionInfoTracker", () => {
 		expect(patch?.contextUsage?.usedTokens).toBe(120);
 	});
 
-	it("returns null on result when no request usage was seen", () => {
+	it("returns only the stats when no request usage was seen", () => {
 		const t = createSessionInfoTracker();
-		expect(t.onResult(result({}), fixedNow)).toBeNull();
+		expect(t.onResult(result({}), fixedNow)).toEqual({
+			stats: { compactions: 0, totalCostUsd: 0.12 },
+		});
+		const bare = {
+			type: "result",
+			subtype: "success",
+		} as unknown as SDKMessage;
+		expect(createSessionInfoTracker().onResult(bare, fixedNow)).toBeNull();
+	});
+
+	it("continues the persisted totals and counts compactions", () => {
+		const t = createSessionInfoTracker(
+			{ compactions: 2, totalCostUsd: 1.5 },
+			fixedNow,
+		);
+		const patch = t.observe({
+			type: "system",
+			subtype: "compact_boundary",
+			compact_metadata: { trigger: "auto", pre_tokens: 167000 },
+		} as unknown as SDKMessage);
+		expect(patch).toEqual({
+			stats: {
+				compactions: 3,
+				totalCostUsd: 1.5,
+				lastCompaction: {
+					trigger: "auto",
+					preTokens: 167000,
+					at: "2026-11-01T10:00:00.000Z",
+				},
+			},
+		});
+		t.observe(assistant("m", { input_tokens: 1 }));
+		t.onResult(result({}, 0.5), fixedNow);
+		expect(t.stats.totalCostUsd).toBeCloseTo(2);
 	});
 
 	it("picks up a model change from assistant messages", () => {
