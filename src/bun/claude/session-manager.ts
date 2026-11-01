@@ -16,11 +16,14 @@ import type {
 	SessionInfoPatch,
 	SessionStats,
 } from "@/shared/agent-protocol";
+import type { SessionSkill } from "@/shared/skills";
 import { backupCorruptJson, writeJsonAtomic } from "../atomic-json";
 import { readCodexContextBreakdown } from "../codex/rollout-info";
 import { CodexSessionRuntime } from "../codex/session-runtime";
 import { ptolemyDataDir } from "../paths";
 import { loadSettings } from "../settings";
+import { skillsStore } from "../skills/store";
+import { activateSkills, snapshotSkills } from "../skills/workspace";
 import { findClaudeCli } from "./claude-cli";
 import { mapClaudeContextUsage } from "./context-breakdown";
 import { mcpLoader } from "./mcp-loader";
@@ -65,6 +68,8 @@ export interface SessionMeta {
 	sdkSessionId: string;
 	/** Which agent backs this session. Absent on pre-Codex sessions = claude. */
 	agent?: AgentKind;
+	/** Immutable imported Skill snapshots selected before the first turn. */
+	skills?: SessionSkill[];
 	title: string;
 	/** Project this conversation belongs to. Many sessions can share one project. */
 	projectId: string;
@@ -719,6 +724,7 @@ async function createCodexSession(
 	id: string,
 	prompt: string,
 	project: Project,
+	skills: SessionSkill[],
 ): Promise<string> {
 	const settings = await loadSettings();
 	const now = new Date().toISOString();
@@ -726,6 +732,7 @@ async function createCodexSession(
 		id,
 		sdkSessionId: "", // filled in when Codex reports thread.started
 		agent: "codex",
+		skills,
 		title: generateTitle(prompt),
 		projectId: project.id,
 		projectPath: project.path,
@@ -780,10 +787,19 @@ export async function listSessions(): Promise<SessionMeta[]> {
  */
 export async function createSession(
 	prompt: string,
-	opts: { projectId?: string; agent?: AgentKind } = {},
+	opts: { projectId?: string; agent?: AgentKind; skillIds?: string[] } = {},
 ): Promise<string> {
 	const t0 = Date.now();
 	const id = crypto.randomUUID();
+	if (opts.agent && opts.agent !== "claude" && opts.agent !== "codex")
+		throw new Error("Agente inválido.");
+	const skillIds =
+		opts.skillIds ?? (await skillsStore.defaults(opts.agent ?? "claude"));
+	// Resolve before provisioning a project or mutating the session index.
+	const selectedSkills = await skillsStore.resolveForSession(
+		opts.agent ?? "claude",
+		skillIds,
+	);
 
 	// Resolve (or create) the project this conversation belongs to. The
 	// project directory becomes the agent's cwd — every Write/Edit/Bash is
@@ -804,7 +820,8 @@ export async function createSession(
 	);
 
 	if (opts.agent === "codex") {
-		return createCodexSession(id, prompt, project);
+		const skills = await snapshotSkills(SESSIONS_DIR, id, selectedSkills);
+		return createCodexSession(id, prompt, project, skills);
 	}
 	verbose(
 		`[claude:session] createSession prompt preview: id=${id} prompt="${previewText(prompt)}"`,
@@ -818,6 +835,7 @@ export async function createSession(
 
 	const claudePath = await findClaudeCli();
 	const mcpServers = await mcpLoader.resolve();
+	const skills = await snapshotSkills(SESSIONS_DIR, id, selectedSkills);
 	const mcpNames = Object.keys(mcpServers);
 	if (mcpNames.length > 0) {
 		verbose(
@@ -836,6 +854,7 @@ export async function createSession(
 	const meta: SessionMeta = {
 		id,
 		sdkSessionId: id, // placeholder; gets corrected by sdk-session-id capture in the streaming loop
+		skills,
 		title: generateTitle(prompt),
 		projectId: project.id,
 		projectPath: project.path,
@@ -914,10 +933,13 @@ export async function resumeSession(sessionId: string): Promise<boolean> {
 	// Codex: deferred new session, run its first turn now.
 	if (pendingCodex && pendingCodex.id === sessionId) {
 		const pending = pendingCodex;
-		pendingCodex = null;
 		await deactivateClaude("switching to Codex session");
 		await deactivateCodex("session changed");
+		await activateSkills(SESSIONS_DIR, sessionId, pending.cwd, "codex");
 		const runtime = createCodexRuntime(pending.id, pending.cwd, null);
+		// Activation can fail on a workspace conflict. Retain the deferred
+		// prompt until preparation succeeds so reopening the chat can retry.
+		if (pendingCodex === pending) pendingCodex = null;
 		activeCodex = runtime;
 		void runtime.enqueue(pending.prompt);
 		return true;
@@ -945,7 +967,14 @@ export async function resumeSession(sessionId: string): Promise<boolean> {
 	// Case 2: deferred new session — first resume from chat window after createSession
 	if (pendingNew && pendingNew.id === sessionId) {
 		await deactivateCodex("switching to Claude session");
+		await deactivateClaude("switching to a new Claude session");
 		if (!pendingNew || pendingNew.id !== sessionId) return false;
+		await activateSkills(
+			SESSIONS_DIR,
+			sessionId,
+			pendingNew.options.cwd as string,
+			"claude",
+		);
 		const pendingAuthMode = pendingNew.authMode;
 		const q = query({
 			prompt: pendingNew.inbox.iterable,
@@ -995,6 +1024,7 @@ export async function resumeSession(sessionId: string): Promise<boolean> {
 			await deactivateClaude("switching to Codex session");
 			await deactivateCodex("session changed");
 			const cwd = await resolveProjectPath(meta);
+			await activateSkills(SESSIONS_DIR, sessionId, cwd, "codex");
 			activeCodex = createCodexRuntime(
 				sessionId,
 				cwd,
@@ -1038,6 +1068,7 @@ export async function resumeSession(sessionId: string): Promise<boolean> {
 		const claudePath = await findClaudeCli();
 		const mcpServers = await mcpLoader.resolve();
 		const cwd = await resolveProjectPath(meta);
+		await activateSkills(SESSIONS_DIR, sessionId, cwd, "claude");
 
 		// Downgrade silently when meta.model has been retired.
 		const cached = await tryGetCachedModels(authMode);

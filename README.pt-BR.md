@@ -37,6 +37,10 @@ bun run dev:hmr
 | **Claude Code** | Conversar com o Claude em uma janela dedicada: respostas em streaming, sessões persistentes, seletor de modelo, aprovação de ferramentas e servidores MCP. Cada conversa roda em um workspace isolado. |
 | **Codex** | Conversar com o Codex da OpenAI na mesma janela de chat, via Codex SDK e o seu Codex CLI: sessões persistentes, seletor de modelo e de esforço de raciocínio, comandos, alterações de arquivos e plano ao vivo. Roda no sandbox do Codex, restrito ao workspace da conversa. Opcional. |
 
+## Skills dos agentes
+
+Claude e Codex usam um composer AI Elements para preparar uma conversa com Skills antes da primeira mensagem. Mantenha os padrões do harness, importe Skills adicionais de um repositório público do GitHub, selecione-as para uma conversa e salve padrões separados por agente. A importação valida o formato Agent Skills e os arquivos de apoio, fixa um commit e mantém os arquivos no workspace de cada conversa. Enter inicia a conversa; Shift+Enter insere uma linha. A configuração de MCP continua nas preferências existentes. Consulte o [guia de Skills](docs/skills.md) para URLs aceitas, limites de validação e persistência.
+
 ## Sistema de plugins
 
 Todo plugin implementa a interface `SearchProvider`:

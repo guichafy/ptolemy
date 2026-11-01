@@ -61,7 +61,8 @@
 		"react-dom": "^19.2.5",
 		"streamdown": "2.7.1",
 		"tailwind-merge": "^3.5.0",
-		"use-stick-to-bottom": "1.1.6"
+		"use-stick-to-bottom": "1.1.6",
+		"yaml": "^2.9.1"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.4.10",

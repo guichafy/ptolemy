@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { initRendererAnalytics, shutdownRendererAnalytics } from "./analytics";
+import { AgentComposer } from "./components/agent-composer";
 import { CalculatorResult } from "./components/calculator-result";
 import { ModeBar } from "./components/mode-bar";
 import { ResultItem } from "./components/result-item";
@@ -34,6 +35,7 @@ const DEFAULT_WIDTH = 630;
 
 function PaletteContent() {
 	const { activeProvider, cycleNext, cyclePrev } = useProvider();
+	const agent = agentForProviderId(activeProvider.id);
 	const {
 		activeSubType,
 		setSubType,
@@ -112,12 +114,11 @@ function PaletteContent() {
 		// [] — whether legitimately or due to a transient webview/RPC failure —
 		// must not clobber a populated list that arrived via push. Use the
 		// functional setter to compare against the latest state.
-		const preserveOnEmpty =
-			agentForProviderId(activeProvider.id) !== null && !query.trim();
+		const preserveOnEmpty = agent !== null;
 
 		try {
 			const items = await activeProvider.search(
-				query,
+				agent ? "" : query,
 				controller.signal,
 				providerContext,
 			);
@@ -142,7 +143,7 @@ function PaletteContent() {
 				setIsLoading(false);
 			}
 		}
-	}, [activeProvider, query, providerContext]);
+	}, [activeProvider, query, providerContext, agent]);
 
 	// Auto-search for calculator (real-time), apps (on any change), and the
 	// agent plugins (Claude / Codex recent sessions)
@@ -177,7 +178,6 @@ function PaletteContent() {
 			);
 			const agent = agentForProviderId(activeProvider.id);
 			if (!agent) return;
-			if (query.trim()) return;
 			abortRef.current?.abort();
 			setResults(sessionsForAgent(sessions, agent).map(sessionToResult));
 			setError(null);
@@ -195,7 +195,7 @@ function PaletteContent() {
 	// `claudeSessionsUpdate` push above is still the primary path (it carries
 	// the session payload), this is only the no-payload "refresh now" hint.
 	useWindowShown(() => {
-		if (agentForProviderId(activeProvider.id) !== null && !query.trim()) {
+		if (agentForProviderId(activeProvider.id) !== null) {
 			handleSearch();
 		}
 	});
@@ -220,7 +220,10 @@ function PaletteContent() {
 	// than the in-flight fetch state, so the native window does not collapse
 	// in the gap between keystroke and result arrival.
 	const shouldShowResultsArea =
-		hasIdleResults || query.trim().length > 0 || isComboboxOpen;
+		agent !== null ||
+		hasIdleResults ||
+		query.trim().length > 0 ||
+		isComboboxOpen;
 	const hasFreshResults = resultsMatchQuery && results.length > 0;
 	const hasAnyResults = results.length > 0;
 
@@ -240,14 +243,19 @@ function PaletteContent() {
 	useEffect(() => {
 		const height = isSettingsOpen
 			? SETTINGS_HEIGHT
-			: shouldShowResultsArea
-				? EXPANDED_HEIGHT
-				: COLLAPSED_HEIGHT;
+			: agent
+				? 540
+				: shouldShowResultsArea
+					? EXPANDED_HEIGHT
+					: COLLAPSED_HEIGHT;
 		const width = isSettingsOpen ? SETTINGS_WIDTH : DEFAULT_WIDTH;
 		rpc.request.resizeWindow({ height, width }).catch(() => {});
-	}, [shouldShowResultsArea, isSettingsOpen]);
+	}, [shouldShowResultsArea, isSettingsOpen, agent]);
 
 	function handleKeyDown(e: React.KeyboardEvent) {
+		// Composer and focused recent-session buttons own their keyboard actions.
+		if (agent && e.target instanceof HTMLElement && e.target.closest("button"))
+			return;
 		if (activeProvider.id === "github" && e.metaKey) {
 			if (e.key === "f" || e.key === "F") {
 				e.preventDefault();
@@ -314,19 +322,29 @@ function PaletteContent() {
 			onKeyDown={handleKeyDown}
 		>
 			<ModeBar />
-			<div className="border-b px-4 py-3 flex items-center gap-2">
-				{activeProvider.id === "github" && (
-					<SearchTypeCombobox
-						ref={comboboxRef}
-						onOpenChange={setIsComboboxOpen}
-					/>
-				)}
-				<SearchInput
-					placeholder={activeProvider.placeholder}
+			{agent ? (
+				<AgentComposer
+					key={agent}
+					agent={agent}
 					value={query}
 					onChange={handleQueryChange}
+					onCreated={clearPalette}
 				/>
-			</div>
+			) : (
+				<div className="border-b px-4 py-3 flex items-center gap-2">
+					{activeProvider.id === "github" && (
+						<SearchTypeCombobox
+							ref={comboboxRef}
+							onOpenChange={setIsComboboxOpen}
+						/>
+					)}
+					<SearchInput
+						placeholder={activeProvider.placeholder}
+						value={query}
+						onChange={handleQueryChange}
+					/>
+				</div>
+			)}
 
 			{isCalc && shouldShowResultsArea ? (
 				<div className="flex-1">
@@ -342,6 +360,11 @@ function PaletteContent() {
 				</div>
 			) : shouldShowResultsArea ? (
 				<div className="flex-1 flex flex-col overflow-hidden">
+					{agent && (
+						<p className="px-5 pt-3 pb-1 text-xs text-muted-foreground">
+							Sessões recentes
+						</p>
+					)}
 					{hasAnyResults ? (
 						<ScrollArea
 							className={cn(
@@ -373,7 +396,9 @@ function PaletteContent() {
 					) : !isLoading && resultsMatchQuery ? (
 						<div className="flex-1 flex items-center justify-center">
 							<p className="text-sm text-muted-foreground">
-								Nenhum resultado encontrado
+								{agent
+									? "Sua próxima conversa começa acima."
+									: "Nenhum resultado encontrado"}
 							</p>
 						</div>
 					) : (
@@ -385,7 +410,7 @@ function PaletteContent() {
 			{shouldShowResultsArea && (
 				<div className="flex items-center justify-between px-4 py-1.5 border-t border-border/40">
 					<span className="text-[10px] text-muted-foreground/60">
-						↑↓ navegar
+						{agent ? "Skills preparadas antes da conversa" : "↑↓ navegar"}
 					</span>
 					{activeProvider.id === "github" && lastSearchCached === true && (
 						<span className="text-[10px] text-amber-300/80">⚡ cache</span>
@@ -394,7 +419,9 @@ function PaletteContent() {
 						<span className="text-[10px] text-blue-300/70">🌐 rede</span>
 					)}
 					<span className="text-[10px] text-muted-foreground/60">
-						{isCalc ? "↵ copiar" : "↵ abrir"} · esc fechar
+						{agent
+							? "↵ iniciar · ⇧↵ nova linha"
+							: `${isCalc ? "↵ copiar" : "↵ abrir"} · esc fechar`}
 					</span>
 				</div>
 			)}
