@@ -126,3 +126,12 @@ export class McpLoader {
 }
 
 export const mcpLoader = new McpLoader();
+
+export type {
+	McpServerDefinition,
+	McpServerSummary,
+	McpSnapshot,
+} from "../../shared/mcp";
+// Transitional v1 API above is retired by the shared-registry runtime/UI tasks.
+// Never expose registry.get()/resolve() over RPC.
+export { McpRegistry, mcpRegistry } from "../mcp/registry";

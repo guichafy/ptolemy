@@ -260,3 +260,59 @@ void quitApp(void) {
         [NSApp terminate:nil];
     });
 }
+
+// MCP credentials stay in the app's Keychain service. No subprocess/argv or log
+// carries secret data. The caller owns buffers and receives only bounded status.
+#import <Security/Security.h>
+#include <string.h>
+
+static NSMutableDictionary *mcpSecretQuery(const char *account) {
+    if (!account) return nil;
+    NSString *name = [NSString stringWithUTF8String:account];
+    if (!name) return nil;
+    return [@{(__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
+              (__bridge id)kSecAttrService: @"com.ptolomeu.app.mcp",
+              (__bridge id)kSecAttrAccount: name} mutableCopy];
+}
+
+int32_t mcpReadSecret(const char *account, void *output, uint32_t capacity) {
+    @autoreleasepool {
+        NSMutableDictionary *query = mcpSecretQuery(account);
+        if (!query || !output) return -2;
+        query[(__bridge id)kSecReturnData] = @YES;
+        query[(__bridge id)kSecMatchLimit] = (__bridge id)kSecMatchLimitOne;
+        CFTypeRef result = NULL;
+        OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)query, &result);
+        if (status == errSecItemNotFound) return -1;
+        if (status != errSecSuccess) { if (result) CFRelease(result); return -2; }
+        NSData *data = CFBridgingRelease(result);
+        if (![data isKindOfClass:[NSData class]] || data.length > capacity) return -2;
+        if (data.length > 0) memcpy(output, data.bytes, data.length);
+        return (int32_t)data.length;
+    }
+}
+
+int32_t mcpWriteSecret(const char *account, const void *bytes, uint32_t length) {
+    @autoreleasepool {
+        NSMutableDictionary *query = mcpSecretQuery(account);
+        if (!query || (!bytes && length > 0) || length > 1024 * 1024) return -2;
+        NSData *data = [NSData dataWithBytes:bytes length:length];
+        NSDictionary *attributes = @{(__bridge id)kSecValueData: data};
+        OSStatus status = SecItemUpdate((__bridge CFDictionaryRef)query, (__bridge CFDictionaryRef)attributes);
+        if (status == errSecItemNotFound) {
+            query[(__bridge id)kSecValueData] = data;
+            query[(__bridge id)kSecAttrAccessible] = (__bridge id)kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly;
+            status = SecItemAdd((__bridge CFDictionaryRef)query, NULL);
+        }
+        return status == errSecSuccess ? 0 : -2;
+    }
+}
+
+int32_t mcpDeleteSecret(const char *account) {
+    @autoreleasepool {
+        NSMutableDictionary *query = mcpSecretQuery(account);
+        if (!query) return -2;
+        OSStatus status = SecItemDelete((__bridge CFDictionaryRef)query);
+        return status == errSecSuccess || status == errSecItemNotFound ? 0 : -2;
+    }
+}
