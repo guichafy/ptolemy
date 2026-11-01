@@ -27,6 +27,7 @@ bun run test               # Vitest: two projects (node + jsdom), runs both
 bun run test:watch         # Vitest in watch mode
 bun run test:coverage      # Coverage via @vitest/coverage-v8 (thresholds enforced in vitest.config.ts)
 bun run test:e2e           # E2E: Appium Mac2 (requires Xcode + the dev bundle from build:dev-bundle)
+bun run test:integration   # Agent integration (bun test, test/integration/): Codex offline via a local Responses API mock; Claude uses the real `claude` CLI and API (skip with PTOLEMY_IT_SKIP_CLAUDE=1)
 bun run screenshots        # Build dev bundle + run E2E + regenerate docs/screenshots/
 bun run typecheck          # tsc --noEmit
 bun run lint               # Biome check
