@@ -29,6 +29,7 @@ export interface GatewayAuth {
 	definitions?: Map<string, HttpDefinition>;
 }
 interface Bridge {
+	readonly closed: boolean;
 	down: StreamableHTTPServerTransport;
 	up: Transport;
 	close(): Promise<void>;
@@ -54,6 +55,26 @@ function authorized(value: string | undefined, token: string) {
 	return (
 		supplied.length === expected.length && timingSafeEqual(supplied, expected)
 	);
+}
+
+/** OAuth has its own bounded operations; cancellation must also stop waiting for it. */
+async function abortable<T>(
+	operation: Promise<T>,
+	signal: AbortSignal,
+): Promise<T> {
+	let abort: () => void = () => {};
+	try {
+		return await Promise.race([
+			operation,
+			new Promise<never>((_, reject) => {
+				abort = () => reject(failure());
+				signal.addEventListener("abort", abort, { once: true });
+				if (signal.aborted) abort();
+			}),
+		]);
+	} finally {
+		signal.removeEventListener("abort", abort);
+	}
 }
 
 /** A transport bridge, not an arbitrary URL proxy. Routes come only from trusted snapshots.
@@ -116,7 +137,10 @@ export class McpGateway {
 			},
 		};
 	}
-	private async upstream(route: Route): Promise<Transport> {
+	private async upstream(
+		route: Route,
+		lifecycle: AbortSignal,
+	): Promise<Transport> {
 		const server = route.server;
 		if (server.transport === "stdio") {
 			const base = getDefaultEnvironment();
@@ -159,9 +183,23 @@ export class McpGateway {
 			route.auth?.definitions?.get(server.id) ?? (server as HttpDefinition);
 		return new StreamableHTTPClientTransport(target, {
 			fetch: async (input, init) => {
+				const terminating = init?.method === "DELETE";
+				const connection = new AbortController();
+				// Bound GET establishment and best-effort DELETE, never tool duration or SSE bodies.
+				const timer =
+					terminating || init?.method === "GET"
+						? setTimeout(() => connection.abort(), terminating ? 1_000 : 15_000)
+						: undefined;
+				const signal = AbortSignal.any([
+					connection.signal,
+					...(!terminating
+						? [lifecycle, ...(init?.signal ? [init.signal] : [])]
+						: []),
+				]);
 				// SDK headers contain protocol/session fields only. Credentials are inserted here,
 				// immediately before a fixed validated destination, and never follow redirects.
 				const execute = async (token?: string) => {
+					signal.throwIfAborted();
 					const headers = new Headers(init?.headers);
 					for (const [key, value] of Object.entries(server.headers ?? {}))
 						headers.set(key, value);
@@ -173,46 +211,56 @@ export class McpGateway {
 						...init,
 						headers,
 						redirect: "manual" as const,
-						signal: AbortSignal.any([
-							...(init?.signal ? [init.signal] : []),
-							AbortSignal.timeout(15_000),
-						]),
+						signal,
 					};
 					return isLoopback(target)
 						? fetch(input, { ...options, proxy: "" } as RequestInit)
 						: fetchWithProxy(String(input), options);
 				};
 				try {
-					const token = server.auth
-						? await route.auth?.getAccessToken(server.id, expected)
-						: undefined;
-					let response = await execute(token);
-					if (response.status === 401 && server.auth && token) {
-						await response.body?.cancel();
-						const next = await route.auth?.getAccessToken(
-							server.id,
-							expected,
-							token,
-						);
-						response = await execute(next);
-					}
-					if (
-						response.status === 401 ||
-						response.status === 403 ||
-						(response.status >= 300 && response.status < 400)
-					) {
-						await response.body?.cancel();
-						throw failure();
-					}
-					return response;
+					return await abortable(
+						(async () => {
+							const token = server.auth
+								? await route.auth?.getAccessToken(server.id, expected)
+								: undefined;
+							let response = await execute(token);
+							if (
+								response.status === 401 &&
+								server.auth &&
+								token &&
+								!terminating
+							) {
+								await response.body?.cancel();
+								const next = await route.auth?.getAccessToken(
+									server.id,
+									expected,
+									token,
+								);
+								response = await execute(next);
+							}
+							if (
+								response.status === 401 ||
+								response.status === 403 ||
+								(response.status >= 300 && response.status < 400)
+							) {
+								await response.body?.cancel();
+								throw failure();
+							}
+							return response;
+						})(),
+						signal,
+					);
 				} catch {
 					throw failure();
+				} finally {
+					if (timer !== undefined) clearTimeout(timer);
 				}
 			},
 		});
 	}
 	private async bridge(route: Route): Promise<Bridge> {
-		const up = await this.upstream(route);
+		const lifecycle = new AbortController();
+		const up = await this.upstream(route, lifecycle.signal);
 		if (route.closed) {
 			await up.close();
 			throw failure();
@@ -221,22 +269,58 @@ export class McpGateway {
 			sessionIdGenerator: randomUUID,
 		});
 		let closed = false;
+		let closing: Promise<void> | undefined;
 		let initializeId: string | number | undefined;
+		let initializationTimer: ReturnType<typeof setTimeout> | undefined;
+		let failing = false;
+		const pendingRequests = new Set<string | number>();
+		const rejectPending = async () => {
+			const ids = [...pendingRequests];
+			pendingRequests.clear();
+			await Promise.allSettled(
+				ids.map((id) =>
+					down.send({
+						jsonrpc: "2.0",
+						id,
+						error: { code: -32603, message: failure().message },
+					}),
+				),
+			);
+		};
 		const bridge: Bridge = {
 			up,
 			down,
-			close: async () => {
-				if (closed) return;
-				closed = true;
-				route.pending.delete(bridge);
-				if (down.sessionId) route.bridges.delete(down.sessionId);
-				if (up instanceof StreamableHTTPClientTransport)
-					await up.terminateSession().catch(() => {});
-				await Promise.allSettled([up.close(), down.close()]);
+			get closed() {
+				return closed;
 			},
+			close: () => {
+				if (closing) return closing;
+				closed = true;
+				clearTimeout(initializationTimer);
+				lifecycle.abort();
+				closing = (async () => {
+					await rejectPending();
+					if (up instanceof StreamableHTTPClientTransport)
+						await up.terminateSession().catch(() => {});
+					await Promise.allSettled([up.close(), down.close()]);
+					route.pending.delete(bridge);
+					if (down.sessionId) route.bridges.delete(down.sessionId);
+				})();
+				return closing;
+			},
+		};
+		const transportFailed = () => {
+			if (closed || failing) return;
+			failing = true;
+			void rejectPending().finally(() => bridge.close());
 		};
 		route.pending.add(bridge);
 		up.onmessage = (msg) => {
+			if ("id" in msg && msg.id !== undefined && !("method" in msg)) {
+				pendingRequests.delete(msg.id);
+				if (msg.id === initializeId) clearTimeout(initializationTimer);
+			}
+
 			if (
 				up instanceof StreamableHTTPClientTransport &&
 				"result" in msg &&
@@ -247,26 +331,24 @@ export class McpGateway {
 			void down.send(msg).catch(() => bridge.close());
 		};
 		down.onmessage = (msg) => {
-			if ("method" in msg && msg.method === "initialize" && "id" in msg)
-				initializeId = msg.id;
-			void up.send(msg).catch(async () => {
-				if ("id" in msg && "method" in msg) {
-					await down
-						.send({
-							jsonrpc: "2.0",
-							id: msg.id,
-							error: { code: -32603, message: failure().message },
-						})
-						.catch(() => {});
+			if ("id" in msg && msg.id !== undefined && "method" in msg) {
+				pendingRequests.add(msg.id);
+				if (failing || closed) {
+					void rejectPending();
+					return;
 				}
-			});
+				if (msg.method === "initialize") {
+					initializeId = msg.id;
+					initializationTimer = setTimeout(transportFailed, 15_000);
+				}
+			}
+			void up.send(msg).catch(transportFailed);
 		};
-		// Never pass transport/server startup errors or credential-bearing stderr to logging.
-		up.onerror = () => {};
+		// SDK SSE processing is asynchronous after send() resolves. Settle callers on
+		// transport errors too; never expose raw errors or leave them awaiting a timeout.
+		up.onerror = transportFailed;
 		down.onerror = () => {};
-		up.onclose = () => {
-			void bridge.close();
-		};
+		up.onclose = transportFailed;
 		down.onclose = () => {
 			void bridge.close();
 		};
@@ -328,7 +410,7 @@ export class McpGateway {
 				}
 				bridge = await this.bridge(route);
 				await bridge.down.handleRequest(req, res, body);
-				if (bridge.down.sessionId && !route.closed) {
+				if (bridge.down.sessionId && !route.closed && !bridge.closed) {
 					route.pending.delete(bridge);
 					route.bridges.set(bridge.down.sessionId, bridge);
 				}
