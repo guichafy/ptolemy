@@ -48,12 +48,26 @@ function oneLine(text: string | undefined): string | undefined {
 		: flat;
 }
 
-/** Shows only the tail of long paths: `…/src/chatview/App.tsx`. */
+const SEGMENT_MAX = 24;
+
+function shortSegment(segment: string): string {
+	return segment.length > SEGMENT_MAX
+		? `${segment.slice(0, SEGMENT_MAX - 1)}…`
+		: segment;
+}
+
+/**
+ * Shows only the tail of long paths (`…/src/App.tsx`); long folder names,
+ * such as the per-conversation project folders, are cut short.
+ */
 export function shortPath(path: string | undefined): string | undefined {
 	if (!path) return undefined;
 	const parts = path.split("/").filter(Boolean);
-	if (parts.length <= 3) return path;
-	return `…/${parts.slice(-3).join("/")}`;
+	if (parts.length <= 2 && path.length <= SEGMENT_MAX * 2) return path;
+	const tail = parts.slice(-2);
+	return `…/${tail
+		.map((p, i) => (i === tail.length - 1 ? p : shortSegment(p)))
+		.join("/")}`;
 }
 
 /** Strips the `bash -lc '...'` wrapper Codex puts around commands. */

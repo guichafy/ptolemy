@@ -9,7 +9,14 @@
  * Memory questions are answered from the history the CLI sends back.
  */
 
-import { chunk, nextMockStep, type ScenarioFile, sse } from "./scenario";
+import {
+	chunk,
+	createPromptCache,
+	estimateTokens,
+	nextMockStep,
+	type ScenarioFile,
+	sse,
+} from "./scenario";
 
 export interface MockResponsesServer {
 	url: string;
@@ -28,22 +35,36 @@ function textOf(item: InputItem): string {
 	return parts.map((p) => p.text ?? "").join("");
 }
 
-const USAGE = {
-	input_tokens: 120,
-	input_tokens_details: { cached_tokens: 20 },
-	output_tokens: 30,
-	output_tokens_details: { reasoning_tokens: 0 },
-	total_tokens: 150,
-};
+const OUTPUT_TOKENS = 30;
 
-function completed(n: number) {
+interface ResponseUsage {
+	input_tokens: number;
+	input_tokens_details: { cached_tokens: number };
+	output_tokens: number;
+	output_tokens_details: { reasoning_tokens: number };
+	total_tokens: number;
+}
+
+/** OpenAI convention: `input_tokens` includes the cached part. */
+function responseUsage(cached: number, fresh: number): ResponseUsage {
+	const input = cached + fresh;
 	return {
-		type: "response.completed",
-		response: { id: `resp_${n}`, usage: USAGE },
+		input_tokens: input,
+		input_tokens_details: { cached_tokens: cached },
+		output_tokens: OUTPUT_TOKENS,
+		output_tokens_details: { reasoning_tokens: 0 },
+		total_tokens: input + OUTPUT_TOKENS,
 	};
 }
 
-function execTurn(n: number, file: ScenarioFile): string {
+function completed(n: number, usage: ResponseUsage) {
+	return {
+		type: "response.completed",
+		response: { id: `resp_${n}`, usage },
+	};
+}
+
+function execTurn(n: number, file: ScenarioFile, usage: ResponseUsage): string {
 	const patch = `*** Begin Patch\n*** Add File: ${file.name}\n+${file.text}\n*** End Patch\n`;
 	const script = [
 		`await tools.apply_patch(${JSON.stringify(patch)});`,
@@ -66,11 +87,11 @@ function execTurn(n: number, file: ScenarioFile): string {
 			item: { ...item, input: "" },
 		},
 		{ type: "response.output_item.done", output_index: 0, item },
-		completed(n),
+		completed(n, usage),
 	]);
 }
 
-function messageTurn(n: number, text: string): string {
+function messageTurn(n: number, text: string, usage: ResponseUsage): string {
 	const id = `msg_${n}`;
 	return sse([
 		{ type: "response.created", response: { id: `resp_${n}` } },
@@ -97,12 +118,13 @@ function messageTurn(n: number, text: string): string {
 				content: [{ type: "output_text", text, annotations: [] }],
 			},
 		},
-		completed(n),
+		completed(n, usage),
 	]);
 }
 
 export function startMockResponsesServer(): MockResponsesServer {
 	const requests: MockResponsesServer["requests"] = [];
+	const promptCache = createPromptCache();
 	let counter = 0;
 	const server = Bun.serve({
 		port: 0,
@@ -130,6 +152,19 @@ export function startMockResponsesServer(): MockResponsesServer {
 					break;
 				}
 			}
+			const firstUser = input.find(
+				(i) => i.type === "message" && i.role === "user",
+			);
+			const { cached, fresh } = promptCache(
+				JSON.stringify(firstUser ?? "").slice(0, 400),
+				estimateTokens({
+					instructions: body.instructions,
+					tools: body.tools,
+					input,
+				}),
+			);
+			const usage = responseUsage(cached, fresh);
+
 			// One `exec` call does both the write and the `cat`.
 			const step = nextMockStep({
 				lastUserText,
@@ -138,8 +173,8 @@ export function startMockResponsesServer(): MockResponsesServer {
 			});
 			const payload =
 				step.kind === "write-file"
-					? execTurn(n, step.file)
-					: messageTurn(n, step.kind === "reply" ? step.text : "Ok.");
+					? execTurn(n, step.file, usage)
+					: messageTurn(n, step.kind === "reply" ? step.text : "Ok.", usage);
 			return new Response(payload, {
 				headers: { "content-type": "text/event-stream" },
 			});

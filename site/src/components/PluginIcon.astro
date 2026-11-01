@@ -49,3 +49,11 @@ const { icon, class: className = "size-5" } = Astro.props;
 		<circle cx="17" cy="10" r="0.6" fill="currentColor" />
 	</svg>
 )}
+
+{icon === "codex" && (
+	<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class={className}>
+		<rect x="3" y="4" width="18" height="16" rx="2.5" />
+		<polyline points="7.5 10 10.5 12.5 7.5 15" />
+		<line x1="13" y1="15" x2="16.5" y2="15" />
+	</svg>
+)}

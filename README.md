@@ -181,6 +181,7 @@ bun run test:e2e           # E2E (Appium Mac2; requires the dev bundle)
 bun run test:integration   # Claude + Codex integration, against local API mocks (offline)
 bun run test:integration:live  # Same, against the real services (uses your signed-in CLIs)
 bun run screenshots        # Build dev bundle + run E2E + regenerate docs/screenshots/
+bun run screenshots:chat   # Chat E2E (Claude + Codex against local mocks) + regenerate site/public/screenshots/chat-*.png
 ```
 
 The E2E suite drives the real macOS app via Appium Mac2 and writes PNG screenshots to `docs/screenshots/`. Both the CI `e2e` job and the `screenshots` script build the dev bundle with `electrobun build --env=dev` before running.
@@ -191,6 +192,8 @@ Vitest runs two projects side by side:
 - `jsdom`: React UI (`src/mainview/**`, `src/chatview/components/**`, `src/lib/**`)
 
 The agent integration tests (`test/integration/`) run one conversation per agent through the real session manager: create a file, run a command, then check that the agent remembers the conversation, including after switching agents. `test:integration` uses the real SDKs and CLIs bundled with them, talking to local mocks of the Anthropic and OpenAI APIs, so it needs no network or sign-in and runs in CI. `test:integration:live` runs the same scenario with the `claude` and `codex` CLIs installed and signed in on your machine (`claude /login`, `codex login`); an agent that is missing or signed out is skipped with a message. To run only one agent or pick models, set `PTOLEMY_IT_AGENTS=claude` (or `codex`), `PTOLEMY_IT_CLAUDE_MODEL=sonnet` or `PTOLEMY_IT_CODEX_MODEL=gpt-6-luna`, inline or in a `.env.test.local` file (git-ignored, loaded by `bun test`). Your Ptolemy settings and sessions are never touched: the tests use a temporary data folder. Full guide (in Portuguese): [docs/testing/integration-tests.md](docs/testing/integration-tests.md).
+
+`screenshots:chat` (`test/e2e-chat/`) runs the same scenario through the real chat UI: the Bun request handlers, session manager, SDKs and bundled CLIs are real (against the local mocks), and the chat webview is built by Vite and driven by Playwright in Chromium, with a WebSocket in place of Electrobun's RPC. It checks the tool cards, the model shown, the context gauge and the context details, and writes the screenshots the site uses. It runs on any OS; install the browser once with `bunx playwright install chromium`.
 
 **Lint and types**
 

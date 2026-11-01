@@ -27,19 +27,11 @@
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentEvent, AgentKind } from "@/shared/agent-protocol";
-import {
-	type MockAnthropicServer,
-	startMockAnthropicServer,
-} from "./helpers/mock-anthropic-server";
-import {
-	type MockResponsesServer,
-	mockCodexConfigToml,
-	startMockResponsesServer,
-} from "./helpers/mock-responses-server";
+import { configureLocalAgents, type LocalAgents } from "./helpers/local-agents";
 import {
 	ASK_FILE_NAME,
 	ASK_FILE_TEXT,
@@ -72,54 +64,10 @@ for (const key of ["CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_REMOTE_SESSION_ID"]) {
 }
 
 const REPO = join(import.meta.dir, "..", "..");
-let anthropicMock: MockAnthropicServer | null = null;
-let responsesMock: MockResponsesServer | null = null;
 
+let localAgents: LocalAgents | null = null;
 if (!LIVE) {
-	// Local servers only: bypass any HTTP(S) proxy for loopback.
-	for (const key of ["NO_PROXY", "no_proxy"]) {
-		process.env[key] = ["127.0.0.1", "localhost", process.env[key]]
-			.filter(Boolean)
-			.join(",");
-	}
-
-	// Claude: the CLI bundled with the Agent SDK, isolated config, API key
-	// auth against the mock. Drop anything that could route it elsewhere.
-	for (const key of Object.keys(process.env)) {
-		if (key.startsWith("ANTHROPIC_") || key.startsWith("CLAUDE_CODE_")) {
-			delete process.env[key];
-		}
-	}
-	anthropicMock = startMockAnthropicServer();
-	process.env.ANTHROPIC_BASE_URL = anthropicMock.url;
-	process.env.ANTHROPIC_API_KEY = "mock-key";
-	process.env.CLAUDE_CONFIG_DIR = join(TMP, ".claude");
-	process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1";
-	process.env.PTOLEMY_CLAUDE_PATH ??= join(
-		REPO,
-		"node_modules",
-		"@anthropic-ai",
-		`claude-agent-sdk-${process.platform}-${process.arch}`,
-		"claude",
-	);
-
-	// Codex: the CLI bundled with the SDK, with its own CODEX_HOME pointing
-	// at the mock provider.
-	responsesMock = startMockResponsesServer();
-	const codexHome = join(TMP, ".codex");
-	process.env.CODEX_HOME = codexHome;
-	await mkdir(codexHome, { recursive: true });
-	await writeFile(
-		join(codexHome, "config.toml"),
-		mockCodexConfigToml(responsesMock.url),
-	);
-	process.env.PTOLEMY_MOCK_API_KEY = "mock-key";
-	process.env.PTOLEMY_CODEX_PATH ??= join(
-		REPO,
-		"node_modules",
-		".bin",
-		"codex",
-	);
+	localAgents = await configureLocalAgents(TMP, REPO);
 }
 
 const sm = await import("../../src/bun/claude/session-manager");
@@ -268,8 +216,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-	anthropicMock?.stop();
-	responsesMock?.stop();
+	localAgents?.stop();
 	await rm(TMP, { recursive: true, force: true });
 });
 

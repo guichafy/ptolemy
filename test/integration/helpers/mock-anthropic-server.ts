@@ -8,7 +8,13 @@
  * the CLI resends on every request.
  */
 
-import { chunk, nextMockStep, sse } from "./scenario";
+import {
+	chunk,
+	createPromptCache,
+	estimateTokens,
+	nextMockStep,
+	sse,
+} from "./scenario";
 
 export interface MockAnthropicServer {
 	url: string;
@@ -50,11 +56,34 @@ function cwdFrom(system: unknown): string {
 	return match ? match[1].trim() : ".";
 }
 
-const USAGE = { input_tokens: 100, output_tokens: 20 };
+const OUTPUT_TOKENS = 20;
+
+interface RequestUsage {
+	input_tokens: number;
+	cache_read_input_tokens: number;
+	cache_creation_input_tokens: number;
+	output_tokens: number;
+}
+
+/**
+ * Usage shaped like Claude Code's real traffic: it caches the whole prompt
+ * on every request, so the reused prefix is a cache read, the new tail is a
+ * cache write, and only a few tokens are plain input.
+ */
+function requestUsage(cached: number, fresh: number): RequestUsage {
+	const input = Math.min(fresh, 40);
+	return {
+		input_tokens: input,
+		cache_read_input_tokens: cached,
+		cache_creation_input_tokens: fresh - input,
+		output_tokens: OUTPUT_TOKENS,
+	};
+}
 
 function stream(
 	n: number,
 	model: string,
+	usage: RequestUsage,
 	block:
 		| { type: "text"; text: string }
 		| { type: "tool_use"; name: string; input: Record<string, unknown> },
@@ -97,7 +126,7 @@ function stream(
 				content: [],
 				stop_reason: null,
 				stop_sequence: null,
-				usage: { ...USAGE, output_tokens: 1 },
+				usage: { ...usage, output_tokens: 1 },
 			},
 		},
 		{ type: "content_block_start", index: 0, content_block: start },
@@ -109,7 +138,7 @@ function stream(
 				stop_reason: block.type === "text" ? "end_turn" : "tool_use",
 				stop_sequence: null,
 			},
-			usage: { output_tokens: USAGE.output_tokens },
+			usage: { output_tokens: usage.output_tokens },
 		},
 		{ type: "message_stop" },
 	]);
@@ -117,6 +146,7 @@ function stream(
 
 export function startMockAnthropicServer(): MockAnthropicServer {
 	const requests: MockAnthropicServer["requests"] = [];
+	const promptCache = createPromptCache();
 	let counter = 0;
 	const server = Bun.serve({
 		port: 0,
@@ -124,6 +154,20 @@ export function startMockAnthropicServer(): MockAnthropicServer {
 		async fetch(req) {
 			const url = new URL(req.url);
 			if (req.method === "HEAD") return new Response(null, { status: 200 });
+			// Used by the CLI to size the context categories (`/context`).
+			if (
+				req.method === "POST" &&
+				url.pathname.endsWith("/v1/messages/count_tokens")
+			) {
+				const body = (await req.json()) as Record<string, unknown>;
+				return Response.json({
+					input_tokens: estimateTokens({
+						system: body.system,
+						tools: body.tools,
+						messages: body.messages,
+					}),
+				});
+			}
 			if (req.method !== "POST" || !url.pathname.endsWith("/v1/messages")) {
 				return new Response("{}", { status: 404 });
 			}
@@ -131,6 +175,7 @@ export function startMockAnthropicServer(): MockAnthropicServer {
 				model: string;
 				stream?: boolean;
 				system?: unknown;
+				tools?: unknown;
 				messages: Message[];
 			};
 			requests.push(body as unknown as Record<string, unknown>);
@@ -151,6 +196,16 @@ export function startMockAnthropicServer(): MockAnthropicServer {
 				lastUserText = userText(m);
 				if (lastUserText) break;
 			}
+
+			const { cached, fresh } = promptCache(
+				JSON.stringify(messages[0] ?? "").slice(0, 400),
+				estimateTokens({
+					system: body.system,
+					tools: body.tools,
+					messages,
+				}),
+			);
+			const usage = requestUsage(cached, fresh);
 
 			const step = nextMockStep({
 				lastUserText,
@@ -189,10 +244,10 @@ export function startMockAnthropicServer(): MockAnthropicServer {
 					content: [{ type: "text", text: "ok" }],
 					stop_reason: "end_turn",
 					stop_sequence: null,
-					usage: USAGE,
+					usage,
 				});
 			}
-			return new Response(stream(n, body.model, block), {
+			return new Response(stream(n, body.model, usage, block), {
 				headers: { "content-type": "text/event-stream" },
 			});
 		},

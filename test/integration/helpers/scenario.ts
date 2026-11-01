@@ -91,3 +91,27 @@ export function chunk(text: string, size = 12): string[] {
 	for (let i = 0; i < text.length; i += size) out.push(text.slice(i, i + size));
 	return out.length > 0 ? out : [""];
 }
+
+/**
+ * Rough token count of a request payload (~4 characters per token), so the
+ * mocks report usage on the scale of the real APIs instead of constants.
+ */
+export function estimateTokens(value: unknown): number {
+	return Math.ceil(JSON.stringify(value ?? "").length / 4);
+}
+
+/**
+ * Prompt caching as the real APIs report it: the part of a conversation's
+ * prompt already sent in its previous request counts as a cache read, the
+ * rest is new. Keyed by conversation (its first message), so parallel
+ * sessions on one mock do not share a cache.
+ */
+export function createPromptCache() {
+	const previous = new Map<string, number>();
+	return (conversationKey: string, promptTokens: number) => {
+		const before = previous.get(conversationKey) ?? 0;
+		previous.set(conversationKey, promptTokens);
+		const cached = Math.min(before, promptTokens);
+		return { cached, fresh: promptTokens - cached };
+	};
+}

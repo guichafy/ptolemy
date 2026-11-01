@@ -116,7 +116,21 @@ Arquivos em `test/integration/helpers/`:
 - **`mock-anthropic-server.ts`:** imita `POST /v1/messages` da API da Anthropic, com streaming (SSE). O Claude Code chega nele via `ANTHROPIC_BASE_URL`, autenticado com uma `ANTHROPIC_API_KEY` falsa. Responde com `tool_use` de `Write` (caminho absoluto, lido do "Primary working directory" do prompt de sistema), depois `Bash` com `cat` e por fim o texto.
 - **`mock-responses-server.ts`:** imita `POST /v1/responses` da API da OpenAI, com streaming (SSE). O Codex chega nele por um provedor próprio no `config.toml` do `CODEX_HOME` temporário (`supports_websockets = false` e sem novas tentativas, para falhar rápido). O Codex 0.166 executa ferramentas em "code mode": uma única chamada da ferramenta `exec`, com JavaScript que chama `tools.apply_patch` para criar o arquivo e `tools.exec_command` para rodar o `cat`. O CLI transforma isso nos itens `file_change` e `command_execution`, que o app mostra como `ApplyPatch` e `Shell`.
 
+Os dois servidores também informam o uso de tokens na escala das APIs reais (cerca de 4 caracteres por token do que foi enviado) e simulam o cache de prompt: a parte do prompt que já tinha ido na requisição anterior da mesma conversa volta como leitura de cache. O servidor da Anthropic responde ainda `POST /v1/messages/count_tokens`, que o Claude Code usa para dividir o contexto por categoria (o painel "Janela de contexto" do chat). Assim o indicador de contexto, o custo e o detalhamento recebem números plausíveis nos testes.
+
 Ponto central do desenho: **os servidores falsos não guardam estado da conversa.** Para responder às perguntas de memória, leem o histórico que o CLI reenvia a cada requisição. Se a retomada quebrar e o histórico não voltar, o servidor falso responde "não sei" e o teste falha, mesmo no modo local. Isso foi verificado quebrando de propósito a retomada do Claude (`resume` sem o ID) e a do Codex (thread novo a cada turno): nos dois casos, o teste de memória falhou.
+
+## Screenshots do chat (E2E)
+
+`bun run screenshots:chat` (`test/e2e-chat/`) roda o mesmo cenário pela interface real do chat e grava as capturas usadas no site (`site/public/screenshots/chat-*.png`):
+
+- **Tudo abaixo da interface é real:** os handlers RPC do Bun (`src/bun/rpc.ts`), o session manager, os SDKs e os CLIs que vêm com eles, conversando com os servidores falsos acima (`helpers/local-agents.ts`). Sem rede e sem login.
+- **A interface é o app do chat de verdade** (`src/chatview`), compilado pelo Vite e aberto no Chromium pelo Playwright. A única troca é o transporte: o RPC do Electrobun vira um WebSocket para um servidor ponte dentro do teste (`web/ws-rpc.ts`). O módulo `electrobun/bun` é substituído por um que repassa as mensagens para esse WebSocket, porque o runtime do Electrobun só carrega dentro do app.
+- **O que o teste confere:** os cartões das ferramentas de cada agente, a resposta do segundo turno (memória), o seletor mostrando o modelo real e não o apelido, o indicador de contexto, o painel de detalhamento carregado e nenhum erro no console da página.
+
+Variáveis: `PTOLEMY_SCREENSHOTS_DIR` muda a pasta de saída; `PTOLEMY_E2E_SKIP_BUILD=1` reaproveita o último build da interface. Na primeira vez, instale o navegador do Playwright com `bunx playwright install chromium`.
+
+Diferente do `bun run screenshots` (Appium no app do macOS), este roda em qualquer sistema e não precisa do dev bundle. A renderização é do Chromium, não do WebKit do macOS, então fontes e bordas podem variar um pouco em relação ao app.
 
 ## CI
 

@@ -30,6 +30,7 @@ bun run test:e2e           # E2E: Appium Mac2 (requires Xcode + the dev bundle f
 bun run test:integration       # Agent integration, local mode: real SDKs + CLIs against local API mocks (offline, runs in CI)
 bun run test:integration:live  # Same scenario against the real services, using the `claude`/`codex` CLIs signed in on this machine
 bun run screenshots        # Build dev bundle + run E2E + regenerate docs/screenshots/
+bun run screenshots:chat   # Chat E2E: real backend + CLIs vs local mocks, real chat UI in Chromium; writes site/public/screenshots/chat-*.png
 bun run typecheck          # tsc --noEmit
 bun run lint               # Biome check
 bun run lint:fix           # Biome auto-fix
@@ -152,6 +153,10 @@ Full guide (pt-BR): [docs/testing/integration-tests.md](docs/testing/integration
 - **live** (`PTOLEMY_IT_MODE=live`): the installed `claude` and `codex` CLIs with the machine's own sign-ins and the real models. An agent whose CLI is missing (or, for Codex, not signed in) is skipped with a printed reason. Assertions are looser where model behaviour varies (any tool call), strict where it matters (file contents, memory across turns and after a cold resume).
 
 Ptolemy's own data always goes to a throwaway `PTOLEMY_HOME` (see `src/bun/paths.ts`), so the real `~/.ptolomeu` and settings are never touched; `$HOME` is left alone so the CLIs keep their sign-ins. Knobs (env vars, or a git-ignored `.env.test.local`, which `bun test` loads): `PTOLEMY_IT_AGENTS=claude,codex`, `PTOLEMY_IT_CLAUDE_MODEL` (live, default `haiku`; use an alias, see below), `PTOLEMY_IT_CODEX_MODEL` (live, default: the CLI's configured model), `PTOLEMY_CLAUDE_PATH` / `PTOLEMY_CODEX_PATH` (force a CLI binary; also honoured by the app).
+
+The mocks report usage on the real APIs' scale (~4 chars/token, with prompt caching across requests of a conversation) and the Anthropic mock answers `count_tokens`, so the context gauge and the details dialog get plausible numbers.
+
+**Chat E2E** (`test/e2e-chat/`, `bun run screenshots:chat`): reuses `helpers/local-agents.ts`, mocks `electrobun/bun` so `src/bun/rpc.ts` loads outside the app (its `send` pushes go to a WebSocket), serves the real `src/chatview` built by `test/e2e-chat/vite.config.ts` (which swaps `src/chatview/rpc.ts` for `web/ws-rpc.ts`) and drives it with Playwright. Asserts the tool cards, the memory turn, the resolved model in the picker, the context gauge and dialog, and no page errors; writes the site's chat screenshots. Guide: [docs/testing/integration-tests.md](docs/testing/integration-tests.md).
 
 Known pre-existing issue the suite works around: on a cold resume, the Claude session model is checked against the SDK's model list, which only has aliases (`default`, `sonnet`, `opus`, `haiku`...), so a full model id is silently replaced by `default`.
 
