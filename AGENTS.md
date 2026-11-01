@@ -142,6 +142,8 @@ Built on `@openai/codex-sdk`, which spawns the user's Codex CLI (`codex exec --e
 
 ### Agent integration tests (`test/integration/`)
 
+Full guide (pt-BR): [docs/testing/integration-tests.md](docs/testing/integration-tests.md).
+
 `bun test` suite (not Vitest: it needs real Bun APIs and real subprocesses) that drives both agents through the real session manager: create, deferred start, streamed `AgentEvent`s, persistence, follow-up turn, switching agents with a cold resume, delete. One scenario (`helpers/scenario.ts`: create a file, `cat` it, then answer memory questions) runs in two modes:
 
 - **local** (default): the CLIs bundled with each SDK (`@anthropic-ai/claude-agent-sdk-<platform>`, `@openai/codex`) talk to `helpers/mock-anthropic-server.ts` (Messages API, via `ANTHROPIC_BASE_URL` + an isolated `CLAUDE_CONFIG_DIR`) and `helpers/mock-responses-server.ts` (Responses API, via a mock provider in an isolated `CODEX_HOME`). The mocks follow the scenario's prompts literally and answer memory questions only from the history the CLI resends, so a broken resume fails here too. Assertions are exact (tool names, file contents).
