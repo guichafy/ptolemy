@@ -1,3 +1,15 @@
+# [0.14.0](https://github.com/guichafy/ptolemy/compare/v0.13.0...v0.14.0) (2026-11-01)
+
+
+### Bug Fixes
+
+* **skills:** handle missing GitHub revision responses ([89d15fb](https://github.com/guichafy/ptolemy/commit/89d15fb58b25fc9bc2e1ecd8a6b5635d1e89cade))
+
+
+### Features
+
+* **agents:** configure Skills before starting conversations ([0608ba0](https://github.com/guichafy/ptolemy/commit/0608ba01ea84ee53956937ef4e852e65784aced8))
+
 # [0.13.0](https://github.com/guichafy/ptolemy/compare/v0.12.0...v0.13.0) (2026-11-01)
 
 
