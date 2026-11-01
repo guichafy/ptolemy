@@ -19,6 +19,7 @@ export async function resolveExtensionPrompt(
 	prepared: PreparedSessionExtensions,
 	prompt: string,
 	cwd: string,
+	readOnly = false,
 ): Promise<string> {
 	const match = prompt.trimStart().match(/^\/([^\s]+)(?:\s+([\s\S]*))?$/);
 	const command = match && prepared.commands.find((c) => c.name === match[1]);
@@ -35,6 +36,7 @@ export async function resolveExtensionPrompt(
 				timeout: 60,
 				variables,
 				args,
+				readOnly,
 			});
 			if (result.code !== 0)
 				throw Error("Expansão dinâmica do comando falhou.");
@@ -91,6 +93,7 @@ export async function codexExtensionOverrides(
 	cwd: string,
 	env: Record<string, string>,
 	sessionId: string,
+	readOnly = false,
 ): Promise<string[]> {
 	if (!prepared.explicit) return [];
 	const disabled = suppressCodexPlugins(
@@ -110,7 +113,7 @@ export async function codexExtensionOverrides(
 		...COMMON_HOOK_EVENTS.map((e) => `hooks.${e}=[]`),
 		...(prepared.hooks.length
 			? codexHookOverrides(
-					prepared.hooks,
+					prepared.hooks.map((h) => ({ ...h, readOnly })),
 					inheritedHooks.map((h) => h.key),
 				)
 			: ["features.hooks=false"]),

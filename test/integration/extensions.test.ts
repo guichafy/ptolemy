@@ -958,3 +958,44 @@ test("trusted native Claude prompt hooks evaluate without tools and deny before 
 		await rm(root, { recursive: true, force: true });
 	}
 }, 30000);
+
+test("read-only Codex extensions cannot write even inside the project", async () => {
+	const cwd = await mkdtemp(join(tmpdir(), "ptolemy-extension-readonly-"));
+	try {
+		const spec = {
+			cwd,
+			root: cwd,
+			data: cwd,
+			event: "PreToolUse",
+			command: "echo forbidden > readonly-file",
+			timeout: 2,
+			readOnly: true,
+		};
+		expect(await runExtensionHook(spec, {})).toMatchObject({
+			hookSpecificOutput: { permissionDecision: "deny" },
+		});
+		expect(
+			await readFile(join(cwd, "readonly-file"), "utf8").catch(() => null),
+		).toBeNull();
+		const prepared = await prepareSessionExtensions(
+			"readonly",
+			cwd,
+			[],
+			"codex",
+		);
+		prepared.commands.push({
+			name: "test:read",
+			root: cwd,
+			metadata: {},
+			prompt: "!`echo forbidden > readonly-command; printf safe`",
+		});
+		expect(
+			await resolveExtensionPrompt(prepared, "/test:read", cwd, true),
+		).toBe("safe");
+		expect(
+			await readFile(join(cwd, "readonly-command"), "utf8").catch(() => null),
+		).toBeNull();
+	} finally {
+		await rm(cwd, { recursive: true, force: true });
+	}
+});

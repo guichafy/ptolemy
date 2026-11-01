@@ -111,6 +111,7 @@ async function defaultCreateThread(
 					options.workingDirectory!,
 					env,
 					extensions.sessionId,
+					options.sandboxMode === "read-only",
 				)
 			: []),
 	];
@@ -181,7 +182,12 @@ export class CodexSessionRuntime {
 			const skillConfig = (await this.deps.loadSkillConfig?.()) ?? {};
 			const prepared = await this.deps.loadExtensions?.();
 			if (prepared)
-				prompt = await resolveExtensionPrompt(prepared, prompt, this.deps.cwd);
+				prompt = await resolveExtensionPrompt(
+					prepared,
+					prompt,
+					this.deps.cwd,
+					options.sandboxMode === "read-only",
+				);
 			if (
 				prepared?.skills.length &&
 				skillConfig.skills &&

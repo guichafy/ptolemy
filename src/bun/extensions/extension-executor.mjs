@@ -91,7 +91,7 @@ export async function executeHookSequence(hooks, input, signal) {
 
 export async function executeRestricted(spec, input = "", signal) {
 	const cwd = await realpath(spec.cwd);
-	const policy = `(version 1)(allow default)(deny file-write*)(allow file-write* (subpath ${JSON.stringify(cwd)}))(allow file-write-data (literal "/dev/null"))`;
+	const policy = `(version 1)(allow default)(deny file-write*)${spec.readOnly ? "" : `(allow file-write* (subpath ${JSON.stringify(cwd)}))`}(allow file-write-data (literal "/dev/null"))`;
 	const env = {};
 	for (const key of ["PATH", "LANG", "LC_ALL", "TZ"])
 		if (process.env[key]) env[key] = process.env[key];

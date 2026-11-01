@@ -16,6 +16,7 @@ export function executeRestricted(
 		timeout: number;
 		variables?: Record<string, string>;
 		args?: string[];
+		readOnly?: boolean;
 	},
 	input?: string,
 	signal?: AbortSignal,
