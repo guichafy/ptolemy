@@ -187,6 +187,7 @@ export class CodexSessionRuntime {
 					prompt,
 					this.deps.cwd,
 					options.sandboxMode === "read-only",
+					controller.signal,
 				);
 			if (
 				prepared?.skills.length &&
@@ -202,6 +203,7 @@ export class CodexSessionRuntime {
 					...prepared.skills.map((s) => ({ path: s.path, enabled: true })),
 				];
 			}
+			controller.signal.throwIfAborted();
 			const thread = await createThread(
 				this.currentThreadId,
 				options,

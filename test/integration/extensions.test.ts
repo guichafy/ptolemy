@@ -23,9 +23,11 @@ import {
 	toToml,
 } from "../../src/bun/extensions/hooks";
 import {
+	denyUnselectedSlash,
 	inventoryClaudeBuiltins,
 	inventoryCodexHooks,
 	inventoryCodexPlugins,
+	refreshClaudeBuiltinSelection,
 } from "../../src/bun/extensions/native";
 import {
 	claudeExtensionOptions,
@@ -429,9 +431,24 @@ test("explicit plugin selection suppresses inherited components, preserves selec
 			"claude",
 			{ store },
 		);
-		const opts = await claudeExtensionOptions(prepared, {
-			all: allBuiltins,
+		const frozenBuiltins = {
+			all: allBuiltins.filter((name) => name !== "update-config"),
 			selected: [],
+		};
+		const refreshedBuiltins = refreshClaudeBuiltinSelection(
+			frozenBuiltins,
+			allBuiltins,
+		);
+		expect(frozenBuiltins.all).not.toContain("update-config");
+		expect(() =>
+			denyUnselectedSlash(
+				"/update-config",
+				refreshedBuiltins.all,
+				refreshedBuiltins.selected,
+			),
+		).toThrow();
+		const opts = await claudeExtensionOptions(prepared, {
+			...refreshedBuiltins,
 			hasFileSkills: false,
 		});
 		const command = await resolveExtensionPrompt(

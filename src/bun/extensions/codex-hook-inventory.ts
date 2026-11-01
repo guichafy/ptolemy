@@ -43,6 +43,9 @@ export function parseNativeHookInventory(value: unknown): NativeHook[] {
 		};
 	});
 }
+export function codexHookInventoryPolicy(scratch: string, id: string): string {
+	return `(version 1)(allow default)(deny network*)(allow network* (local unix-socket))(allow network* (remote unix-socket))(deny file-write*)(allow file-write* (subpath ${JSON.stringify(scratch)}))(allow file-write-data (literal ${JSON.stringify(id)}))`;
+}
 /** No thread/model request, no network; native source identities include policy and trusted project layers. */
 export async function inventoryCodexHooks(
 	cli: string,
@@ -54,12 +57,17 @@ export async function inventoryCodexHooks(
 		"installation_id",
 	);
 	// The installed CLI opens this existing UUID read/write even though it only reads it.
-	// Never authorize creation, repair, links or an invalid identifier.
+	// Never authorize creation, mode repair, links or an invalid identifier.
+	// 0.166.0 attempts chmod unless the existing mode is already 0644.
 	const before = await lstat(id).catch(() => {
 		throw failure();
 	});
 	if (!before.isFile() || before.isSymbolicLink() || before.size > 128)
 		throw failure();
+	if ((before.mode & 0o777) !== 0o644)
+		throw Error(
+			"Inventário de hooks requer installation_id existente com modo 0644; o CLI tentaria reparar as permissões. Nenhum arquivo foi alterado.",
+		);
 	const bytes = await readFile(id);
 	if (
 		!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\s*$/i.test(
@@ -69,7 +77,10 @@ export async function inventoryCodexHooks(
 		throw failure();
 
 	const scratch = await mkdtemp(join(tmpdir(), "ptolemy-hook-inventory-"));
-	const policy = `(version 1)(allow default)(deny network*)(allow network* (local unix-socket))(allow network* (remote unix-socket))(deny file-write*)(allow file-write* (subpath ${JSON.stringify(await realpath(scratch))}))(allow file-write* (literal ${JSON.stringify(await realpath(id))}))`;
+	const policy = codexHookInventoryPolicy(
+		await realpath(scratch),
+		await realpath(id),
+	);
 	const child = spawn(
 		"/usr/bin/sandbox-exec",
 		[

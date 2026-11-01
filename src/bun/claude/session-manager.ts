@@ -27,11 +27,13 @@ import { snapshotExtensionMcp } from "../extensions/mcp";
 import {
 	denyUnselectedSlash,
 	inventoryClaudeBuiltins,
+	refreshClaudeBuiltinSelection,
 } from "../extensions/native";
 import {
 	claudeExtensionOptions,
 	resolveExtensionPrompt,
 } from "../extensions/runtime";
+import { SessionExecutions } from "../extensions/session-execution";
 import { extensionsStore } from "../extensions/store";
 import { mcpRegistry } from "../mcp/registry";
 import {
@@ -222,6 +224,8 @@ interface ActiveQuery {
 	turnCompletionQueue: Array<() => Promise<void>>;
 }
 
+const claudeExpansions = new SessionExecutions();
+
 let active: { sessionId: string; q: ActiveQuery } | null = null;
 
 let pendingNew: {
@@ -394,6 +398,22 @@ async function mutateIndex<T>(
 	return next;
 }
 
+async function refreshSessionBuiltins(meta: SessionMeta) {
+	if (!meta.builtinCommands) return undefined;
+	const current = await inventoryClaudeBuiltins(await findClaudeCli());
+	const refreshed = refreshClaudeBuiltinSelection(
+		meta.builtinCommands,
+		current.map((c) => c.name),
+	);
+	await mutateIndex((index) => {
+		const saved = index.sessions.find((s) => s.id === meta.id);
+		if (saved?.builtinCommands)
+			saved.builtinCommands.all = [
+				...new Set([...saved.builtinCommands.all, ...refreshed.all]),
+			];
+	});
+	return refreshed;
+}
 function sessionDir(sessionId: string): string {
 	return join(SESSIONS_DIR, sessionId);
 }
@@ -686,6 +706,7 @@ function startLoopForActive(sessionId: string): boolean {
 async function deactivateClaude(reason: string): Promise<void> {
 	if (!active) return;
 	const prev = active;
+	await claudeExpansions.cancel(prev.sessionId);
 	console.log(
 		`[claude:session] tearing down active Claude session ${prev.sessionId} (${reason})`,
 	);
@@ -715,6 +736,7 @@ async function deactivateCodex(reason: string): Promise<void> {
 
 function discardPendingClaude(reason: string): void {
 	if (!pendingNew) return;
+	claudeExpansions.abort(pendingNew.id);
 	console.warn(
 		`[claude:session] discarding unrealized pendingNew id=${pendingNew.id} (${reason})`,
 	);
@@ -746,6 +768,7 @@ async function prepareStoredSessionMcp(
 /** App shutdown owns both CLI runtimes, all gateways and pending prompt streams. */
 export async function shutdownSessions(): Promise<void> {
 	discardPendingClaude("application shutdown");
+	await claudeExpansions.cancel();
 	pendingCodex = null;
 	await deactivateClaude("application shutdown");
 	await deactivateCodex("application shutdown");
@@ -1061,6 +1084,7 @@ export async function createSession(
 	);
 
 	if (pendingNew) {
+		await claudeExpansions.cancel(pendingNew.id);
 		console.warn(
 			`[claude:session] createSession: replacing unrealized pendingNew id=${pendingNew.id} (chat never opened?)`,
 		);
@@ -1106,6 +1130,7 @@ export async function createSession(
  * subscribed.
  */
 export async function resumeSession(sessionId: string): Promise<boolean> {
+	await claudeExpansions.cancelExcept(sessionId);
 	console.log(`[claude:session] resumeSession start: id=${sessionId}`);
 
 	// Codex: already live (deferred start fired, or resumed earlier).
@@ -1152,74 +1177,98 @@ export async function resumeSession(sessionId: string): Promise<boolean> {
 		await deactivateCodex("switching to Claude session");
 		await deactivateClaude("switching to a new Claude session");
 		if (!pendingNew || pendingNew.id !== sessionId) return false;
-		await activateSkills(
-			SESSIONS_DIR,
-			sessionId,
-			pendingNew.options.cwd as string,
-			"claude",
-		);
-		const mcp = await prepareStoredSessionMcp(
-			sessionId,
-			pendingNew.options.cwd as string,
-			"claude",
-		);
-		pendingNew.options.mcpServers = mcp.servers;
-		pendingNew.options.strictMcpConfig = mcp.explicit;
-		pendingNew.options.env = localMcpEnv({ ...process.env, ...mcp.env });
-		const meta = (await readIndex()).sessions.find((s) => s.id === sessionId)!;
-		const extensions = await prepareSessionExtensions(
-			sessionId,
-			pendingNew.options.cwd as string,
-			meta.extensionSelections,
-			"claude",
-		);
-		const extensionOptions = await claudeExtensionOptions(
-			extensions,
-			meta.builtinCommands
-				? { ...meta.builtinCommands, hasFileSkills: !!meta.skills?.length }
-				: undefined,
-		);
-		const basePlugins = pendingNew.options.plugins ?? [];
-		Object.assign(pendingNew.options, extensionOptions, {
-			plugins: [...basePlugins, ...(extensionOptions.plugins ?? [])],
-		});
-		pendingNew.inbox.push(
-			buildUserMessage(
-				await resolveExtensionPrompt(
+		const pending = pendingNew;
+		return claudeExpansions.run(sessionId, async (signal) => {
+			let mcp: PreparedSessionMcp | undefined;
+			let attached = false;
+			try {
+				await activateSkills(
+					SESSIONS_DIR,
+					sessionId,
+					pending.options.cwd as string,
+					"claude",
+				);
+				mcp = await prepareStoredSessionMcp(
+					sessionId,
+					pending.options.cwd as string,
+					"claude",
+				);
+				pending.options.mcpServers = mcp.servers;
+				pending.options.strictMcpConfig = mcp.explicit;
+				pending.options.env = localMcpEnv({ ...process.env, ...mcp.env });
+				const meta = (await readIndex()).sessions.find(
+					(s) => s.id === sessionId,
+				)!;
+				const extensions = await prepareSessionExtensions(
+					sessionId,
+					pending.options.cwd as string,
+					meta.extensionSelections,
+					"claude",
+				);
+				const refreshedBuiltins = await refreshSessionBuiltins(meta);
+				if (refreshedBuiltins)
+					denyUnselectedSlash(
+						pending.prompt,
+						refreshedBuiltins.all,
+						refreshedBuiltins.selected,
+					);
+				const extensionOptions = await claudeExtensionOptions(
 					extensions,
-					pendingNew.prompt,
-					pendingNew.options.cwd as string,
-				),
-			),
-		);
-		const pendingAuthMode = pendingNew.authMode;
-		let q: Query;
-		try {
-			q = query({
-				prompt: pendingNew.inbox.iterable,
-				options: pendingNew.options,
-			});
-		} catch {
-			await mcp.dispose();
-			throw Error("Não foi possível iniciar a sessão Claude.");
-		}
-		active = {
-			sessionId,
-			q: {
-				mcp,
-				query: q,
-				inbox: pendingNew.inbox,
-				streamingLoop: null,
-				turnCompletionQueue: [],
-			},
-		};
-		permissionGate.clearWhitelist(sessionId);
-		pendingNew = null;
-		void primeModelsCacheFromQuery(q, pendingAuthMode);
-		return startLoopForActive(sessionId);
+					refreshedBuiltins
+						? { ...refreshedBuiltins, hasFileSkills: !!meta.skills?.length }
+						: undefined,
+				);
+				const basePlugins = pending.options.plugins ?? [];
+				Object.assign(pending.options, extensionOptions, {
+					plugins: [...basePlugins, ...(extensionOptions.plugins ?? [])],
+				});
+				pending.inbox.push(
+					buildUserMessage(
+						await resolveExtensionPrompt(
+							extensions,
+							pending.prompt,
+							pending.options.cwd as string,
+							false,
+							signal,
+						),
+					),
+				);
+				signal.throwIfAborted();
+				if (pendingNew !== pending)
+					throw new Error("Preparação da sessão cancelada.");
+				const pendingAuthMode = pending.authMode;
+				let q: Query;
+				try {
+					q = query({
+						prompt: pending.inbox.iterable,
+						options: pending.options,
+					});
+				} catch {
+					throw Error("Não foi possível iniciar a sessão Claude.");
+				}
+				active = {
+					sessionId,
+					q: {
+						mcp,
+						query: q,
+						inbox: pending.inbox,
+						streamingLoop: null,
+						turnCompletionQueue: [],
+					},
+				};
+				permissionGate.clearWhitelist(sessionId);
+				pendingNew = null;
+				attached = true;
+				void primeModelsCacheFromQuery(q, pendingAuthMode);
+				return startLoopForActive(sessionId);
+			} catch (error) {
+				if (signal.aborted) return false;
+				throw error;
+			} finally {
+				if (!attached) await mcp?.dispose();
+			}
+		});
 	}
-
-	// Case 3: cold resume of a previously persisted session
 	// Discard a stale pendingNew if it belongs to a different session — it
 	// will never be consumed and would silently leak its inbox + options.
 	if (pendingNew && pendingNew.id !== sessionId) {
@@ -1304,10 +1353,11 @@ export async function resumeSession(sessionId: string): Promise<boolean> {
 			meta.extensionSelections,
 			"claude",
 		);
+		const refreshedBuiltins = await refreshSessionBuiltins(meta);
 		const extensionOptions = await claudeExtensionOptions(
 			extensions,
-			meta.builtinCommands
-				? { ...meta.builtinCommands, hasFileSkills: !!meta.skills?.length }
+			refreshedBuiltins
+				? { ...refreshedBuiltins, hasFileSkills: !!meta.skills?.length }
 				: undefined,
 		);
 
@@ -1406,90 +1456,100 @@ export async function sendMessage(
 	}
 	const snap = active; // captured BEFORE any await
 	const internalId = snap.sessionId;
-	const selectionMeta = (await readIndex()).sessions.find(
-		(s) => s.id === internalId,
-	);
-	if (selectionMeta?.builtinCommands)
-		denyUnselectedSlash(
-			message,
-			selectionMeta.builtinCommands.all,
-			selectionMeta.builtinCommands.selected,
+	return claudeExpansions.run(internalId, async (signal) => {
+		const selectionMeta = (await readIndex()).sessions.find(
+			(s) => s.id === internalId,
 		);
-	if (selectionMeta?.extensionSelections)
-		message = await resolveExtensionPrompt(
-			await prepareSessionExtensions(
-				internalId,
-				selectionMeta.projectPath,
-				selectionMeta.extensionSelections,
-				"claude",
-				{ materialize: false },
-			),
-			message,
-			selectionMeta.projectPath,
-		);
-
-	console.log(
-		`[claude:session] sendMessage start: sessionId=${internalId} length=${message.length} override=${opts.modelOverride ?? "(none)"}`,
-	);
-	verbose(
-		`[claude:session] sendMessage preview: sessionId=${internalId} message="${previewText(message)}"`,
-	);
-
-	await appendStoredMessageV2(internalId, {
-		version: 2,
-		role: "user",
-		blocks: [{ type: "text", text: message }],
-		timestamp: new Date().toISOString(),
-		...(opts.modelOverride && { modelUsed: opts.modelOverride }),
-	});
-
-	const index = await readIndex();
-	const meta = index.sessions.find((s) => s.id === internalId);
-	if (!meta) {
-		throw new Error(`Session metadata not found: ${internalId}`);
-	}
-
-	let restore: string | null = null;
-	if (opts.modelOverride && opts.modelOverride !== meta.model) {
-		const cached = await tryGetCachedModels(meta.authMode ?? "anthropic");
-		// If we have a cache and the override isn't in it, ignore.
-		// If we have no cache, allow it (best-effort).
-		if (!cached || cached.some((m) => m.value === opts.modelOverride)) {
-			restore = meta.model;
-			try {
-				await snap.q.query.setModel(opts.modelOverride);
-			} catch (err) {
-				console.warn("[claude:session] setModel(override) failed:", err);
-				restore = null;
-			}
-		} else {
-			console.warn(
-				`[claude:session] modelOverride="${opts.modelOverride}" not in cache — ignoring`,
+		const refreshedBuiltins = selectionMeta
+			? await refreshSessionBuiltins(selectionMeta)
+			: undefined;
+		if (refreshedBuiltins)
+			denyUnselectedSlash(
+				message,
+				refreshedBuiltins.all,
+				refreshedBuiltins.selected,
 			);
-		}
-	}
+		if (selectionMeta?.extensionSelections)
+			message = await resolveExtensionPrompt(
+				await prepareSessionExtensions(
+					internalId,
+					selectionMeta.projectPath,
+					selectionMeta.extensionSelections,
+					"claude",
+					{ materialize: false },
+				),
+				message,
+				selectionMeta.projectPath,
+				false,
+				signal,
+			);
 
-	if (restore !== null) {
-		const restoreModel = restore;
-		snap.q.turnCompletionQueue.push(async () => {
-			// Identity-guard: only restore if this exact slot is still active.
-			if (active !== snap) return;
-			try {
-				await snap.q.query.setModel(restoreModel);
-			} catch (err) {
-				console.warn("[claude:session] setModel(restore) failed:", err);
-				sender.sendEvent?.(internalId, {
-					type: "error",
-					error: {
-						message: "Falha ao restaurar modelo da sessão",
-						recoverable: true,
-					},
-				});
-			}
+		console.log(
+			`[claude:session] sendMessage start: sessionId=${internalId} length=${message.length} override=${opts.modelOverride ?? "(none)"}`,
+		);
+		verbose(
+			`[claude:session] sendMessage preview: sessionId=${internalId} message="${previewText(message)}"`,
+		);
+
+		await appendStoredMessageV2(internalId, {
+			version: 2,
+			role: "user",
+			blocks: [{ type: "text", text: message }],
+			timestamp: new Date().toISOString(),
+			...(opts.modelOverride && { modelUsed: opts.modelOverride }),
 		});
-	}
 
-	snap.q.inbox.push(buildUserMessage(message));
+		const index = await readIndex();
+		const meta = index.sessions.find((s) => s.id === internalId);
+		if (!meta) {
+			throw new Error(`Session metadata not found: ${internalId}`);
+		}
+
+		let restore: string | null = null;
+		if (opts.modelOverride && opts.modelOverride !== meta.model) {
+			const cached = await tryGetCachedModels(meta.authMode ?? "anthropic");
+			// If we have a cache and the override isn't in it, ignore.
+			// If we have no cache, allow it (best-effort).
+			if (!cached || cached.some((m) => m.value === opts.modelOverride)) {
+				restore = meta.model;
+				try {
+					await snap.q.query.setModel(opts.modelOverride);
+				} catch (err) {
+					console.warn("[claude:session] setModel(override) failed:", err);
+					restore = null;
+				}
+			} else {
+				console.warn(
+					`[claude:session] modelOverride="${opts.modelOverride}" not in cache — ignoring`,
+				);
+			}
+		}
+
+		if (restore !== null) {
+			const restoreModel = restore;
+			snap.q.turnCompletionQueue.push(async () => {
+				// Identity-guard: only restore if this exact slot is still active.
+				if (active !== snap) return;
+				try {
+					await snap.q.query.setModel(restoreModel);
+				} catch (err) {
+					console.warn("[claude:session] setModel(restore) failed:", err);
+					sender.sendEvent?.(internalId, {
+						type: "error",
+						error: {
+							message: "Falha ao restaurar modelo da sessão",
+							recoverable: true,
+						},
+					});
+				}
+			});
+		}
+
+		signal.throwIfAborted();
+		if (active !== snap)
+			throw new Error("Sessão alterada durante preparação do comando.");
+		snap.q.inbox.push(buildUserMessage(message));
+	});
 }
 
 /**
@@ -1500,8 +1560,9 @@ export async function stopGeneration(): Promise<boolean> {
 	console.log(
 		`[claude:session] stopGeneration: activeId=${active?.sessionId ?? activeCodex?.sessionId ?? "null"}`,
 	);
+	const cancelledExpansion = claudeExpansions.abort();
 	if (activeCodex) return activeCodex.stop();
-	if (!active) return false;
+	if (!active) return cancelledExpansion;
 
 	// Release any tool-permission promises the SDK is awaiting. The interrupt
 	// below races them; cancelling explicitly avoids leaking deny timers.
@@ -1539,6 +1600,8 @@ export async function stopGeneration(): Promise<boolean> {
  * working once multiple sessions share a project.
  */
 export async function deleteSession(sessionId: string): Promise<boolean> {
+	await claudeExpansions.cancel(sessionId);
+	if (pendingNew?.id === sessionId) discardPendingClaude("session deleted");
 	console.log(`[claude:session] deleteSession start: id=${sessionId}`);
 	const index = await readIndex();
 	const idx = index.sessions.findIndex((s) => s.id === sessionId);

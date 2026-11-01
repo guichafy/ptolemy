@@ -1,3 +1,6 @@
+export function restrictedEnvironment(
+	source: Record<string, string | undefined>,
+): Record<string, string>;
 export function hookOutput(
 	event: string,
 	text: string,
@@ -6,6 +9,7 @@ export function executeHookSequence(
 	hooks: import("./hooks").PreparedHook[],
 	input: string,
 	signal?: AbortSignal,
+	environment?: Record<string, string>,
 ): Promise<import("@anthropic-ai/claude-agent-sdk").SyncHookJSONOutput>;
 export function executeRestricted(
 	spec: {
@@ -20,4 +24,5 @@ export function executeRestricted(
 	},
 	input?: string,
 	signal?: AbortSignal,
+	environment?: Record<string, string>,
 ): Promise<{ stdout: string; code: number }>;
