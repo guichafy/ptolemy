@@ -11,5 +11,6 @@ try{
  const spec={cwd,root:cwd,data:cwd,event:"PreToolUse",timeout:5,command:`echo yes > inside; /bin/sh -c 'echo no > ../outside'; printf '%s' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny"}}'`};
  const child=Bun.spawn([paths.executable,paths.launcher,Buffer.from(JSON.stringify(spec)).toString("base64url")],{cwd,env:{PATH:"/usr/bin:/bin"},stdin:new Blob(['{"tool_name":"Bash"}']),stdout:"pipe",stderr:"pipe"});
  const output=await new Response(child.stdout).text();assert.equal(await child.exited,0);assert.equal(JSON.parse(output).hookSpecificOutput.permissionDecision,"deny");assert.equal(await readFile(join(cwd,"inside"),"utf8"),"yes\n");assert.equal(await readFile(join(root,"outside"),"utf8").catch(()=>null),null);
+ const readonly=Bun.spawn([paths.executable,paths.launcher,Buffer.from(JSON.stringify({...spec,readOnly:true,command:"echo no > readonly-file"})).toString("base64url")],{cwd,env:{PATH:"/usr/bin:/bin"},stdin:new Blob(['{}']),stdout:"pipe",stderr:"pipe"});assert.equal(await readonly.exited,2);assert.equal(await readFile(join(cwd,"readonly-file"),"utf8").catch(()=>null),null);
  console.log(`Bundled extension launcher, executor and Bun verified: ${paths.launcher}`);
 }finally{await rm(root,{recursive:true,force:true});}

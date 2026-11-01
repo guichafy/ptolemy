@@ -20,6 +20,7 @@ export interface RestrictedExecution {
 	command: string;
 	timeout: number;
 	event?: string;
+	readOnly?: boolean;
 }
 export interface PreparedHook extends RestrictedExecution {
 	event: string;
