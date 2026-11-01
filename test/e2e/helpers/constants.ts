@@ -20,10 +20,11 @@ export const APPIUM_PORT = 4723;
 export const BUNDLE_ID = "com.ptolomeu.app";
 
 export const ModifierFlag = {
-	SHIFT: 1 << 17,
-	CONTROL: 1 << 18,
-	OPTION: 1 << 19,
-	COMMAND: 1 << 20,
+	// macos: keys forwards XCUIKeyModifierFlags, not NSEventModifierFlags.
+	SHIFT: 1 << 1,
+	CONTROL: 1 << 2,
+	OPTION: 1 << 3,
+	COMMAND: 1 << 4,
 } as const;
 
 // ASCII control-character strings for special keys. appium-mac2-driver's
@@ -40,7 +41,7 @@ export const Key = {
 	TAB: "\t",
 	ENTER: "\r",
 	ESCAPE: "",
-	BACKSPACE: "",
+	BACKSPACE: "\u007f",
 } as const;
 
 // macOS virtual key codes. Some Mac2 driver builds accept these alongside

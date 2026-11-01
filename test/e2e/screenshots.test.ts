@@ -56,7 +56,7 @@ describe("Ptolemy Screenshots", () => {
 
 	afterAll(async () => {
 		if (driver) {
-			saveNativeWindowLog();
+			await saveNativeWindowLog(driver);
 			try {
 				await driver.deleteSession();
 			} catch {
@@ -202,7 +202,7 @@ describe("Ptolemy Screenshots", () => {
 		);
 		expect(composer.missing, composer.source.slice(0, 1800)).toEqual([]);
 		const skills = await driver.$(
-			'//XCUIElementTypeButton[@label="Configurar Skills" or @title="Configurar Skills"]',
+			'//*[@label="Configurar Skills" or @title="Configurar Skills" or @identifier="Configurar Skills"]',
 		);
 		await clickPaletteElement(skills);
 		const picker = await waitForResults(

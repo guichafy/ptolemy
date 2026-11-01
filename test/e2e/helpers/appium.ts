@@ -194,8 +194,14 @@ async function ensurePaletteInteractive(
 	);
 }
 
-export function saveNativeWindowLog(): void {
+export async function saveNativeWindowLog(
+	driver: WebdriverIO.Browser,
+): Promise<void> {
 	try {
+		writeFileSync(
+			path.join(SCREENSHOTS_DIR, "final-source.xml"),
+			await driver.getPageSource(),
+		);
 		const logs = execFileSync(
 			"/usr/bin/log",
 			[
