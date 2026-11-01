@@ -80,7 +80,6 @@ export function ChatPaneV2() {
 	const [draft, setDraft] = useState("");
 	const [attachments, setAttachments] = useState<Attachment[]>([]);
 	const [models, setModels] = useState<ProtocolModelInfo[]>([]);
-	const [overrideModel, setOverrideModel] = useState<string | null>(null);
 	const fileInputRef = useRef<HTMLInputElement>(null);
 	// Until the session meta loads, assume Claude (the historical default).
 	const agent = state.sessionAgent ?? "claude";
@@ -135,9 +134,18 @@ export function ChatPaneV2() {
 				: "";
 		setDraft("");
 		setAttachments([]);
-		const overrideForTurn = overrideModel ?? undefined;
-		setOverrideModel(null); // reset BEFORE the await so the user sees the picker reset immediately
-		await sendMessage(`${prefix}${text}`, { modelOverride: overrideForTurn });
+		await sendMessage(`${prefix}${text}`);
+	};
+
+	// The composer's picker is the only model selector: it changes the
+	// session model (persisted, applies from the next turn on).
+	const handleModelChange = async (model: string) => {
+		if (!sessionId || model === state.sessionModel) return;
+		try {
+			await rpc.request.claudeSetSessionModel({ sessionId, model });
+		} catch (err) {
+			console.error("[chat-pane] setSessionModel failed:", err);
+		}
 	};
 
 	const handleFilesSelected = async (files: FileList | null) => {
@@ -291,15 +299,12 @@ export function ChatPaneV2() {
 								</PromptInputButton>
 								<ModelPicker
 									variant="turn-override"
-									value={overrideModel ?? state.sessionModel}
-									sessionDefault={state.sessionModel}
+									value={state.sessionModel}
 									models={models}
-									onChange={(v) =>
-										setOverrideModel(v === state.sessionModel ? null : v)
-									}
+									onChange={handleModelChange}
 									disabled={state.sessionState !== "idle" || !sessionId}
-									placeholder="Modelo do turno"
-									resolvedLabel={overrideModel ? null : sessionModelLabel}
+									placeholder="Selecionar modelo"
+									resolvedLabel={sessionModelLabel}
 								/>
 							</PromptInputTools>
 							<PromptInputSubmit

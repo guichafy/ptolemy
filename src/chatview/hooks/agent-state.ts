@@ -354,7 +354,14 @@ export function reduceAgentState(
 			};
 
 		case "session-model-changed":
-			return { ...state, sessionModel: event.model };
+			// The resolved model belonged to the previous choice; the next turn
+			// reports the new one.
+			return {
+				...state,
+				sessionModel: event.model,
+				resolvedModel:
+					event.model === state.sessionModel ? state.resolvedModel : null,
+			};
 
 		case "session-info":
 			return applySessionInfo(state, event.info);
