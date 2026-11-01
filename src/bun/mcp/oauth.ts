@@ -19,10 +19,10 @@ import type {
 } from "@modelcontextprotocol/sdk/shared/auth.js";
 import { checkResourceAllowed } from "@modelcontextprotocol/sdk/shared/auth-utils.js";
 import type { FetchLike } from "@modelcontextprotocol/sdk/shared/transport.js";
-import {
-	MCP_OAUTH_REGISTERED_REDIRECT_URI,
-	type McpConnectionStatus,
-	type McpServerDefinition,
+import type {
+	McpConnectionStatus,
+	McpOAuthRegistration,
+	McpServerDefinition,
 } from "../../shared/mcp";
 import { fetchWithProxy } from "../net/proxy";
 import {
@@ -93,6 +93,11 @@ function definitionKey(definition: McpServerDefinition): string {
 		}),
 	);
 }
+/** mcpUrl canonicalizes the same validated issuer identity used for discovery. */
+function registrationUri(issuer: string): string {
+	return `http://127.0.0.1/oauth/callback/${hash(mcpUrl(issuer))}`;
+}
+
 const storageKey = (id: string) => `oauth.${hash(id)}`;
 function identity(
 	r: Pick<
@@ -156,6 +161,7 @@ export class McpOAuthService {
 	private readonly requestTimeoutMs: number;
 	private readonly now: () => number;
 	private readonly flows = new Map<string, Flow>();
+	private readonly registrationControllers = new Map<AbortController, string>();
 	private readonly epochs = new Map<string, number>();
 	private readonly callbacks = new Set<Promise<void>>();
 	private readonly locks = new Map<string, Promise<unknown>>();
@@ -275,6 +281,34 @@ export class McpOAuthService {
 		)
 			throw authenticationError();
 	}
+	/** Safe for RPC before a clientId exists: discovery only, no DCR/browser/token IO.
+	 * Register redirectUri with the returned issuer; only its loopback port may vary. */
+	async getRegistrationInfo(serverId: string): Promise<McpOAuthRegistration> {
+		if (this.disposed) throw authenticationError();
+		const controller = new AbortController();
+		this.registrationControllers.set(controller, serverId);
+		const timer = setTimeout(() => controller.abort(), this.requestTimeoutMs);
+		try {
+			const d = await this.definition(serverId);
+			if (controller.signal.aborted || this.disposed)
+				throw authenticationError();
+			const { issuer, resource } = await this.discoverAuthorization(
+				d,
+				controller,
+			);
+			await this.unchanged(d);
+			if (controller.signal.aborted || this.disposed)
+				throw authenticationError();
+			return { issuer, resource, redirectUri: registrationUri(issuer) };
+		} catch {
+			throw authenticationError();
+		} finally {
+			clearTimeout(timer);
+			controller.abort();
+			this.registrationControllers.delete(controller);
+		}
+	}
+
 	async connect(serverId: string): Promise<McpConnectionStatus> {
 		if (this.disposed) throw authenticationError();
 		const epoch = this.epochs.get(serverId) ?? 0;
@@ -315,11 +349,19 @@ export class McpOAuthService {
 		});
 		return { state: "connecting" };
 	}
-	private async begin(flow: Flow): Promise<void> {
-		const d = flow.definition;
-		const fetchFn = this.request(d, flow.controller);
+
+	private async discoverAuthorization(
+		d: OAuthDefinition,
+		controller: AbortController,
+	): Promise<{
+		issuer: string;
+		resource: string;
+		scopes: string[];
+		metadata: AuthorizationServerMetadata;
+	}> {
+		const fetchFn = this.request(d, controller);
 		const info = await discoverOAuthServerInfo(d.url, { fetchFn });
-		this.active(flow);
+		if (controller.signal.aborted || this.disposed) throw authenticationError();
 		const metadata = info.authorizationServerMetadata;
 		if (!metadata) throw authenticationError();
 		const issuer = mcpUrl(info.authorizationServerUrl);
@@ -351,8 +393,17 @@ export class McpOAuthService {
 			d.auth.scopes ??
 			[...new Set(info.resourceMetadata?.scopes_supported ?? [])].sort();
 		if (scopes.some((s) => !s || /\s/.test(s))) throw authenticationError();
+
+		return { issuer, resource, scopes, metadata };
+	}
+	private async begin(flow: Flow): Promise<void> {
+		const d = flow.definition;
+		const { issuer, resource, scopes, metadata } =
+			await this.discoverAuthorization(d, flow.controller);
+		this.active(flow);
+		const fetchFn = this.request(d, flow.controller);
 		const callbackPath = d.auth.clientId
-			? new URL(MCP_OAUTH_REGISTERED_REDIRECT_URI).pathname
+			? new URL(registrationUri(issuer)).pathname
 			: `/oauth/callback/${randomBytes(24).toString("hex")}`;
 		const server = createServer();
 		flow.server = server;
@@ -676,6 +727,8 @@ export class McpOAuthService {
 	}
 	async cancel(serverId: string): Promise<void> {
 		this.epochs.set(serverId, (this.epochs.get(serverId) ?? 0) + 1);
+		for (const [controller, id] of this.registrationControllers)
+			if (id === serverId) controller.abort();
 		const flow = this.flows.get(serverId);
 		if (flow && ["connecting", "waiting"].includes(flow.status.state))
 			this.stop(flow, { state: "cancelled" });
@@ -720,6 +773,8 @@ export class McpOAuthService {
 	}
 	async dispose(): Promise<void> {
 		this.disposed = true;
+		for (const controller of this.registrationControllers.keys())
+			controller.abort();
 		for (const flow of this.flows.values())
 			this.stop(flow, { state: "cancelled" });
 		for (const controller of this.refreshControllers.values())

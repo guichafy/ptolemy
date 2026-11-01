@@ -31,6 +31,9 @@ describe("MCP browser OAuth", () => {
 	let tokenScope: string | undefined;
 	const registeredRedirects = new Map<string, string[]>();
 	let authorizationRequests: number;
+	let issuerPath: string;
+	let metadataRequests: number;
+	let metadataDelay: number;
 	let tokenRequests: number;
 	let registrations: number;
 	let issueRefresh: boolean;
@@ -99,29 +102,35 @@ describe("MCP browser OAuth", () => {
 		lastTokenParams = new URLSearchParams();
 		codes.clear();
 		registeredRedirects.clear();
-		registeredRedirects.set("pre-registered", [
-			"http://127.0.0.1/oauth/callback",
-		]);
+		issuerPath = "";
+		metadataRequests = 0;
+		metadataDelay = 0;
 		authorizationRequests = 0;
 		server = createServer(async (req, res) => {
 			const url = new URL(req.url!, origin);
 			res.setHeader("content-type", "application/json");
 			if (url.pathname.startsWith("/.well-known/oauth-protected-resource")) {
+				metadataRequests++;
+				if (metadataDelay)
+					await new Promise((resolve) => setTimeout(resolve, metadataDelay));
 				res.end(
 					JSON.stringify({
 						resource: wrongResource
 							? "https://other.example/mcp"
 							: `${origin}/mcp`,
-						authorization_servers: [origin],
+						authorization_servers: [`${origin}${issuerPath}`],
 						scopes_supported: ["read"],
 					}),
 				);
 				return;
 			}
-			if (url.pathname === "/.well-known/oauth-authorization-server") {
+			if (url.pathname.startsWith("/.well-known/oauth-authorization-server")) {
+				metadataRequests++;
 				res.end(
 					JSON.stringify({
-						issuer: wrongIssuer ? "https://other.example" : origin,
+						issuer: wrongIssuer
+							? "https://other.example"
+							: `${origin}${issuerPath}`,
 						authorization_endpoint: `${origin}/authorize`,
 						token_endpoint: `${origin}/token`,
 						registration_endpoint: `${origin}/register`,
@@ -560,7 +569,13 @@ describe("MCP browser OAuth", () => {
 		await oauth.getAccessToken("one").catch(() => {});
 		expect((await oauth.status("one")).state).toBe("expired");
 	});
-	it("authenticates twice through an authorization endpoint enforcing one pre-registered callback path", async () => {
+	it.each([
+		"",
+		"/another-issuer",
+	])("authenticates twice through an authorization endpoint enforcing the pre-registered issuer path %s", async (path) => {
+		issuerPath = path;
+		const registration = await oauth.getRegistrationInfo("one");
+		registeredRedirects.set("pre-registered", [registration.redirectUri]);
 		const definition = await registry.get("one");
 		if (definition.transport !== "http") throw Error("fixture");
 		await registry.save(
@@ -578,7 +593,9 @@ describe("MCP browser OAuth", () => {
 			const redirect = new URL(opened[0].searchParams.get("redirect_uri")!);
 			const authorize = await fetch(opened[0], { redirect: "manual" });
 			expect(authorize.status).toBe(302);
-			expect(redirect.pathname).toBe("/oauth/callback");
+			expect(redirect.pathname).toBe(
+				new URL(registration.redirectUri).pathname,
+			);
 			await fetch(authorize.headers.get("location")!);
 			await waitFor(
 				async () => (await oauth.status("one")).state === "connected",
@@ -604,5 +621,79 @@ describe("MCP browser OAuth", () => {
 		expect(await oauth.getAccessToken("one")).toBe("refreshed-secret-probe");
 		expect(refreshes).toBe(1);
 		expect((await oauth.status("one")).state).toBe("connected");
+	});
+	it("discovers a safe registration URI before client registration without a browser or credentials", async () => {
+		const registration = await oauth.getRegistrationInfo("one");
+		expect(registration.issuer).toBe(`${origin}/`);
+		expect(registration.resource).toBe(`${origin}/mcp`);
+		expect(new URL(registration.redirectUri).origin).toBe("http://127.0.0.1");
+		expect(metadataRequests).toBeGreaterThan(0);
+		expect(registrations).toBe(0);
+		expect(authorizationRequests).toBe(0);
+		expect(tokenRequests).toBe(0);
+		expect(opened).toHaveLength(0);
+		expect(Object.keys(registration).sort()).toEqual([
+			"issuer",
+			"redirectUri",
+			"resource",
+		]);
+		expect((await oauth.status("one")).state).toBe("disconnected");
+	});
+	it("keeps a registration path stable per discovered issuer and distinct for different issuers", async () => {
+		const first = await oauth.getRegistrationInfo("one");
+		const repeated = await oauth.getRegistrationInfo("one");
+		expect(repeated.redirectUri).toBe(first.redirectUri);
+		issuerPath = "/another-issuer";
+		const other = await oauth.getRegistrationInfo("one");
+		expect(new URL(other.redirectUri).pathname).not.toBe(
+			new URL(first.redirectUri).pathname,
+		);
+		expect(other.issuer).toBe(`${origin}/another-issuer`);
+		issuerPath = "";
+		expect((await oauth.getRegistrationInfo("one")).redirectUri).toBe(
+			first.redirectUri,
+		);
+	});
+	it("rejects an unrelated callback path before any token exchange", async () => {
+		const registration = await oauth.getRegistrationInfo("one");
+		const definition = await registry.get("one");
+		if (definition.transport !== "http") throw Error("fixture");
+		await registry.save({
+			...definition,
+			auth: { ...definition.auth!, clientId: "pre-registered" },
+		});
+		await start();
+		const callback = new URL(opened[0].searchParams.get("redirect_uri")!);
+		callback.pathname = `${new URL(registration.redirectUri).pathname}/unexpected`;
+		const response = await fetch(callback);
+		expect(response.status).toBe(404);
+		expect(tokenRequests).toBe(0);
+		expect(exchanges).toBe(0);
+		expect((await oauth.status("one")).state).toBe("waiting");
+		await oauth.cancel("one");
+	});
+	it("validates discovered resource and issuer before returning registration information", async () => {
+		wrongResource = true;
+		await expect(oauth.getRegistrationInfo("one")).rejects.toThrow(
+			"autenticação MCP",
+		);
+		wrongResource = false;
+		wrongIssuer = true;
+		await expect(oauth.getRegistrationInfo("one")).rejects.toThrow(
+			"autenticação MCP",
+		);
+		expect(registrations).toBe(0);
+		expect(tokenRequests).toBe(0);
+		expect(opened).toHaveLength(0);
+	});
+	it("cancels a registration lookup without starting a login flow", async () => {
+		metadataDelay = 80;
+		const pending = oauth.getRegistrationInfo("one").catch((error) => error);
+		await waitFor(() => metadataRequests > 0);
+		await oauth.cancel("one");
+		expect(await pending).toBeInstanceOf(Error);
+		expect(registrations).toBe(0);
+		expect(tokenRequests).toBe(0);
+		expect(opened).toHaveLength(0);
 	});
 });
