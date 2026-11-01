@@ -10,6 +10,7 @@ import {
 	claudeBuiltinControls,
 	denyUnselectedSlash,
 	parseCodexPlugins,
+	refreshClaudeBuiltinSelection,
 	suppressCodexPlugins,
 } from "./native";
 
@@ -124,4 +125,21 @@ test("inventory refuses missing or invalid installation IDs before starting the 
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}
+});
+
+test("a later builtin universe expands denial without changing the frozen selection", () => {
+	const saved = { all: ["old", "selected"], selected: ["selected"] };
+	const refreshed = refreshClaudeBuiltinSelection(saved, ["selected", "added"]);
+	expect(refreshed).toEqual({
+		all: ["old", "selected", "added"],
+		selected: ["selected"],
+	});
+	expect(saved.all).toEqual(["old", "selected"]);
+	expect(
+		claudeBuiltinControls(refreshed.all, refreshed.selected, true)
+			.disallowedTools,
+	).toEqual(["Skill(old)", "Skill(added)"]);
+	expect(() =>
+		denyUnselectedSlash("/added", refreshed.all, refreshed.selected),
+	).toThrow("desabilitado");
 });

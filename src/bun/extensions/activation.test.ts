@@ -284,3 +284,34 @@ test("native prompt hooks do not silently reorder mixed handlers", async () => {
 		),
 	).toBe(true);
 });
+
+test("Codex selected Skills resolve known package root/data tokens while scripts retain their bytes", async () => {
+	const { cwd, store, pkg } = await fixture({
+		"plugin.json": JSON.stringify({ name: "assets" }),
+		"skills/check/SKILL.md": `${skill("check").replace("user-invocable: false\n", "")}\nRead \${CLAUDE_PLUGIN_ROOT}/assets/value.txt\nRead \${PLUGIN_ROOT}/assets/value.txt\nWrite \${PLUGIN_DATA}/result\nWrite \${CLAUDE_PLUGIN_DATA}/result`,
+		"assets/value.txt": "packaged asset",
+		"scripts/check.sh": `echo "\${PLUGIN_ROOT}"`,
+	});
+	const prepared = await prepareSessionExtensions(
+		"assets",
+		cwd,
+		[
+			{
+				packageId: pkg.id,
+				revision: pkg.revision,
+				componentIds: pkg.components
+					.filter((c) => c.kind === "skill")
+					.map((c) => c.id),
+			},
+		],
+		"codex",
+		{ store },
+	);
+	const content = await readFile(prepared.skills[0].path, "utf8");
+	expect(content).not.toMatch(/\$\{(?:CLAUDE_)?PLUGIN_(?:ROOT|DATA)\}/);
+	const asset = content.match(/Read (.*\/assets\/value.txt)/)![1];
+	expect(await readFile(asset, "utf8")).toBe("packaged asset");
+	expect(
+		await readFile(join(prepared.roots[0], "scripts/check.sh"), "utf8"),
+	).toBe(`echo "\${PLUGIN_ROOT}"`);
+});

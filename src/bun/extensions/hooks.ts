@@ -64,9 +64,15 @@ export async function runExtensionHook(
 	hook: PreparedHook,
 	input: HookInput | Record<string, unknown>,
 	signal?: AbortSignal,
+	environment?: Record<string, string>,
 ): Promise<SyncHookJSONOutput> {
 	try {
-		const result = await executeRestricted(hook, JSON.stringify(input), signal);
+		const result = await executeRestricted(
+			hook,
+			JSON.stringify(input),
+			signal,
+			environment,
+		);
 		if (result.code !== 0) throw Error();
 		return hookOutput(hook.event, result.stdout);
 	} catch {
@@ -89,9 +95,15 @@ export async function runExtensionHookSequence(
 	hooks: PreparedHook[],
 	input: HookInput,
 	signal?: AbortSignal,
+	environment?: Record<string, string>,
 ): Promise<SyncHookJSONOutput> {
 	try {
-		return await executeHookSequence(hooks, JSON.stringify(input), signal);
+		return await executeHookSequence(
+			hooks,
+			JSON.stringify(input),
+			signal,
+			environment,
+		);
 	} catch {
 		return hooks[0]?.event === "PreToolUse"
 			? {

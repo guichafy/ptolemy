@@ -42,7 +42,7 @@ export function hookOutput(event, text) {
 }
 
 /** Native matcher groups run concurrently; a wrapper preserves authored order. */
-export async function executeHookSequence(hooks, input, signal) {
+export async function executeHookSequence(hooks, input, signal, environment) {
 	const value = JSON.parse(input);
 	let context = "";
 	let systemMessage = "";
@@ -61,7 +61,7 @@ export async function executeHookSequence(hooks, input, signal) {
 			!new RegExp(hook.matcher).test(String(target))
 		)
 			continue;
-		const result = await executeRestricted(hook, input, signal);
+		const result = await executeRestricted(hook, input, signal, environment);
 		if (result.code !== 0) throw Error("Hook bloqueou a operação.");
 		const output = hookOutput(hook.event, result.stdout);
 		if (
@@ -89,12 +89,40 @@ export async function executeHookSequence(hooks, input, signal) {
 	};
 }
 
-export async function executeRestricted(spec, input = "", signal) {
+const EXECUTION_ENV_KEYS = [
+	"PATH",
+	"HOME",
+	"LANG",
+	"LC_ALL",
+	"LC_CTYPE",
+	"TZ",
+	"HTTP_PROXY",
+	"HTTPS_PROXY",
+	"ALL_PROXY",
+	"NO_PROXY",
+	"http_proxy",
+	"https_proxy",
+	"all_proxy",
+	"no_proxy",
+];
+export function restrictedEnvironment(source) {
+	return Object.fromEntries(
+		EXECUTION_ENV_KEYS.filter((key) => typeof source[key] === "string").map(
+			(key) => [key, source[key]],
+		),
+	);
+}
+export async function executeRestricted(
+	spec,
+	input = "",
+	signal,
+	environment = process.env,
+) {
+	signal?.throwIfAborted();
 	const cwd = await realpath(spec.cwd);
+	signal?.throwIfAborted();
 	const policy = `(version 1)(allow default)(deny file-write*)${spec.readOnly ? "" : `(allow file-write* (subpath ${JSON.stringify(cwd)}))`}(allow file-write-data (literal "/dev/null"))`;
-	const env = {};
-	for (const key of ["PATH", "LANG", "LC_ALL", "TZ"])
-		if (process.env[key]) env[key] = process.env[key];
+	const env = restrictedEnvironment(environment);
 	// No inherited model/MCP/OAuth secrets. Plugin paths are session-local.
 	Object.assign(env, {
 		CLAUDE_PLUGIN_ROOT: spec.root,
@@ -104,6 +132,7 @@ export async function executeRestricted(spec, input = "", signal) {
 	});
 	for (const [key, value] of Object.entries(spec.variables ?? {})) {
 		if (
+			EXECUTION_ENV_KEYS.includes(key) ||
 			!/^[A-Z][A-Z0-9_]*$/.test(key) ||
 			/^(?:HOME|PATH|ENV|BASH_ENV|SHELLOPTS|BASHOPTS|LD_|DYLD_|CLAUDE_|PLUGIN_)/.test(
 				key,
@@ -160,6 +189,9 @@ export async function executeRestricted(spec, input = "", signal) {
 		child.on("error", () => {
 			failed = true;
 		});
+		// A child can finish forking concurrently with the first group signal.
+		// Reap again on root exit, before inherited pipes delay the close event.
+		child.once("exit", kill);
 		child.on("close", (code) => {
 			clearTimeout(timer);
 			signal?.removeEventListener("abort", fail);

@@ -434,6 +434,16 @@ export async function prepareSessionExtensions(
 					for (const file of pkg.files)
 						if (file.path.endsWith("SKILL.md") && !allowed.has(file.path))
 							await rm(join(target, file.path));
+					for (const path of allowed) {
+						const content = await readFile(join(target, path), "utf8");
+						await writeFile(
+							join(target, path),
+							content.replace(
+								/\$\{(?:CLAUDE_)?PLUGIN_(ROOT|DATA)\}/g,
+								(_token, kind) => (kind === "ROOT" ? root : data),
+							),
+						);
+					}
 					if (!owned.includes(extensionNamespace(pkg.id)))
 						owned.push(extensionNamespace(pkg.id));
 					await writeFile(ownership, JSON.stringify(owned));
@@ -473,7 +483,10 @@ export async function prepareSessionExtensions(
 									Buffer.from(
 										bytes
 											.toString()
-											.replace(/\$\{(?:CLAUDE_)?PLUGIN_ROOT\}/g, () => root),
+											.replace(
+												/\$\{(?:CLAUDE_)?PLUGIN_(ROOT|DATA)\}/g,
+												(_token, kind) => (kind === "ROOT" ? root : data),
+											),
 									),
 								)
 							: bytes,

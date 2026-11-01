@@ -6,6 +6,7 @@ import type { PreparedSessionExtensions } from "./activation";
 import { claudeAgent } from "./agents";
 import { COMMON_HOOK_EVENTS } from "./capabilities";
 import { resolveExtensionCommand } from "./commands";
+import { buildExtensionEnvironment } from "./execution-environment";
 import { executeRestricted } from "./extension-executor.mjs";
 import { codexHookOverrides, runExtensionHookSequence, toToml } from "./hooks";
 import {
@@ -20,28 +21,38 @@ export async function resolveExtensionPrompt(
 	prompt: string,
 	cwd: string,
 	readOnly = false,
+	signal?: AbortSignal,
 ): Promise<string> {
 	const match = prompt.trimStart().match(/^\/([^\s]+)(?:\s+([\s\S]*))?$/);
 	const command = match && prepared.commands.find((c) => c.name === match[1]);
 	if (!command) return prompt;
+	signal?.throwIfAborted();
+	const environment = await buildExtensionEnvironment();
+	signal?.throwIfAborted();
 	return resolveExtensionCommand(
 		command,
 		{ arguments: match?.[2] },
 		async (script, variables, args) => {
-			const result = await executeRestricted({
-				cwd,
-				root: command.root,
-				data: command.data ?? cwd,
-				command: script,
-				timeout: 60,
-				variables,
-				args,
-				readOnly,
-			});
+			const result = await executeRestricted(
+				{
+					cwd,
+					root: command.root,
+					data: command.data ?? cwd,
+					command: script,
+					timeout: 60,
+					variables,
+					args,
+					readOnly,
+				},
+				"",
+				signal,
+				environment,
+			);
 			if (result.code !== 0)
 				throw Error("Expansão dinâmica do comando falhou.");
 			return result.stdout;
 		},
+		signal,
 	);
 }
 
@@ -58,8 +69,13 @@ export async function claudeExtensionOptions(
 			{
 				timeout: sequence.reduce((n, h) => n + h.timeout, 0) + 2,
 				hooks: [
-					(input, _id, { signal }) =>
-						runExtensionHookSequence(sequence, input, signal),
+					async (input, _id, { signal }) =>
+						runExtensionHookSequence(
+							sequence,
+							input,
+							signal,
+							await buildExtensionEnvironment(),
+						),
 				],
 			},
 		];

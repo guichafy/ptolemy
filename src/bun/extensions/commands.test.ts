@@ -61,3 +61,40 @@ test("declared named arguments receive slash command positions", async () => {
 		),
 	).toBe("two words strict");
 });
+
+test("stdout stays literal and cannot replace or introduce another expansion", async () => {
+	const output = "$& $` $' $$ !`same` $ARGUMENTS";
+	let calls = 0;
+	const result = await resolveExtensionCommand(
+		{
+			name: "x",
+			root: "/root",
+			metadata: {},
+			prompt: "before !`same` between !`same` after $ARGUMENTS",
+		},
+		{ arguments: "argument" },
+		async () => {
+			calls++;
+			return output;
+		},
+	);
+	expect(calls).toBe(2);
+	expect(result).toBe(`before ${output} between ${output} after argument`);
+});
+test("cancellation between expansions prevents the remaining authored commands", async () => {
+	const controller = new AbortController();
+	let calls = 0;
+	await expect(
+		resolveExtensionCommand(
+			{ name: "x", root: "/root", metadata: {}, prompt: "!`one` !`two`" },
+			{},
+			async () => {
+				calls++;
+				controller.abort();
+				return "output";
+			},
+			controller.signal,
+		),
+	).rejects.toThrow();
+	expect(calls).toBe(1);
+});

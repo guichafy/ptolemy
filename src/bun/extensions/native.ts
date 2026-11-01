@@ -190,6 +190,15 @@ export async function inventoryClaudeBuiltins(
 		await rm(config, { recursive: true, force: true });
 	}
 }
+export function refreshClaudeBuiltinSelection(
+	saved: { all: string[]; selected: string[] },
+	currentNames: string[],
+): { all: string[]; selected: string[] } {
+	return {
+		all: [...new Set([...saved.all, ...currentNames])],
+		selected: [...saved.selected],
+	};
+}
 export function claudeBuiltinControls(
 	all: string[],
 	selected: string[],
