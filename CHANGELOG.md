@@ -1,3 +1,10 @@
+# [0.15.0](https://github.com/guichafy/ptolemy/compare/v0.14.0...v0.15.0) (2026-11-01)
+
+
+### Features
+
+* **composer:** select session models and fix keyboard navigation ([f9041a4](https://github.com/guichafy/ptolemy/commit/f9041a4f503052f737dafcdc4168066364e625b0))
+
 # [0.14.0](https://github.com/guichafy/ptolemy/compare/v0.13.0...v0.14.0) (2026-11-01)
 
 
