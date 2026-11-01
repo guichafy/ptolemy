@@ -117,6 +117,17 @@ export async function downloadGithubSkill(
 			await response.body?.cancel();
 			return null;
 		}
+		if (allowMissing && response.status === 422) {
+			// The commits endpoint uses 422 (rather than 404) when a URL
+			// suffix is not a revision. Keep searching the shorter ref prefixes.
+			const error = await readJson(response, MAX_FILE_BYTES);
+			if (
+				typeof error.message === "string" &&
+				error.message.startsWith("No commit found for SHA:")
+			)
+				return null;
+			throw new Error("GitHub retornou HTTP 422 ao resolver a revisão.");
+		}
 		if (!response.ok) {
 			await response.body?.cancel();
 			throw new Error(

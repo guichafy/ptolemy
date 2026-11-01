@@ -24,7 +24,11 @@ function fixture(
 	const fetcher = async (url: string) => {
 		requests.push(url);
 		if (url.endsWith("/commits/main")) return Response.json({ sha: commit });
-		if (url.includes("/commits/")) return new Response(null, { status: 404 });
+		if (url.includes("/commits/"))
+			return Response.json(
+				{ message: "No commit found for SHA: missing" },
+				{ status: 422 },
+			);
 		if (url.includes("/git/trees/"))
 			return Response.json({ tree: entries, truncated });
 		if (url.includes("/git/blobs/"))
@@ -38,6 +42,18 @@ function fixture(
 }
 
 describe("GitHub Skill import", () => {
+	test("resolves branch names containing slashes before selecting the Skill folder", async () => {
+		const { fetcher } = fixture();
+		const bundle = await downloadGithubSkill(
+			"https://github.com/org/repo/tree/feature/new/skills/review",
+			async (url) =>
+				url.endsWith("/commits/feature%2Fnew")
+					? Response.json({ sha: commit })
+					: fetcher(url),
+		);
+		expect(bundle.name).toBe("review");
+		expect(bundle.source.commit).toBe(commit);
+	});
 	test.each([
 		"http://github.com/a/b",
 		"https://evil.com/a/b",
