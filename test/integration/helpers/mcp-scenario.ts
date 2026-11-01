@@ -24,6 +24,7 @@ import {
 	prepareSessionMcp,
 } from "../../../src/bun/mcp/runtime";
 import { MemorySecretVault } from "../../../src/bun/mcp/secrets";
+import type { AgentEvent } from "../../../src/shared/agent-protocol";
 import { configureLocalAgents } from "./local-agents";
 
 const root = await mkdtemp(join(tmpdir(), "ptolemy-mcp-cli-"));
@@ -45,6 +46,7 @@ let inherited = 0;
 let refreshes = 0;
 let registrations = 0;
 let rejects = 0;
+let getRequests = 0;
 let currentToken = "initial-private-token";
 let revoked = false;
 const received: string[] = [];
@@ -109,6 +111,7 @@ const server = Bun.serve({
 				},
 			});
 		}
+		if (req.method === "GET") getRequests++;
 		if (req.method === "GET" || req.method === "DELETE")
 			return new Response(null, { status: 405 });
 		const body = (await req.json()) as {
@@ -312,12 +315,13 @@ url=${JSON.stringify(`${origin}/inherited`)}
 			}
 			q.close();
 		} else {
+			const events: AgentEvent[] = [];
 			const runtime = new CodexSessionRuntime({
 				sessionId: "none",
 				cwd,
 				threadId: null,
 				mcp: context,
-				sender: { sendEvent: () => {} },
+				sender: { sendEvent: (_id, event) => events.push(event) },
 				persister: { appendMessage: async () => {} },
 				loadConfig: async () => ({
 					model: "default",
@@ -328,6 +332,16 @@ url=${JSON.stringify(`${origin}/inherited`)}
 				readSessionInfo: async () => null,
 			});
 			await runtime.enqueue("Responda apenas oi");
+			assert(
+				!events.some((event) => event.type === "error"),
+				JSON.stringify(events),
+			);
+			assert(
+				events.some(
+					(event) => event.type === "finish" && event.reason === "completed",
+				),
+				"Selected-none Codex turn did not complete successfully",
+			);
 			await runtime.close();
 		}
 		await context.dispose();
@@ -402,6 +416,7 @@ url=${JSON.stringify(`${origin}/inherited`)}
 		{ registry, oauth },
 	);
 	const client = new Client({ name: "refresh", version: "1" });
+	const getsBefore = getRequests;
 	await client.connect(
 		new StreamableHTTPClientTransport(
 			new URL((context.servers.selected as { url: string }).url),
@@ -412,6 +427,11 @@ url=${JSON.stringify(`${origin}/inherited`)}
 			},
 		),
 	);
+	// Initialized notifications start GET asynchronously; finish that setup before revocation.
+	for (let i = 0; getRequests === getsBefore; i++) {
+		assert(i < 500, "MCP GET setup timed out");
+		await Bun.sleep(5);
+	}
 	revoked = true;
 	await client.callTool({ name: "echo", arguments: {} });
 	assert.equal(refreshes, 1);
