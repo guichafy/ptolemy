@@ -182,7 +182,7 @@ async function ensurePaletteVisible(
 /** XCTest element.click can activate another native window and hide overlays.
  * Use the observed AX rect with CGEvents, as for the existing global hotkey. */
 export async function clickPaletteElement(
-	element: WebdriverIO.Element,
+	element: Pick<WebdriverIO.Element, "getLocation" | "getSize">,
 ): Promise<void> {
 	const [location, size] = await Promise.all([
 		element.getLocation(),
