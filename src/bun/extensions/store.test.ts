@@ -262,3 +262,68 @@ it("refuses to persist credentials from superseded later-native referenced confi
 	await expect(store.install(source.id, item.id)).rejects.toThrow(/segurança/);
 	expect(await readFile(join(path, "index.json"), "utf8")).toBe(before);
 });
+
+it("sanitizes inspection and atomically refuses credentials in superseded inline-only default hooks", async () => {
+	const fixtureData = githubFixture({
+		".claude-plugin/marketplace.json": JSON.stringify({
+			plugins: [
+				{
+					name: "demo",
+					source: "./plugin",
+					strict: false,
+					skills: ["./skills/one"],
+					hooks: {
+						hooks: {
+							PreToolUse: [
+								{ hooks: [{ type: "command", command: "echo safe" }] },
+							],
+						},
+					},
+				},
+			],
+		}),
+		"plugin/README.md": "resources",
+		"plugin/hooks/hooks.json": JSON.stringify({
+			hooks: {
+				PreToolUse: [
+					{
+						hooks: [
+							{
+								type: "http",
+								url: "https://example.test",
+								headers: { Authorization: "Bearer credential-probe" },
+							},
+						],
+					},
+				],
+			},
+		}),
+		"plugin/skills/one/SKILL.md": skill("one"),
+		"plugin/skills/two/SKILL.md": skill("two"),
+	});
+	const path = await root();
+	const store = new ExtensionsStore({
+		root: path,
+		fetcher: fixtureData.fetcher,
+	});
+	const source = await store.addSource("https://github.com/o/r");
+	const [item] = await store.browse(source.id);
+	const inspected = await store.inspect(source.id, item.id);
+	expect(inspected.components.filter((c) => c.kind === "hook")).toHaveLength(2);
+	expect(
+		inspected.components.some((c) =>
+			c.sources.some((s) => s.manifest === "@directory" && !s.effective),
+		),
+	).toBe(true);
+	expect(
+		inspected.components.filter((c) => c.kind === "skill").map((c) => c.name),
+	).toEqual(["one"]);
+	expect(JSON.stringify(inspected)).not.toContain("credential-probe");
+	expect(inspected.diagnostics.some((d) => d.code === "embedded-secret")).toBe(
+		true,
+	);
+	const before = await readFile(join(path, "index.json"), "utf8");
+	await expect(store.install(source.id, item.id)).rejects.toThrow(/segurança/);
+	expect(await readFile(join(path, "index.json"), "utf8")).toBe(before);
+	expect(await store.installed()).toEqual([]);
+});

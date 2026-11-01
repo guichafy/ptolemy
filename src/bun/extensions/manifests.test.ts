@@ -512,3 +512,112 @@ it("keeps inline MCP declaration identities stable when their configuration chan
 	expect(after.map((c) => c.id)).toEqual(before.map((c) => c.id));
 	expect(new Set(after.map((c) => c.id)).size).toBe(2);
 });
+
+describe("inline-only package defaults overridden by marketplace declarations", () => {
+	it("keeps superseded default hooks inactive and scans their credentials without adding sibling Skills", () => {
+		const result = normalizePackage(
+			records({
+				"README.md": "plugin resources",
+				"hooks/hooks.json": JSON.stringify({
+					hooks: {
+						PreToolUse: [
+							{
+								hooks: [
+									{
+										type: "http",
+										url: "https://example.test",
+										headers: { Authorization: "Bearer credential-probe" },
+									},
+								],
+							},
+						],
+					},
+				}),
+				"skills/one/SKILL.md": skill("one"),
+				"skills/two/SKILL.md": skill("two"),
+			}),
+			"demo",
+			{
+				name: "demo",
+				strict: false,
+				skills: ["./skills/one"],
+				hooks: {
+					hooks: {
+						PreToolUse: [
+							{ hooks: [{ type: "command", command: "echo safe" }] },
+						],
+					},
+				},
+			},
+		);
+		const hooks = result.components.filter((c) => c.kind === "hook");
+		expect(hooks).toHaveLength(2);
+		expect(
+			hooks.find((c) => c.definition?.handler.type === "http")?.sources[0],
+		).toMatchObject({
+			manifest: "@directory",
+			harness: "directory",
+			effective: false,
+			overriddenBy: "@catalog",
+			configPath: "hooks/hooks.json",
+		});
+		expect(
+			hooks.find((c) => c.definition?.handler.type === "command")?.sources[0],
+		).toMatchObject({
+			manifest: "@catalog",
+			harness: "catalog",
+			effective: true,
+		});
+		expect(
+			result.components.filter((c) => c.kind === "skill").map((c) => c.name),
+		).toEqual(["one"]);
+		expect(result.diagnostics.map((d) => d.code)).toEqual(
+			expect.arrayContaining(["embedded-secret", "superseded-declaration"]),
+		);
+		expect(result.manifests["hooks/hooks.json"]).toBeDefined();
+	});
+	it.each([
+		[
+			"apps",
+			".app.json",
+			{
+				apps: [
+					{ id: "app", headers: { Authorization: "Bearer credential-probe" } },
+				],
+			},
+		],
+		[
+			"lspServers",
+			".lsp.json",
+			{ ts: { command: "server", env: { API_TOKEN: "credential-probe" } } },
+		],
+		[
+			"mcpServers",
+			".mcp.json",
+			{ api: { command: "server", env: { API_TOKEN: "credential-probe" } } },
+		],
+	] as const)("scans and preserves original default %s configs when inline-only declarations override them", (field, path, config) => {
+		const result = normalizePackage(
+			records({ "README.md": "resources", [path]: JSON.stringify(config) }),
+			"demo",
+			{
+				name: "demo",
+				strict: false,
+				[field]: { replacement: { command: "safe" } },
+			},
+		);
+		expect(result.diagnostics.some((d) => d.code === "embedded-secret")).toBe(
+			true,
+		);
+		expect(
+			result.components.some((c) =>
+				c.sources.some(
+					(s) =>
+						s.manifest === "@directory" &&
+						s.configPath === path &&
+						!s.effective,
+				),
+			),
+		).toBe(true);
+	});
+});

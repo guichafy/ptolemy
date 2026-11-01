@@ -725,9 +725,13 @@ export function normalizePackage(
 		};
 		const append = (component: ExtensionComponent, active: boolean) => {
 			const source = sourceFor(component, active);
+			if (!active && !nativePath) {
+				source.manifest = "@directory";
+				source.harness = "directory";
+			}
 			result.components.push({
 				...component,
-				id: `${harness}:${manifest}:${active ? "effective" : "superseded"}:${component.id}`,
+				id: `${source.harness}:${source.manifest}:${active ? "effective" : "superseded"}:${component.id}`,
 				sources: [source],
 			});
 		};
@@ -738,7 +742,7 @@ export function normalizePackage(
 		if (!result.description) result.description = effective.description;
 		// Inspect every original declaration even when an inline override supersedes it.
 		// Keep superseded non-Skill declarations reviewable; Skill siblings stay excluded.
-		if (nativePath && Object.keys(inline).length) {
+		if (Object.keys(inline).length) {
 			const raw = normalizeManifest(files, fallbackName, {}, nativePath);
 			Object.assign(result.manifests, raw.manifests);
 			result.diagnostics.push(
