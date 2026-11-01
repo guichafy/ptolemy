@@ -8,6 +8,7 @@ import {
 	indexOfInSource,
 	pressEnter,
 	pressEscape,
+	saveNativeWindowLog,
 	saveScreenshot,
 	selectProvider,
 	startAppiumServer,
@@ -55,6 +56,7 @@ describe("Ptolemy Screenshots", () => {
 
 	afterAll(async () => {
 		if (driver) {
+			saveNativeWindowLog();
 			try {
 				await driver.deleteSession();
 			} catch {
