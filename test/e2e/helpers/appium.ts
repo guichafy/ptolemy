@@ -1,4 +1,9 @@
-import { type ChildProcess, execSync, spawn } from "node:child_process";
+import {
+	type ChildProcess,
+	execFileSync,
+	execSync,
+	spawn,
+} from "node:child_process";
 import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { remote } from "webdriverio";
@@ -135,8 +140,7 @@ export async function selectProvider(
 	driver: WebdriverIO.Browser,
 	provider: ProviderId,
 ): Promise<void> {
-	activateWindow();
-	await wait(Timing.POST_TAB);
+	await ensurePaletteVisible(driver);
 	const labels: Record<ProviderId, string> = {
 		apps: "Apps",
 		github: "GitHub",
@@ -148,14 +152,49 @@ export async function selectProvider(
 	const button = await driver.$(
 		`//XCUIElementTypeButton[@title="${title}" or @label="${title}"]`,
 	);
-	await button.click();
+	await clickPaletteElement(button);
 	await wait(Timing.POST_TAB);
 	if (provider !== "claude") {
 		// Clicking a mode leaves keyboard focus on its button. Refocus the
 		// search field before typing instead of relying on the previous DOM.
 		const input = await driver.$("//XCUIElementTypeTextField");
-		await input.click();
+		await clickPaletteElement(input);
 	}
+}
+
+/** Read the webview's screen coordinates, which move far offscreen on hide. */
+async function ensurePaletteVisible(
+	driver: WebdriverIO.Browser,
+): Promise<void> {
+	for (let attempt = 0; attempt < 3; attempt++) {
+		const source = await driver.getPageSource();
+		const webview = source.match(/<XCUIElementTypeWebView\b[^>]*>/)?.[0];
+		const x = Number(webview?.match(/\bx="([^"]+)"/)?.[1]);
+		const y = Number(webview?.match(/\by="([^"]+)"/)?.[1]);
+		if (Number.isFinite(x) && Number.isFinite(y) && x > -10_000 && y > -10_000)
+			return;
+		activateWindow();
+		await wait(Timing.SETTLE_LOCAL);
+	}
+	throw new Error("A paleta continua oculta após o atalho global.");
+}
+
+/** XCTest element.click can activate another native window and hide overlays.
+ * Use the observed AX rect with CGEvents, as for the existing global hotkey. */
+export async function clickPaletteElement(
+	element: WebdriverIO.Element,
+): Promise<void> {
+	const [location, size] = await Promise.all([
+		element.getLocation(),
+		element.getSize(),
+	]);
+	if (location.x < -10_000 || location.y < -10_000)
+		throw new Error("Controle da paleta está fora da tela.");
+	execFileSync(compileSwiftHelper(), [
+		"click",
+		String(location.x + size.width / 2),
+		String(location.y + size.height / 2),
+	]);
 }
 
 /**
@@ -195,21 +234,20 @@ guard args.count > 1 else { exit(1) }
 
 switch args[1] {
 case "activate":
-    // The overlay orders itself out whenever it resigns key. XCTest and
-    // screenshots can move focus between cases; never blindly toggle a
-    // window that is already visible.
-    let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String:Any]] ?? []
-    let visible = windows.contains { window in
-        (window["kCGWindowOwnerName"] as? String) == "ptolemy-dev" &&
-        (window["kCGWindowName"] as? String) == "Ptolemy" &&
-        (window["kCGWindowAlpha"] as? Double ?? 0) > 0
-    }
-    if visible { break }
     let down = CGEvent(keyboardEventSource: nil, virtualKey: 49, keyDown: true)!
     down.flags = [.maskCommand, .maskShift]
     down.post(tap: .cghidEventTap)
     let up = CGEvent(keyboardEventSource: nil, virtualKey: 49, keyDown: false)!
     up.flags = [.maskCommand, .maskShift]
+    up.post(tap: .cghidEventTap)
+
+case "click":
+    guard args.count >= 4, let x = Double(args[2]), let y = Double(args[3]) else { exit(1) }
+    let point = CGPoint(x: x, y: y)
+    let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left)!
+    down.post(tap: .cghidEventTap)
+    Thread.sleep(forTimeInterval: 0.05)
+    let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left)!
     up.post(tap: .cghidEventTap)
 
 case "bounds":
