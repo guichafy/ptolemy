@@ -16,11 +16,23 @@ import type {
 	SessionInfoPatch,
 	SessionStats,
 } from "@/shared/agent-protocol";
+import type { ExtensionSelection } from "@/shared/extensions";
 import type { McpSnapshot } from "@/shared/mcp";
 import type { SessionSkill, SessionSkillSelection } from "@/shared/skills";
 import { backupCorruptJson, writeJsonAtomic } from "../atomic-json";
 import { readCodexContextBreakdown } from "../codex/rollout-info";
 import { CodexSessionRuntime } from "../codex/session-runtime";
+import { prepareSessionExtensions } from "../extensions/activation";
+import { snapshotExtensionMcp } from "../extensions/mcp";
+import {
+	denyUnselectedSlash,
+	inventoryClaudeBuiltins,
+} from "../extensions/native";
+import {
+	claudeExtensionOptions,
+	resolveExtensionPrompt,
+} from "../extensions/runtime";
+import { extensionsStore } from "../extensions/store";
 import { mcpRegistry } from "../mcp/registry";
 import {
 	disposeSessionMcp,
@@ -73,6 +85,8 @@ function previewText(text: string, max = 60): string {
 // ---------------------------------------------------------------------------
 
 export interface SessionMeta {
+	extensionSelections?: ExtensionSelection[];
+	builtinCommands?: { all: string[]; selected: string[] };
 	/** Safe logical selection for listings; no credential references. */
 	mcpServerIds?: string[];
 	id: string;
@@ -212,6 +226,7 @@ let active: { sessionId: string; q: ActiveQuery } | null = null;
 
 let pendingNew: {
 	id: string;
+	prompt: string;
 	inbox: MessageInbox;
 	authMode: SessionMeta["authMode"];
 	options: ReturnType<typeof buildQueryOptions>;
@@ -775,6 +790,15 @@ async function createCodexRuntime(
 					: [],
 			);
 		},
+		loadExtensions: async () => {
+			const meta = (await readIndex()).sessions.find((s) => s.id === sessionId);
+			return prepareSessionExtensions(
+				sessionId,
+				cwd,
+				meta?.extensionSelections,
+				"codex",
+			);
+		},
 		onSessionInfo: (patch) => {
 			void recordSessionInfo(sessionId, patch);
 		},
@@ -791,6 +815,7 @@ async function createCodexSession(
 	skills: SessionSkill[],
 	skillSelection: SessionSkillSelection,
 	mcpSelection: McpSnapshot,
+	extensionSelections: ExtensionSelection[],
 	model?: string,
 ): Promise<string> {
 	const settings = await loadSettings();
@@ -802,6 +827,7 @@ async function createCodexSession(
 		skills,
 		skillSelection,
 		mcpSelection,
+		extensionSelections,
 		title: generateTitle(prompt),
 		projectId: project.id,
 		projectPath: project.path,
@@ -864,6 +890,8 @@ export async function createSession(
 		agent?: AgentKind;
 		skillIds?: string[];
 		mcpServerIds?: string[];
+		extensionSelections?: ExtensionSelection[];
+		builtinCommandNames?: string[];
 		model?: string;
 	} = {},
 ): Promise<string> {
@@ -895,6 +923,44 @@ export async function createSession(
 	const skillSelection = {
 		nativePaths: await skillsStore.nativePaths(opts.agent ?? "claude"),
 	};
+	const extensionDefaults = await extensionsStore.defaults(
+		opts.agent ?? "claude",
+	);
+	const extensionSelections = structuredClone(
+		opts.extensionSelections ?? extensionDefaults?.selections ?? [],
+	);
+	const builtins =
+		opts.agent !== "codex"
+			? await inventoryClaudeBuiltins(await findClaudeCli())
+			: [];
+	const builtinCommands = {
+		all: builtins.map((b) => b.name),
+		selected:
+			opts.builtinCommandNames ??
+			(opts.skillIds === undefined
+				? (extensionDefaults?.builtinCommandNames ??
+					builtins.map((b) => b.name))
+				: []),
+	};
+	if (
+		!Array.isArray(builtinCommands.selected) ||
+		builtinCommands.selected.some((name) => !builtinCommands.all.includes(name))
+	)
+		throw Error("Seleção de comandos internos inválida.");
+	denyUnselectedSlash(prompt, builtinCommands.all, builtinCommands.selected);
+
+	const extensions = await prepareSessionExtensions(
+		id,
+		join(ptolemyDataDir(), "projects", "preview"),
+		extensionSelections,
+		opts.agent ?? "claude",
+		{ materialize: false },
+	);
+	const duplicate = extensions.skills.find((s) =>
+		selectedSkills.some((existing) => existing.name === s.name),
+	);
+	if (duplicate)
+		throw Error(`Skills com mesmo nome na seleção: ${duplicate.name}.`);
 
 	// Resolve (or create) the project this conversation belongs to. The
 	// project directory becomes the agent's cwd — every Write/Edit/Bash is
@@ -909,6 +975,17 @@ export async function createSession(
 	} else {
 		project = await projectStore.create({ title: generateTitle(prompt) });
 	}
+	const materialized = await prepareSessionExtensions(
+		id,
+		project.path,
+		extensionSelections,
+		opts.agent ?? "claude",
+		{ materialize: false },
+	);
+	const pluginMcp = await snapshotExtensionMcp(materialized);
+	for (const server of pluginMcp.servers)
+		if (!mcpSelection.servers.some((s) => s.id === server.id))
+			mcpSelection.servers.push(server);
 
 	console.log(
 		`[claude:session] createSession start: id=${id} agent=${opts.agent ?? "claude"} projectId=${project.id} path=${project.path} promptLength=${prompt.length}`,
@@ -923,6 +1000,7 @@ export async function createSession(
 			skills,
 			skillSelection,
 			mcpSelection,
+			extensionSelections,
 			opts.model,
 		);
 	}
@@ -947,7 +1025,6 @@ export async function createSession(
 	// before the streaming loop emits its first chunk, otherwise
 	// chatRpc.send.* drops.
 	const inbox = createMessageInbox();
-	inbox.push(buildUserMessage(prompt));
 
 	const now = new Date().toISOString();
 	const meta: StoredSessionMeta = {
@@ -956,6 +1033,8 @@ export async function createSession(
 		skills,
 		skillSelection,
 		mcpSelection,
+		extensionSelections,
+		builtinCommands,
 		title: generateTitle(prompt),
 		projectId: project.id,
 		projectPath: project.path,
@@ -994,6 +1073,7 @@ export async function createSession(
 	pendingCodex = null;
 	pendingNew = {
 		id,
+		prompt,
 		inbox,
 		authMode,
 		options: buildQueryOptions({
@@ -1086,6 +1166,32 @@ export async function resumeSession(sessionId: string): Promise<boolean> {
 		pendingNew.options.mcpServers = mcp.servers;
 		pendingNew.options.strictMcpConfig = mcp.explicit;
 		pendingNew.options.env = localMcpEnv({ ...process.env, ...mcp.env });
+		const meta = (await readIndex()).sessions.find((s) => s.id === sessionId)!;
+		const extensions = await prepareSessionExtensions(
+			sessionId,
+			pendingNew.options.cwd as string,
+			meta.extensionSelections,
+			"claude",
+		);
+		const extensionOptions = await claudeExtensionOptions(
+			extensions,
+			meta.builtinCommands
+				? { ...meta.builtinCommands, hasFileSkills: !!meta.skills?.length }
+				: undefined,
+		);
+		const basePlugins = pendingNew.options.plugins ?? [];
+		Object.assign(pendingNew.options, extensionOptions, {
+			plugins: [...basePlugins, ...(extensionOptions.plugins ?? [])],
+		});
+		pendingNew.inbox.push(
+			buildUserMessage(
+				await resolveExtensionPrompt(
+					extensions,
+					pendingNew.prompt,
+					pendingNew.options.cwd as string,
+				),
+			),
+		);
 		const pendingAuthMode = pendingNew.authMode;
 		let q: Query;
 		try {
@@ -1192,6 +1298,18 @@ export async function resumeSession(sessionId: string): Promise<boolean> {
 		const mcp = await prepareStoredSessionMcp(sessionId, cwd, "claude");
 		preparedMcp = mcp;
 		await activateSkills(SESSIONS_DIR, sessionId, cwd, "claude");
+		const extensions = await prepareSessionExtensions(
+			sessionId,
+			cwd,
+			meta.extensionSelections,
+			"claude",
+		);
+		const extensionOptions = await claudeExtensionOptions(
+			extensions,
+			meta.builtinCommands
+				? { ...meta.builtinCommands, hasFileSkills: !!meta.skills?.length }
+				: undefined,
+		);
 
 		// Downgrade silently when meta.model has been retired.
 		const cached = await tryGetCachedModels(authMode);
@@ -1211,18 +1329,25 @@ export async function resumeSession(sessionId: string): Promise<boolean> {
 		const inbox = createMessageInbox();
 		const q = query({
 			prompt: inbox.iterable,
-			options: buildQueryOptions({
-				explicitSkillSelection: meta.skillSelection !== undefined,
-				explicitMcpSelection: mcp.explicit,
-				mcpEnv: mcp.env,
-				model,
-				permissionMode,
-				claudePath,
-				canUseTool: buildCanUseTool(sessionId, cwd),
-				mcpServers: mcp.servers,
-				cwd,
-				resumeSdkSessionId: meta.sdkSessionId,
-			}),
+			options: {
+				...buildQueryOptions({
+					explicitSkillSelection: meta.skillSelection !== undefined,
+					explicitMcpSelection: mcp.explicit,
+					mcpEnv: mcp.env,
+					model,
+					permissionMode,
+					claudePath,
+					canUseTool: buildCanUseTool(sessionId, cwd),
+					mcpServers: mcp.servers,
+					cwd,
+					resumeSdkSessionId: meta.sdkSessionId,
+				}),
+				...extensionOptions,
+				plugins: [
+					{ type: "local", path: join(cwd, ".ptolemy", "claude-harness") },
+					...(extensionOptions.plugins ?? []),
+				],
+			},
 		});
 		active = {
 			sessionId,
@@ -1281,6 +1406,27 @@ export async function sendMessage(
 	}
 	const snap = active; // captured BEFORE any await
 	const internalId = snap.sessionId;
+	const selectionMeta = (await readIndex()).sessions.find(
+		(s) => s.id === internalId,
+	);
+	if (selectionMeta?.builtinCommands)
+		denyUnselectedSlash(
+			message,
+			selectionMeta.builtinCommands.all,
+			selectionMeta.builtinCommands.selected,
+		);
+	if (selectionMeta?.extensionSelections)
+		message = await resolveExtensionPrompt(
+			await prepareSessionExtensions(
+				internalId,
+				selectionMeta.projectPath,
+				selectionMeta.extensionSelections,
+				"claude",
+				{ materialize: false },
+			),
+			message,
+			selectionMeta.projectPath,
+		);
 
 	console.log(
 		`[claude:session] sendMessage start: sessionId=${internalId} length=${message.length} override=${opts.modelOverride ?? "(none)"}`,

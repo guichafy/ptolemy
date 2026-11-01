@@ -18,6 +18,8 @@ export default {
 			"dist-chat/assets": "views/chatview/assets",
 			"src/bun/native/liboverlay.dylib": "native/liboverlay.dylib",
 			"src/bun/mcp/launcher.mjs":"native/mcp-launcher.mjs",
+			"src/bun/extensions/launcher.mjs":"native/extension-launcher.mjs",
+			"src/bun/extensions/extension-executor.mjs":"native/extension-executor.mjs",
             "src/bun/tray-icon.png": "native/tray-icon.png",
 		},
 		watchIgnore: [],

@@ -4,6 +4,11 @@ import type {
 	MessagePersister,
 	StreamMessageSender,
 } from "../claude/streaming";
+import type { PreparedSessionExtensions } from "../extensions/activation";
+import {
+	codexExtensionOverrides,
+	resolveExtensionPrompt,
+} from "../extensions/runtime";
 import {
 	buildCodexMcpOverrides,
 	inheritedCodexMcpNames,
@@ -42,12 +47,14 @@ export interface CodexRuntimeDeps {
 	readSessionInfo?: (threadId: string) => Promise<SessionInfoPatch | null>;
 	/** Fresh inventory disables newly installed native Skills for explicit selections. */
 	loadSkillConfig?: () => Promise<NonNullable<CodexOptions["config"]>>;
+	loadExtensions?: () => Promise<PreparedSessionExtensions>;
 	/** Injected in tests; defaults to spawning the user's Codex CLI. */
 	createThread?: (
 		threadId: string | null,
 		options: ThreadOptions,
 		config: NonNullable<CodexOptions["config"]>,
 		mcp?: PreparedSessionMcp,
+		extensions?: { prepared: PreparedSessionExtensions; sessionId: string },
 	) => Promise<CodexThreadLike>;
 }
 
@@ -83,19 +90,30 @@ async function defaultCreateThread(
 	options: ThreadOptions,
 	config: NonNullable<CodexOptions["config"]>,
 	mcp?: PreparedSessionMcp,
+	extensions?: { prepared: PreparedSessionExtensions; sessionId: string },
 ): Promise<CodexThreadLike> {
 	// Imported lazily so the SDK (and its CLI lookup) only loads when a Codex
 	// session actually runs.
 	const { Codex } = await import("@openai/codex-sdk");
 	const cliPath = await findCodexCli();
 	const env = localMcpEnv({ ...(await buildCodexEnv()), ...mcp?.env });
-	const configOverrides =
-		mcp && mcp.explicit !== false
+	const configOverrides = [
+		...(mcp && mcp.explicit !== false
 			? buildCodexMcpOverrides(
 					mcp.codexConfig,
 					await inheritedCodexMcpNames(cliPath, options.workingDirectory!, env),
 				)
-			: undefined;
+			: []),
+		...(extensions
+			? await codexExtensionOverrides(
+					extensions.prepared,
+					cliPath,
+					options.workingDirectory!,
+					env,
+					extensions.sessionId,
+				)
+			: []),
+	];
 	if (config.skills)
 		await assertSkillSelectionSupport("codex", cliPath, undefined, env);
 	const codex = new Codex({
@@ -161,11 +179,29 @@ export class CodexSessionRuntime {
 			const options = buildThreadOptions(config, this.deps.cwd, modelOverride);
 			const createThread = this.deps.createThread ?? defaultCreateThread;
 			const skillConfig = (await this.deps.loadSkillConfig?.()) ?? {};
+			const prepared = await this.deps.loadExtensions?.();
+			if (prepared)
+				prompt = await resolveExtensionPrompt(prepared, prompt, this.deps.cwd);
+			if (
+				prepared?.skills.length &&
+				skillConfig.skills &&
+				typeof skillConfig.skills === "object" &&
+				!Array.isArray(skillConfig.skills)
+			) {
+				const skills = skillConfig.skills as {
+					config?: Array<{ path: string; enabled: boolean }>;
+				};
+				skills.config = [
+					...(skills.config ?? []),
+					...prepared.skills.map((s) => ({ path: s.path, enabled: true })),
+				];
+			}
 			const thread = await createThread(
 				this.currentThreadId,
 				options,
 				skillConfig,
 				this.deps.mcp,
+				prepared ? { prepared, sessionId: this.sessionId } : undefined,
 			);
 			await runCodexTurn({
 				thread,

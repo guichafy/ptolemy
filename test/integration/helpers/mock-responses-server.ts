@@ -125,7 +125,11 @@ function messageTurn(n: number, text: string, usage: ResponseUsage): string {
 	]);
 }
 
-export function startMockResponsesServer(): MockResponsesServer {
+export function startMockResponsesServer(
+	probeScript?:
+		| string
+		| { name: string; namespace: string; arguments: Record<string, unknown> },
+): MockResponsesServer {
 	const requests: MockResponsesServer["requests"] = [];
 	const promptCache = createPromptCache();
 	let counter = 0;
@@ -149,7 +153,11 @@ export function startMockResponsesServer(): MockResponsesServer {
 			let lastUserText = "";
 			for (let i = input.length - 1; i >= 0; i--) {
 				const item = input[i];
-				if (item.type === "custom_tool_call_output") toolResultsThisTurn++;
+				if (
+					item.type === "custom_tool_call_output" ||
+					item.type === "function_call_output"
+				)
+					toolResultsThisTurn++;
 				if (item.type === "message" && item.role === "user") {
 					lastUserText = textOf(item);
 					break;
@@ -192,7 +200,39 @@ export function startMockResponsesServer(): MockResponsesServer {
 			});
 			const payload =
 				step.kind === "write-file"
-					? execTurn(n, step.file, usage)
+					? typeof probeScript === "string"
+						? scriptTurn(n, probeScript, usage)
+						: probeScript
+							? sse([
+									{ type: "response.created", response: { id: `resp_${n}` } },
+									{
+										type: "response.output_item.added",
+										output_index: 0,
+										item: {
+											type: "function_call",
+											id: `fc_${n}`,
+											call_id: `call_${n}`,
+											name: probeScript.name,
+											namespace: probeScript.namespace,
+											arguments: "",
+										},
+									},
+									{
+										type: "response.output_item.done",
+										output_index: 0,
+										item: {
+											type: "function_call",
+											id: `fc_${n}`,
+											call_id: `call_${n}`,
+											name: probeScript.name,
+											namespace: probeScript.namespace,
+											arguments: JSON.stringify(probeScript.arguments),
+											status: "completed",
+										},
+									},
+									completed(n, usage),
+								])
+							: execTurn(n, step.file, usage)
 					: messageTurn(n, step.kind === "reply" ? step.text : "Ok.", usage);
 			return new Response(payload, {
 				headers: { "content-type": "text/event-stream" },

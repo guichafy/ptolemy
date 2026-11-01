@@ -5,6 +5,7 @@ import type {
 	ContextUsageInfo,
 	SessionStats,
 } from "@/shared/agent-protocol";
+import type { ExtensionSelection } from "@/shared/extensions";
 import type { SessionSkill, SkillSummary } from "@/shared/skills";
 
 export type GitHubSearchType = "repos" | "code" | "issues" | "users";
@@ -308,6 +309,8 @@ interface PtolemyRPCSchema extends ElectrobunRPCSchema {
 					projectId?: string;
 					agent?: AgentKind;
 					skillIds?: string[];
+					extensionSelections?: ExtensionSelection[];
+					builtinCommandNames?: string[];
 					mcpServerIds?: string[];
 					model?: string;
 				};

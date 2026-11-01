@@ -1,11 +1,14 @@
 import { createHash } from "node:crypto";
-import { readFile, stat } from "node:fs/promises";
+import { lstat, readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
+import type { AgentKind } from "@/shared/agent-protocol";
 import type {
 	ExtensionPackage,
+	ExtensionSelection,
 	ExtensionSource,
 	ExtensionSummary,
 } from "@/shared/extensions";
+import type { SkillFile } from "@/shared/skills";
 import { writeJsonAtomic } from "../atomic-json";
 import { fetchWithProxy } from "../net/proxy";
 import { ptolemyDataDir } from "../paths";
@@ -23,12 +26,19 @@ import {
 	validatePackageFiles,
 } from "./github";
 import { normalizePackage } from "./manifests";
+import type { NativePlugin } from "./native";
 
 interface ExtensionIndex {
 	version: 1;
 	sources: ExtensionSource[];
 	packages: ExtensionPackage[];
 	installed: Record<string, string>;
+	defaults?: Partial<
+		Record<
+			AgentKind,
+			{ selections: ExtensionSelection[]; builtinCommandNames?: string[] }
+		>
+	>;
 }
 interface StoreOptions {
 	root?: string;
@@ -62,16 +72,69 @@ function assertInstallable(pkg: ExtensionPackage): void {
 
 /** One queued atomic index publishes complete validated packages and immutable history. */
 export class ExtensionsStore {
-	private readonly root: string;
+	private readonly configuredRoot?: string;
+	private get root(): string {
+		return this.configuredRoot ?? join(ptolemyDataDir(), "extensions");
+	}
 	private readonly fetcher: GithubFetcher;
 	private queue: Promise<void> = Promise.resolve();
 	constructor(options: StoreOptions = {}) {
-		this.root = options.root ?? join(ptolemyDataDir(), "extensions");
+		this.configuredRoot = options.root;
 		this.fetcher = options.fetcher ?? fetchWithProxy;
 	}
 	async sources(): Promise<ExtensionSource[]> {
 		await this.queue;
 		return structuredClone((await this.read()).sources);
+	}
+	async defaults(
+		agent: AgentKind,
+	): Promise<
+		| { selections: ExtensionSelection[]; builtinCommandNames?: string[] }
+		| undefined
+	> {
+		await this.queue;
+		return structuredClone((await this.read()).defaults?.[agent]);
+	}
+	async setDefaults(
+		agent: AgentKind,
+		selections: ExtensionSelection[],
+		builtinCommandNames?: string[],
+	): Promise<void> {
+		if (
+			!["claude", "codex"].includes(agent) ||
+			!Array.isArray(selections) ||
+			selections.length > 128 ||
+			(builtinCommandNames !== undefined &&
+				(!Array.isArray(builtinCommandNames) ||
+					builtinCommandNames.some(
+						(n) => typeof n !== "string" || n.length > 256,
+					)))
+		)
+			throw Error("Padrões de extensões inválidos.");
+		for (const selection of selections) {
+			const pkg = await this.getPackage(
+				selection.packageId,
+				selection.revision,
+			);
+			if (
+				!Array.isArray(selection.componentIds) ||
+				selection.componentIds.some(
+					(id) => !pkg.components.some((c) => c.id === id),
+				) ||
+				(selection.trustedHookDigest !== undefined &&
+					selection.trustedHookDigest !== pkg.revision)
+			)
+				throw Error("Seleção de componentes inválida.");
+		}
+		await this.mutate((index) => {
+			index.defaults ??= {};
+			index.defaults[agent] = {
+				selections: structuredClone(selections),
+				...(builtinCommandNames
+					? { builtinCommandNames: [...new Set(builtinCommandNames)] }
+					: {}),
+			};
+		});
 	}
 	async addSource(input: string): Promise<ExtensionSource> {
 		const url = canonicalGithubUrl(input);
@@ -147,6 +210,78 @@ export class ExtensionsStore {
 		if (!pkg) throw new Error("Pacote não instalado ou revisão indisponível.");
 		return structuredClone(pkg);
 	}
+	/** Explicit snapshot import from metadata-only CLI inventory, never from arbitrary RPC paths. */
+	async importNative(
+		agent: AgentKind,
+		plugin: NativePlugin,
+	): Promise<ExtensionSummary> {
+		if (!plugin.path?.startsWith("/"))
+			throw Error("Plugin local sem arquivos disponíveis.");
+		const root = plugin.path;
+		const files: SkillFile[] = [];
+		let total = 0;
+		async function visit(path: string, depth: number): Promise<void> {
+			if (depth > 32 || (await lstat(join(root, path))).isSymbolicLink())
+				throw Error("Pacote local contém link ou profundidade excessiva.");
+			for (const entry of await readdir(join(root, path), {
+				withFileTypes: true,
+			})) {
+				const name = path ? `${path}/${entry.name}` : entry.name;
+				if (entry.isSymbolicLink())
+					throw Error("Pacote local contém link simbólico.");
+				if (entry.isDirectory()) {
+					await visit(name, depth + 1);
+					continue;
+				}
+				const info = await stat(join(root, name));
+				total += info.size;
+				if (
+					!entry.isFile() ||
+					files.length >= 2048 ||
+					info.size > 8 * 1024 * 1024 ||
+					total > 32 * 1024 * 1024
+				)
+					throw Error("Pacote local excede limites de arquivos.");
+				files.push({
+					path: name,
+					content: (await readFile(join(root, name))).toString("base64"),
+					executable: (info.mode & 0o111) !== 0,
+				});
+			}
+		}
+		await visit("", 0);
+		validatePackageFiles(files);
+		const id = `extension:${createHash("sha256").update(`native:${agent}:${plugin.id}`).digest("hex")}`;
+		const revision = packageRevision("", "", {}, files);
+		const normalized = normalizePackage(files, plugin.name, {});
+		const pkg: ExtensionPackage = {
+			id,
+			sourceId: `native:${agent}`,
+			url: root,
+			revision,
+			files,
+			...normalized,
+			origin: {
+				native: { agent, id: plugin.id, path: root },
+				repository: "",
+				path: "",
+				commit: "",
+				catalogUrl: "",
+				catalogRevision: "",
+				itemId: id,
+			},
+		};
+		assertInstallable(pkg);
+		return this.mutate((index) => {
+			if (!index.packages.some((p) => p.id === id && p.revision === revision)) {
+				if (index.packages.length >= 512)
+					throw Error("Limite de 512 revisões de pacotes atingido.");
+				index.packages.push(pkg);
+			}
+			index.installed[id] = revision;
+			return packageSummary(pkg);
+		});
+	}
 	private source(index: ExtensionIndex, id: string): ExtensionSource {
 		const source = index.sources.find((s) => s.id === id);
 		if (!source) throw new Error("Fonte de extensões não encontrada.");
@@ -209,11 +344,18 @@ export class ExtensionsStore {
 				!/^extension:[a-f0-9]{64}$/.test(pkg.id) ||
 				!/^[a-f0-9]{64}$/.test(pkg.revision) ||
 				!pkg.origin ||
-				!/^[a-f0-9]{40}$/.test(pkg.origin.commit) ||
-				!/^[-\w.]+\/[-\w.]+$/.test(pkg.origin.repository) ||
+				(!pkg.origin.native && !/^[a-f0-9]{40}$/.test(pkg.origin.commit)) ||
+				(!pkg.origin.native &&
+					!/^[-\w.]+\/[-\w.]+$/.test(pkg.origin.repository)) ||
 				typeof pkg.origin.path !== "string" ||
 				relativePath(pkg.origin.path, true) !== pkg.origin.path ||
-				canonicalGithubUrl(pkg.origin.catalogUrl) !== pkg.origin.catalogUrl ||
+				(!pkg.origin.native &&
+					canonicalGithubUrl(pkg.origin.catalogUrl) !==
+						pkg.origin.catalogUrl) ||
+				(pkg.origin.native &&
+					(!["claude", "codex"].includes(pkg.origin.native.agent) ||
+						!pkg.origin.native.path.startsWith("/") ||
+						typeof pkg.origin.native.id !== "string")) ||
 				pkg.origin.itemId !== pkg.id
 			)
 				throw new Error("Origem ou revisão persistida inválida.");

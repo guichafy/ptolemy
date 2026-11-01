@@ -327,3 +327,34 @@ it("sanitizes inspection and atomically refuses credentials in superseded inline
 	expect(await readFile(join(path, "index.json"), "utf8")).toBe(before);
 	expect(await store.installed()).toEqual([]);
 });
+
+it("freezes explicit defaults by revision and distinguishes absence from an empty selection", async () => {
+	const path = await root();
+	const store = new ExtensionsStore({ root: path, fetcher: fixture().fetcher });
+	expect(await store.defaults("claude")).toBeUndefined();
+	const source = await store.addSource("https://github.com/o/r");
+	const item = (await store.browse(source.id))[0];
+	const pkg = await store.install(source.id, item.id);
+	const selections = [
+		{
+			packageId: pkg.id,
+			revision: pkg.revision,
+			componentIds: [pkg.components[0].id],
+		},
+	];
+	await store.setDefaults("claude", selections, []);
+	selections[0].componentIds.length = 0;
+	expect(
+		(await store.defaults("claude"))?.selections[0].componentIds,
+	).toHaveLength(1);
+	await store.remove(pkg.id);
+	expect(
+		(await new ExtensionsStore({ root: path }).defaults("claude"))
+			?.selections[0].revision,
+	).toBe(pkg.revision);
+	await store.setDefaults("claude", [], []);
+	expect(await store.defaults("claude")).toEqual({
+		selections: [],
+		builtinCommandNames: [],
+	});
+});
