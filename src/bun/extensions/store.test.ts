@@ -183,7 +183,7 @@ describe("persistent package integrity", () => {
 		let sabotage = false;
 		const fetcher = async (url: string) => {
 			const response = await fixtureData.fetcher(url);
-			if (sabotage && url.includes("/git/blobs/")) {
+			if (sabotage && new URL(url).hostname === "raw.githubusercontent.com") {
 				sabotage = false;
 				await rename(join(path, "index.json"), join(path, "before.json"));
 				await mkdir(join(path, "index.json"));
@@ -232,4 +232,33 @@ describe("persistent package integrity", () => {
 		await writeFile(file, JSON.stringify(index));
 		await expect(store.getPackage(installed.id)).rejects.toThrow(/alterada/);
 	});
+});
+
+it("refuses to persist credentials from superseded later-native referenced config and exposes public provenance", async () => {
+	const fixtureData = githubFixture({
+		".claude-plugin/plugin.json":
+			'{"name":"demo","skills":[],"mcpServers":{"api":{"command":"safe"}}}',
+		".codex-plugin/plugin.json":
+			'{"name":"demo","skills":[],"mcpServers":"./custom-codex.json"}',
+		"custom-codex.json":
+			'{"api":{"command":"node","env":{"API_TOKEN":"literal-credential-probe"}}}',
+	});
+	const path = await root();
+	const store = new ExtensionsStore({
+		root: path,
+		fetcher: fixtureData.fetcher,
+	});
+	const source = await store.addSource("https://github.com/o/r");
+	const [item] = await store.browse(source.id);
+	const inspected = await store.inspect(source.id, item.id);
+	expect(
+		inspected.components
+			.filter((c) => c.kind === "mcp")
+			.flatMap((c) => c.sources)
+			.map((s) => s.harness),
+	).toEqual(expect.arrayContaining(["claude", "codex"]));
+	expect(JSON.stringify(inspected)).not.toContain("literal-credential-probe");
+	const before = await readFile(join(path, "index.json"), "utf8");
+	await expect(store.install(source.id, item.id)).rejects.toThrow(/segurança/);
+	expect(await readFile(join(path, "index.json"), "utf8")).toBe(before);
 });

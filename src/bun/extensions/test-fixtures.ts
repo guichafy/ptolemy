@@ -47,6 +47,17 @@ export function githubFixture(
 					size: options.size ?? Buffer.byteLength(b.content),
 				})),
 			});
+		if (new URL(url).hostname === "raw.githubusercontent.com") {
+			const filePath = path
+				.split("/")
+				.slice(4)
+				.map(decodeURIComponent)
+				.join("/");
+			const raw = blobs.find((blob) => blob.path === filePath);
+			return raw
+				? new Response(options.mismatch ? `${raw.content}x` : raw.content)
+				: new Response("", { status: 404 });
+		}
 		const blob = blobs.find((b) => url.endsWith(`/git/blobs/${b.sha}`));
 		if (blob)
 			return Response.json({

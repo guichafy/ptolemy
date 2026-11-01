@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { ExtensionSource } from "@/shared/extensions";
-import { catalogSummary, inspectCatalogItem, loadCatalog } from "./catalog";
+import {
+	catalogSummary,
+	inspectCatalogItem,
+	loadCatalog,
+	packageSummary,
+} from "./catalog";
 import { commit, githubFixture, skill } from "./test-fixtures";
 
 const source: ExtensionSource = {
@@ -181,4 +186,18 @@ describe("stable catalog identities", () => {
 		);
 		expect((await inspectCatalogItem(item)).origin.repository).toBe("vendor/r");
 	});
+});
+
+it("keeps malformed Skill source text out of public browse and inspect summaries", async () => {
+	const f = githubFixture({
+		"one/SKILL.md":
+			"---\nname: one\ndescription: test\nsecret: credential-probe: invalid\n---\nbody",
+	});
+	const [item] = await loadCatalog(source, f.fetcher);
+	expect(JSON.stringify(catalogSummary(item))).not.toContain(
+		"credential-probe",
+	);
+	expect(
+		JSON.stringify(packageSummary(await inspectCatalogItem(item))),
+	).not.toContain("credential-probe");
 });

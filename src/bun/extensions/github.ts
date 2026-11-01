@@ -65,11 +65,14 @@ export function validatePackageFiles(files: SkillFile[]): void {
 	}
 	if (total > MAX_PACKAGE_BYTES) throw new Error("Pacote excede 32 MiB.");
 }
-async function boundedJson(
+async function boundedBytes(
 	response: Response,
 	limit: number,
-): Promise<Record<string, unknown>> {
-	if (!response.body) throw new Error("Resposta vazia do GitHub.");
+): Promise<Buffer> {
+	if (!response.body) {
+		if (limit === 0) return Buffer.alloc(0);
+		throw new Error("Resposta vazia do GitHub.");
+	}
 	const reader = response.body.getReader();
 	const chunks: Uint8Array[] = [];
 	let size = 0;
@@ -82,13 +85,27 @@ async function boundedJson(
 				throw new Error("Resposta do GitHub excede o limite permitido.");
 			chunks.push(value);
 		}
-		const result: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-		if (!result || typeof result !== "object" || Array.isArray(result))
-			throw new Error("Resposta inválida do GitHub.");
-		return result as Record<string, unknown>;
+		return Buffer.concat(chunks);
 	} finally {
 		await reader.cancel();
 	}
+}
+function parseJson(bytes: Buffer): Record<string, unknown> {
+	let value: unknown;
+	try {
+		value = JSON.parse(bytes.toString("utf8"));
+	} catch {
+		throw new Error("Resposta JSON inválida do GitHub.");
+	}
+	if (!value || typeof value !== "object" || Array.isArray(value))
+		throw new Error("Manifest precisa ser um objeto JSON.");
+	return value as Record<string, unknown>;
+}
+async function boundedJson(
+	response: Response,
+	limit: number,
+): Promise<Record<string, unknown>> {
+	return parseJson(await boundedBytes(response, limit));
 }
 
 /** Metadata is loaded once at an immutable commit; blobs are verified against Git object IDs. */
@@ -199,20 +216,25 @@ export class GithubRepository {
 		this.validateEntry(entry, limit);
 		const cached = this.cache.get(path);
 		if (cached) return { ...cached };
-		const blob = await this.request(
-			`/git/blobs/${entry.sha}`,
-			Math.ceil((limit * 4) / 3) + MAX_MANIFEST_BYTES,
+		const response = await this.fetcher(
+			`https://raw.githubusercontent.com/${this.repository}/${this.commit}/${path.split("/").map(encodeURIComponent).join("/")}`,
+			{
+				headers: {
+					Accept: "application/octet-stream",
+					"User-Agent": "Ptolemy",
+				},
+				redirect: "error",
+				signal: this.signal,
+			},
 		);
-		if (blob?.encoding !== "base64" || typeof blob.content !== "string")
-			throw new Error("Blob inválido do GitHub.");
-		const content = blob.content.replace(/\s/g, "");
-		if (
-			!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(
-				content,
-			)
-		)
-			throw new Error("Base64 inválido do GitHub.");
-		const bytes = Buffer.from(content, "base64");
+		if (!response.ok) {
+			await response.body?.cancel();
+			throw new Error(
+				`GitHub retornou HTTP ${response.status} ao baixar arquivo público.`,
+			);
+		}
+		const bytes = await boundedBytes(response, Math.min(limit, entry.size!));
+		const content = bytes.toString("base64");
 		if (
 			bytes.length !== entry.size ||
 			bytes.length > limit ||
@@ -230,14 +252,9 @@ export class GithubRepository {
 		path: string,
 		limit = MAX_MANIFEST_BYTES,
 	): Promise<Record<string, unknown>> {
-		const value: unknown = JSON.parse(
-			Buffer.from((await this.read(path, limit)).content, "base64").toString(
-				"utf8",
-			),
+		return parseJson(
+			Buffer.from((await this.read(path, limit)).content, "base64"),
 		);
-		if (!value || typeof value !== "object" || Array.isArray(value))
-			throw new Error("Manifest precisa ser um objeto JSON.");
-		return value as Record<string, unknown>;
 	}
 	private validateEntry(entry: TreeEntry, limit: number) {
 		if (entry.type !== "blob" || !["100644", "100755"].includes(entry.mode))
@@ -266,11 +283,25 @@ export class GithubRepository {
 			total += entry.size!;
 		}
 		if (total > MAX_PACKAGE_BYTES) throw new Error("Pacote excede 32 MiB.");
-		const files: SkillFile[] = [];
-		for (const entry of entries) {
-			const file = await this.read(entry.path, MAX_PACKAGE_FILE_BYTES);
-			files.push({ ...file, path: entry.path.slice(prefix.length) });
-		}
+		const files: SkillFile[] = new Array(entries.length);
+		let cursor = 0;
+		let failure: unknown;
+		const worker = async () => {
+			while (!failure && cursor < entries.length) {
+				const index = cursor++;
+				const entry = entries[index];
+				try {
+					const file = await this.read(entry.path, MAX_PACKAGE_FILE_BYTES);
+					files[index] = { ...file, path: entry.path.slice(prefix.length) };
+				} catch (error) {
+					failure = error;
+				}
+			}
+		};
+		await Promise.all(
+			Array.from({ length: Math.min(6, entries.length) }, worker),
+		);
+		if (failure) throw failure;
 		validatePackageFiles(files);
 		return files;
 	}
