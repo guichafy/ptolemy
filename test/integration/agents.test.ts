@@ -27,7 +27,7 @@
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentEvent, AgentKind } from "@/shared/agent-protocol";
@@ -68,6 +68,29 @@ const REPO = join(import.meta.dir, "..", "..");
 let localAgents: LocalAgents | null = null;
 if (!LIVE) {
 	localAgents = await configureLocalAgents(TMP, REPO);
+}
+
+// Only isolated local CLI configuration is changed; never write to real user Skills.
+const nativeNames = ["ptolemy-native-selected", "ptolemy-native-disabled"];
+if (!LIVE) {
+	for (const agent of ["claude", "codex"])
+		for (const name of nativeNames) {
+			const directory = join(TMP, `.${agent}`, "skills", name);
+			await mkdir(directory, { recursive: true });
+			await writeFile(
+				join(directory, "SKILL.md"),
+				`---\nname: ${name}\ndescription: PTOLEMY_NATIVE_${name.endsWith("selected") ? "SELECTED" : "DISABLED"}_SENTINEL\n---\nOnly an offline fixture.`,
+			);
+		}
+}
+const nativeIds: Partial<Record<AgentKind, string>> = {};
+const codexConfigPath = join(TMP, ".codex", "config.toml");
+let codexConfigBefore = "";
+if (!LIVE) {
+	// User-level enablement must lose to a conversation's explicit path disable;
+	// unrelated entries, model/provider and proxy semantics remain in that layer.
+	codexConfigBefore = `${await readFile(codexConfigPath, "utf8")}\n[[skills.config]]\npath = ${JSON.stringify(join(TMP, ".codex/skills", nativeNames[1], "SKILL.md"))}\nenabled = true\n[[skills.config]]\npath = "/unrelated/skill/SKILL.md"\nenabled = false\n`;
+	await writeFile(codexConfigPath, codexConfigBefore);
 }
 
 const sm = await import("../../src/bun/claude/session-manager");
@@ -236,6 +259,13 @@ beforeAll(async () => {
 			],
 		}),
 	});
+	if (!LIVE)
+		for (const agent of ["claude", "codex"] as const) {
+			nativeIds[agent] = (await catalog.list(agent)).find(
+				(skill) => skill.name === nativeNames[0],
+			)?.id;
+			expect(nativeIds[agent]).toBeTruthy();
+		}
 	integrationSkillId = (
 		await catalog.importGithub("https://github.com/ptolemy/test-fixture")
 	).id;
@@ -250,6 +280,8 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+	if (!LIVE)
+		expect(await readFile(codexConfigPath, "utf8")).toBe(codexConfigBefore);
 	localAgents?.stop();
 	await rm(TMP, { recursive: true, force: true });
 });
@@ -275,7 +307,10 @@ const LOCAL_TOOLS: Record<AgentKind, string[]> = {
 function createOptions(agent: AgentKind) {
 	return {
 		agent,
-		skillIds: [integrationSkillId],
+		skillIds: [
+			integrationSkillId,
+			...(nativeIds[agent] ? [nativeIds[agent]!] : []),
+		],
 		model: LIVE
 			? agent === "claude"
 				? CLAUDE_MODEL
@@ -348,6 +383,12 @@ function scenario(agent: AgentKind, other: AgentKind) {
 							: localAgents?.responsesMock.requests;
 					// The actual CLI must discover the Skill, not merely receive files.
 					expect(JSON.stringify(requests)).toContain(SKILL_NAME);
+					expect(JSON.stringify(requests)).toContain(
+						"PTOLEMY_NATIVE_SELECTED_SENTINEL",
+					);
+					expect(JSON.stringify(requests)).not.toContain(
+						"PTOLEMY_NATIVE_DISABLED_SENTINEL",
+					);
 					// The selected session model must reach the first API request.
 					if (agent === "claude") {
 						expect(
@@ -470,3 +511,33 @@ function scenario(agent: AgentKind, other: AgentKind) {
 
 scenario("codex", "claude");
 scenario("claude", "codex");
+
+for (const agent of ["codex", "claude"] as const) {
+	test.skipIf(LIVE || SKIP[agent] !== null)(
+		`${agent}: seleção vazia não redescobre Skills nativas`,
+		async () => {
+			const requests =
+				agent === "claude"
+					? localAgents!.anthropicMock.requests
+					: localAgents!.responsesMock.requests;
+			const start = requests.length;
+			const id = await sm.createSession("Responda só: oi", {
+				...createOptions(agent),
+				skillIds: [],
+			});
+			expect((await metaOf(id)).skillSelection).toBeDefined();
+			await sm.resumeSession(id);
+			expectCleanTurn(await waitTurn(id, 0, TURN_TIMEOUT), OK_REASON[agent]);
+			const effective = JSON.stringify(requests.slice(start));
+			expect(effective).not.toContain("PTOLEMY_NATIVE_SELECTED_SENTINEL");
+			expect(effective).not.toContain("PTOLEMY_NATIVE_DISABLED_SENTINEL");
+			expect(effective).not.toContain(SKILL_NAME);
+			if (agent === "codex") {
+				expect(effective).not.toContain("skill-creator");
+				expect(effective).not.toContain("skill-installer");
+			}
+			await sm.deleteSession(id);
+		},
+		TEST_TIMEOUT,
+	);
+}

@@ -10,7 +10,11 @@ import {
 import { dirname, join, relative, resolve } from "node:path";
 import { parseDocument, stringify } from "yaml";
 import type { AgentKind } from "@/shared/agent-protocol";
-import type { SessionSkill, SkillBundle } from "@/shared/skills";
+import type {
+	SessionSkill,
+	SessionSkillSelection,
+	SkillBundle,
+} from "@/shared/skills";
 import { writeJsonAtomic } from "../atomic-json";
 import { validateBundle } from "./validation";
 
@@ -231,4 +235,43 @@ export async function activateSkills(
 	} finally {
 		await rm(stage, { recursive: true, force: true });
 	}
+}
+
+/** Session flags are a separate Codex config layer; path rules leave model/proxy and unrelated rules intact. */
+export function buildCodexSkillConfig(
+	selection: SessionSkillSelection | undefined,
+	currentNativePaths: string[],
+	selectedPaths: string[] = [],
+): {
+	skills?: {
+		bundled: { enabled: boolean };
+		config: Array<{ path: string; enabled: boolean }>;
+	};
+} {
+	if (selection === undefined) return {};
+	if (
+		!selection ||
+		!Array.isArray(selection.nativePaths) ||
+		selection.nativePaths.some(
+			(path) =>
+				typeof path !== "string" ||
+				!path.startsWith("/") ||
+				!path.endsWith("/SKILL.md"),
+		)
+	)
+		throw new Error("Seleção nativa de Skills inválida.");
+	const enabled = new Set(selectedPaths);
+	const paths = new Set([
+		...selection.nativePaths,
+		...currentNativePaths,
+		...selectedPaths,
+	]);
+	return {
+		skills: {
+			// The CLI can regenerate .system after inventory, so suppress that
+			// source independently; selected system copies live in .agents/skills.
+			bundled: { enabled: false },
+			config: [...paths].map((path) => ({ path, enabled: enabled.has(path) })),
+		},
+	};
 }

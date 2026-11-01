@@ -1,10 +1,11 @@
-import type { ThreadOptions } from "@openai/codex-sdk";
+import type { CodexOptions, ThreadOptions } from "@openai/codex-sdk";
 import type { SessionInfoPatch } from "@/shared/agent-protocol";
 import type {
 	MessagePersister,
 	StreamMessageSender,
 } from "../claude/streaming";
 import type { CodexReasoningEffort, CodexSandboxMode } from "../settings";
+import { assertSkillSelectionSupport } from "../skills/runtime-support";
 import { buildCodexEnv, findCodexCli } from "./codex-cli";
 import { toSdkModel } from "./models";
 import { readCodexSessionInfo } from "./rollout-info";
@@ -32,10 +33,13 @@ export interface CodexRuntimeDeps {
 	onSessionInfo?: (patch: SessionInfoPatch) => void;
 	/** Injected in tests; defaults to reading the thread's rollout file. */
 	readSessionInfo?: (threadId: string) => Promise<SessionInfoPatch | null>;
+	/** Fresh inventory disables newly installed native Skills for explicit selections. */
+	loadSkillConfig?: () => Promise<NonNullable<CodexOptions["config"]>>;
 	/** Injected in tests; defaults to spawning the user's Codex CLI. */
 	createThread?: (
 		threadId: string | null,
 		options: ThreadOptions,
+		config: NonNullable<CodexOptions["config"]>,
 	) => Promise<CodexThreadLike>;
 }
 
@@ -69,13 +73,19 @@ export function buildThreadOptions(
 async function defaultCreateThread(
 	threadId: string | null,
 	options: ThreadOptions,
+	config: NonNullable<CodexOptions["config"]>,
 ): Promise<CodexThreadLike> {
 	// Imported lazily so the SDK (and its CLI lookup) only loads when a Codex
 	// session actually runs.
 	const { Codex } = await import("@openai/codex-sdk");
+	const cliPath = await findCodexCli();
+	const env = await buildCodexEnv();
+	if (config.skills)
+		await assertSkillSelectionSupport("codex", cliPath, undefined, env);
 	const codex = new Codex({
-		codexPathOverride: await findCodexCli(),
-		env: await buildCodexEnv(),
+		config,
+		codexPathOverride: cliPath,
+		env,
 	});
 	return threadId
 		? codex.resumeThread(threadId, options)
@@ -133,7 +143,12 @@ export class CodexSessionRuntime {
 			const config = await this.deps.loadConfig();
 			const options = buildThreadOptions(config, this.deps.cwd, modelOverride);
 			const createThread = this.deps.createThread ?? defaultCreateThread;
-			const thread = await createThread(this.currentThreadId, options);
+			const skillConfig = (await this.deps.loadSkillConfig?.()) ?? {};
+			const thread = await createThread(
+				this.currentThreadId,
+				options,
+				skillConfig,
+			);
 			await runCodexTurn({
 				thread,
 				prompt,

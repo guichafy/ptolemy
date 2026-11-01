@@ -20,6 +20,14 @@ describe("buildQueryOptions", () => {
 		expect(opts.canUseTool).toBe(baseArgs.canUseTool);
 		expect(opts.allowedTools).not.toContain("Skill");
 	});
+	test("blocks native Skill rediscovery only for explicit selections while selected plugin Skills stay enabled", () => {
+		expect(
+			buildQueryOptions({ ...baseArgs, explicitSkillSelection: true })
+				.managedSettings,
+		).toEqual({ strictPluginOnlyCustomization: ["skills"] });
+		expect(buildQueryOptions(baseArgs).managedSettings).toBeUndefined();
+	});
+
 	test("includes model, cwd, permissionMode, allowed read-only tools", () => {
 		const opts = buildQueryOptions(baseArgs);
 		expect(opts.model).toBe("claude-sonnet-4-6");

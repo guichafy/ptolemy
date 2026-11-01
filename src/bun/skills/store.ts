@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
+import { readdir, readFile, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import type { AgentKind } from "@/shared/agent-protocol";
 import type { SkillBundle, SkillSummary } from "@/shared/skills";
 import { writeJsonAtomic } from "../atomic-json";
@@ -17,6 +17,7 @@ interface RegisteredSkill extends SkillBundle {
 interface SkillIndex {
 	version: 1;
 	skills: RegisteredSkill[];
+	defaults?: Partial<Record<AgentKind, string[]>>;
 }
 interface StoreOptions {
 	root?: string;
@@ -54,6 +55,7 @@ export class SkillsStore {
 				join(homedir(), ".agents", "skills"),
 				join(codexHome, "skills"),
 				join(codexHome, "skills", ".system"),
+				"/etc/codex/skills",
 			],
 		};
 	}
@@ -65,52 +67,76 @@ export class SkillsStore {
 		const native: SkillSummary[] = [];
 		const seen = new Set<string>();
 		for (const root of this.harnessRoots[agent]) {
-			const entries = await readdir(root, { withFileTypes: true }).catch(
-				() => [],
-			);
-			for (const entry of entries) {
-				if (
-					(!entry.isDirectory() && !entry.isSymbolicLink()) ||
-					entry.name.startsWith(".")
-				)
-					continue;
+			for (const path of await this.discover(root)) {
+				if (seen.has(path)) continue;
+				seen.add(path);
 				try {
-					// Discovery reads metadata only. Claude's compatible user Skills
-					// are copied later, when preparing the isolated session plugin.
-					const path = join(root, entry.name, "SKILL.md");
-					const text = await readNativeDocument(path);
-					const metadata = validateSkill(text, entry.name, true);
-					if (seen.has(metadata.name)) continue;
-					seen.add(metadata.name);
+					const metadata = validateSkill(
+						await readNativeDocument(path),
+						basename(dirname(path)),
+						true,
+					);
 					let unavailableReason: string | undefined;
-					if (agent === "claude") {
-						try {
-							const files = await readNativeFiles(join(root, entry.name));
-							validateBundle({
-								...metadata,
-								files,
-								source: { kind: "harness", agent },
-							});
-						} catch (error) {
-							unavailableReason =
-								error instanceof Error
-									? error.message
-									: "Skill local indisponível.";
-						}
+					try {
+						validateBundle({
+							...metadata,
+							files: await readNativeFiles(dirname(path)),
+							source: { kind: "harness", agent },
+						});
+					} catch (error) {
+						unavailableReason =
+							error instanceof Error
+								? error.message
+								: "Skill local indisponível.";
 					}
 					native.push({
 						...metadata,
 						id: `harness:${createHash("sha256").update(path).digest("hex")}`,
 						source: { kind: "harness", agent },
 						defaultFor: unavailableReason ? [] : [agent],
+						origin:
+							root.endsWith("/.system") || root === "/etc/codex/skills"
+								? "system"
+								: "local",
+						localPath: path,
 						...(unavailableReason ? { unavailableReason } : {}),
 					});
-				} catch {
-					/* CLI-owned extensions may use a different format. */
+				} catch (error) {
+					native.push({
+						id: `harness:${createHash("sha256").update(path).digest("hex")}`,
+						name: basename(dirname(path)),
+						description: "Skill local indisponível.",
+						source: { kind: "harness", agent },
+						defaultFor: [],
+						origin:
+							root.endsWith("/.system") || root === "/etc/codex/skills"
+								? "system"
+								: "local",
+						localPath: path,
+						unavailableReason:
+							error instanceof Error
+								? error.message
+								: "Metadados locais inválidos.",
+					});
 				}
 			}
 		}
-		return [...native, ...index.skills.map(summary)];
+		const result = [...native, ...index.skills.map(summary)];
+		if (index.defaults) {
+			for (const skill of result) {
+				for (const kind of ["claude", "codex"] as const) {
+					const defaults = index.defaults[kind];
+					if (defaults !== undefined)
+						skill.defaultFor = [
+							...skill.defaultFor.filter((a) => a !== kind),
+							...(defaults.includes(skill.id) && !skill.unavailableReason
+								? [kind]
+								: []),
+						];
+				}
+			}
+		}
+		return result;
 	}
 
 	async importGithub(url: string): Promise<SkillSummary> {
@@ -134,8 +160,10 @@ export class SkillsStore {
 	async setDefaults(agent: AgentKind, ids: string[]): Promise<void> {
 		if (agent !== "claude" && agent !== "codex")
 			throw new Error("Agente inválido.");
+		await this.resolveForSession(agent, ids);
 		await this.mutate((index) => {
-			this.select(index, ids);
+			index.defaults ??= {};
+			index.defaults[agent] = [...new Set(ids)];
 			for (const skill of index.skills)
 				skill.defaultFor = [
 					...skill.defaultFor.filter((value) => value !== agent),
@@ -152,37 +180,101 @@ export class SkillsStore {
 		agent: AgentKind,
 		ids: string[],
 	): Promise<Array<SkillBundle & { id: string }>> {
-		const selected = await this.resolve(ids);
-		// Codex discovers its user/system Skills itself. Claude SDK isolation
-		// excludes user settings, so mirror user Skills into our isolated plugin.
-		if (agent !== "claude") return selected;
-		const native = (await this.list(agent)).filter(
-			(skill) => skill.source.kind === "harness" && !skill.unavailableReason,
-		);
-		const bundles: Array<SkillBundle & { id: string }> = [];
-		for (const skill of native) {
-			if (selected.some((item) => item.name === skill.name))
-				throw new Error(`A Skill ${skill.name} já existe no harness.`);
-			for (const root of this.harnessRoots.claude) {
-				const id = `harness:${createHash("sha256")
-					.update(join(root, skill.name, "SKILL.md"))
-					.digest("hex")}`;
-				if (id !== skill.id) continue;
-				const bundle = {
-					...skill,
-					files: await readNativeFiles(join(root, skill.name)),
-				};
-				validateBundle(bundle);
-				bundles.push(bundle);
-			}
+		if (
+			!Array.isArray(ids) ||
+			ids.length > 128 ||
+			ids.some((id) => typeof id !== "string")
+		)
+			throw new Error("Seleção de Skills inválida.");
+		const index = await this.read();
+		const catalog = await this.list(agent);
+		const selected: Array<SkillBundle & { id: string }> = [];
+		const names = new Set<string>();
+		for (const id of new Set(ids)) {
+			const skill = catalog.find((item) => item.id === id);
+			if (!skill) throw new Error("Skill não encontrada no catálogo.");
+			if (skill.unavailableReason) throw new Error(skill.unavailableReason);
+			if (names.has(skill.name))
+				throw new Error(`Skills com mesmo nome na seleção: ${skill.name}.`);
+			names.add(skill.name);
+			const bundle =
+				skill.source.kind === "harness"
+					? {
+							id,
+							name: skill.name,
+							description: skill.description,
+							source: skill.source,
+							files: await readNativeFiles(dirname(skill.localPath!)),
+						}
+					: index.skills.find((item) => item.id === id)!;
+			validateBundle(bundle);
+			selected.push(bundle);
 		}
-		return [...bundles, ...selected];
+		return selected;
 	}
 
 	async defaults(agent: AgentKind): Promise<string[]> {
-		return (await this.read()).skills
-			.filter((skill) => skill.defaultFor.includes(agent))
+		return (await this.list(agent))
+			.filter(
+				(skill) => skill.defaultFor.includes(agent) && !skill.unavailableReason,
+			)
 			.map((skill) => skill.id);
+	}
+
+	/** Include even unreadable/incompatible entries so disabled paths cannot rediscover them. */
+	async nativePaths(agent: AgentKind, cwd?: string): Promise<string[]> {
+		const roots = new Set(this.harnessRoots[agent]);
+		if (agent === "codex" && cwd) {
+			let directory = cwd;
+			while (true) {
+				roots.add(join(directory, ".agents", "skills"));
+				const parent = dirname(directory);
+				if (parent === directory) break;
+				directory = parent;
+			}
+		}
+		const paths = new Set<string>();
+		for (const root of roots)
+			for (const path of await this.discover(root)) paths.add(path);
+		return [...paths];
+	}
+
+	private async discover(root: string): Promise<string[]> {
+		const paths: string[] = [];
+		const visited = new Set<string>();
+		let entriesSeen = 0;
+		async function visit(directory: string, depth: number): Promise<void> {
+			if (depth > 16)
+				throw new Error(
+					"Inventário de Skills excede o limite de profundidade.",
+				);
+			const canonical = await realpath(directory).catch(() => null);
+			if (!canonical || visited.has(canonical)) return;
+			visited.add(canonical);
+			if (
+				depth &&
+				(await stat(join(directory, "SKILL.md")).then(
+					(s) => s.isFile(),
+					() => false,
+				))
+			) {
+				paths.push(join(directory, "SKILL.md"));
+				return;
+			}
+			for (const entry of await readdir(directory, {
+				withFileTypes: true,
+			}).catch(() => [])) {
+				if (++entriesSeen > 16384)
+					throw new Error("Inventário de Skills excede o limite de arquivos.");
+				if (
+					(entry.isDirectory() || entry.isSymbolicLink()) &&
+					!entry.name.startsWith(".")
+				)
+					await visit(join(directory, entry.name), depth + 1);
+			}
+		}
+		await visit(root, 0);
+		return paths;
 	}
 
 	private select(index: SkillIndex, ids: string[]): RegisteredSkill[] {
@@ -235,6 +327,19 @@ export class SkillsStore {
 			ids.add(skill.id);
 			names.add(skill.name);
 		}
+		if (
+			data.defaults !== undefined &&
+			(!data.defaults ||
+				typeof data.defaults !== "object" ||
+				Object.entries(data.defaults).some(
+					([agent, ids]) =>
+						!["claude", "codex"].includes(agent) ||
+						!Array.isArray(ids) ||
+						ids.length > 128 ||
+						ids.some((id) => typeof id !== "string"),
+				))
+		)
+			throw new Error("Padrões de Skills inválidos.");
 		return data;
 	}
 
