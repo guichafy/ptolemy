@@ -47,6 +47,13 @@ async function runLoginShell(script: string): Promise<string | null> {
 }
 
 export async function detectCodexCli(): Promise<CodexCliInfo> {
+	// Explicit override for unusual installs (and the integration tests).
+	const override = process.env.PTOLEMY_CODEX_PATH;
+	if (override) {
+		return (await Bun.file(override).exists())
+			? { installed: true, path: override }
+			: { installed: false };
+	}
 	if (cachedCliPath && (await Bun.file(cachedCliPath).exists())) {
 		return { installed: true, path: cachedCliPath };
 	}
