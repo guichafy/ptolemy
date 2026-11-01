@@ -209,7 +209,7 @@ Lefthook installs automatically via `bun install` (the `prepare` script runs `le
 
 **Landing page**
 
-The project site lives in `site/` (Astro). Run it with `bun run dev:site`; it is deployed to GitHub Pages by `.github/workflows/site.yml`.
+The project site lives in `site/` (Astro). Run it with `bun run dev:site`; it is deployed to GitHub Pages by `.github/workflows/site.yml`, which runs after the Release workflow and is the only publisher of `gh-pages` (site, release mirror and `latest.json` in one commit, then it waits until Pages serves that commit). To redeploy, run the Site workflow; do not re-run old "pages build and deployment" runs.
 
 ## Releases
 

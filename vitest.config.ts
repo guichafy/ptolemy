@@ -41,6 +41,7 @@ export default defineConfig({
 						"src/bun/**/*.test.{ts,tsx}",
 						"src/chatview/lib/**/*.test.{ts,tsx}",
 						"src/chatview/hooks/**/*.test.{ts,tsx}",
+						"scripts/**/*.test.ts",
 					],
 					setupFiles: ["src/bun/vitest.setup.ts"],
 				},

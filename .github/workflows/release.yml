@@ -4,14 +4,17 @@ on:
   push:
     branches: [main]
 
+# Publishes the GitHub release only. The Pages mirror of the zip, latest.json
+# and the landing page are published by the Site workflow, which runs after
+# this one finishes (workflow_run), so gh-pages has a single publisher.
+
 permissions:
   contents: write
   issues: write
   pull-requests: write
-  actions: write
 
 concurrency:
-  group: gh-pages-publish
+  group: release
   cancel-in-progress: false
 
 jobs:
@@ -54,20 +57,8 @@ jobs:
             echo "No release produced this run."
           fi
 
-      - name: Stage Pages mirror
-        if: steps.release.outputs.published == 'true'
-        run: bun run scripts/build-pages-mirror.ts "${{ steps.release.outputs.version }}" "${{ steps.release.outputs.zip }}"
-
-      - name: Deploy to GitHub Pages
-        if: steps.release.outputs.published == 'true'
-        uses: peaceiris/actions-gh-pages@v4
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./pages-dist
-          publish_branch: gh-pages
-          keep_files: true
-          commit_message: "chore(pages): publish v${{ steps.release.outputs.version }} mirror"
-
+      # The mirror goes live when the Site workflow (triggered by the end of
+      # this run) publishes it, a few minutes from now.
       - name: Annotate release with Pages mirror link
         if: steps.release.outputs.published == 'true'
         env:
@@ -82,9 +73,3 @@ jobs:
             cat /tmp/body.md
           } > /tmp/new-body.md
           gh release edit "v${VERSION}" --notes-file /tmp/new-body.md
-
-      - name: Trigger site rebuild (refresh /releases)
-        if: steps.release.outputs.published == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh workflow run site.yml --ref main

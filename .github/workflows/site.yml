@@ -1,17 +1,32 @@
 name: Site
 
+# The only workflow that publishes to gh-pages. Every publish carries the
+# whole site: the landing page (site/), the release mirror (v<version>/*.zip)
+# and latest.json. One push per run means one Pages build per run, and the
+# run only ends once Pages serves that commit (scripts/pages-deploy.ts).
+#
+# Order of a merge to main:
+#   push → Release (semantic-release, may publish a GitHub release)
+#        → Site (workflow_run, after Release finishes) → one gh-pages push
+#
+# Release runs on every push to main, so waiting for it covers site-only
+# changes too, and the site never builds before the release it lists exists.
+# Release commits ("[skip ci]") start nothing.
+
 on:
-  push:
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
     branches: [main]
-    paths:
-      - "site/**"
-      - ".github/workflows/site.yml"
-      - "scripts/build-pages-mirror.ts"
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: write # push gh-pages
+  pages: write # request a Pages build when one fails or goes missing
+  deployments: read # read the github-pages deployment status
 
+# One publish at a time, in order. A newer pending run replaces an older
+# pending one, which is fine: each run publishes the full current state.
 concurrency:
   group: gh-pages-publish
   cancel-in-progress: false
@@ -19,9 +34,17 @@ concurrency:
 jobs:
   build:
     name: Build & deploy landing
+    # A cancelled Release (superseded by a newer push) leaves the publish to
+    # the Release run that follows it.
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion != 'cancelled'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
+      # workflow_run runs on the default branch head, which already includes
+      # the release commit (version bump) when Release published one.
       - uses: actions/checkout@v4
+        with:
+          ref: main
 
       - uses: actions/setup-node@v4
         with:
@@ -39,12 +62,27 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bun run build
 
-      # Regenerate latest.json from what is on gh-pages so it always points at
-      # the current Pages path (keep_files would otherwise leave a stale copy).
-      - name: Refresh latest.json
+      # Mirror the latest release zip on Pages when gh-pages does not have it
+      # yet, and regenerate latest.json either way (keep_files would otherwise
+      # leave a stale copy).
+      - name: Stage release mirror
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          bun run scripts/build-pages-mirror.ts --latest-only
-          if [ -f pages-dist/latest.json ]; then cp pages-dist/latest.json site/dist/latest.json; fi
+          set -euo pipefail
+          git fetch --depth=1 origin +refs/heads/gh-pages:refs/remotes/origin/gh-pages || true
+          TAG=$(gh release view --json tagName -q .tagName 2>/dev/null || true)
+          VERSION="${TAG#v}"
+          ZIP="ptolemy-${VERSION}-macos-arm64.zip"
+          if [ -n "$VERSION" ] && ! git cat-file -e "origin/gh-pages:v${VERSION}/${ZIP}" 2>/dev/null; then
+            echo "Mirroring ${TAG} (${ZIP})"
+            gh release download "$TAG" --pattern "$ZIP" --dir .
+            bun run scripts/build-pages-mirror.ts "$VERSION" "$ZIP"
+          else
+            echo "Latest release ${TAG:-none} already mirrored"
+            bun run scripts/build-pages-mirror.ts --latest-only
+          fi
+          if [ -d pages-dist ]; then cp -R pages-dist/. site/dist/; fi
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
@@ -54,3 +92,13 @@ jobs:
           publish_branch: gh-pages
           keep_files: true
           commit_message: "chore(site): publish ${{ github.sha }}"
+
+      # Pages builds each gh-pages push on its own. Wait for the build of the
+      # commit just pushed (or the current head, when nothing changed) and
+      # request a new build if it fails, stalls, or an older commit went live.
+      - name: Wait for Pages to serve this commit
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          SHA=$(git ls-remote origin refs/heads/gh-pages | cut -f1)
+          bun run scripts/pages-deploy.ts "$SHA"
