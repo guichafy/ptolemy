@@ -273,7 +273,17 @@ const LOCAL_TOOLS: Record<AgentKind, string[]> = {
 };
 
 function createOptions(agent: AgentKind) {
-	return { agent, skillIds: [integrationSkillId] };
+	return {
+		agent,
+		skillIds: [integrationSkillId],
+		model: LIVE
+			? agent === "claude"
+				? CLAUDE_MODEL
+				: CODEX_MODEL
+			: agent === "claude"
+				? "sonnet"
+				: "gpt-6.1-sol",
+	};
 }
 
 function scenario(agent: AgentKind, other: AgentKind) {
@@ -289,6 +299,12 @@ function scenario(agent: AgentKind, other: AgentKind) {
 			const meta = await metaOf(state.id);
 			state.projectPath = meta.projectPath;
 			expect(sm.sessionAgent(meta)).toBe(agent);
+			if (!LIVE) {
+				expect(meta.model).toBe(agent === "claude" ? "sonnet" : "gpt-6.1-sol");
+				const settings = await loadSettings();
+				expect(settings.claude.model).toBe("haiku");
+				expect(settings.codex.model).toBe("default");
+			}
 			expect(meta.skills).toContainEqual(
 				expect.objectContaining({ id: integrationSkillId, name: SKILL_NAME }),
 			);
@@ -332,6 +348,20 @@ function scenario(agent: AgentKind, other: AgentKind) {
 							: localAgents?.responsesMock.requests;
 					// The actual CLI must discover the Skill, not merely receive files.
 					expect(JSON.stringify(requests)).toContain(SKILL_NAME);
+					// The selected session model must reach the first API request.
+					if (agent === "claude") {
+						expect(
+							localAgents?.anthropicMock.requests.some((request) =>
+								String(request.model).includes("sonnet"),
+							),
+						).toBe(true);
+					} else {
+						expect(
+							localAgents?.responsesMock.requests.some(
+								(request) => request.body.model === "gpt-6.1-sol",
+							),
+						).toBe(true);
+					}
 				}
 
 				const tools = ofType(turn, "tool-call").map((t) => t.toolName);
@@ -421,7 +451,9 @@ function scenario(agent: AgentKind, other: AgentKind) {
 
 				const meta = await metaOf(state.id);
 				expect(meta.sdkSessionId).toBe(state.sdkId);
-				if (agent === "claude") expect(meta.model).toBe(CLAUDE_MODEL);
+				if (agent === "claude")
+					expect(meta.model).toBe(LIVE ? CLAUDE_MODEL : "sonnet");
+				else if (!LIVE) expect(meta.model).toBe("gpt-6.1-sol");
 			},
 			TEST_TIMEOUT * 2,
 		);

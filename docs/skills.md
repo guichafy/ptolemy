@@ -1,6 +1,8 @@
 # Skills no Claude e Codex
 
-Selecione **Claude** ou **Codex** na paleta. O composer permite escrever uma mensagem com várias linhas e preparar Skills antes de iniciar a conversa. **Enter** inicia a conversa; **Shift+Enter** adiciona uma linha. As sessões recentes continuam abaixo do composer.
+Selecione **Claude** ou **Codex** na paleta. O composer permite escrever uma mensagem com várias linhas e escolher o modelo e preparar Skills antes de iniciar a conversa. O modelo começa com o padrão do agente; uma seleção diferente vale só para a nova sessão e é mantida na janela de conversa e na retomada. **Enter** inicia a conversa; **Shift+Enter** adiciona uma linha. As sessões recentes continuam abaixo do composer.
+
+**Tab/Shift+Tab** percorre os controles. Na barra de plugins, **←/→** troca de aba e **Home/End** vai ao início/fim. **Ctrl+Tab/Ctrl+Shift+Tab** troca de plugin a partir dos controles da paleta. **↑/↓** navega nos resultados e nas opções de Skills/filtros. No composer vazio, as setas alcançam as sessões recentes; com texto, continuam editando a mensagem. Seletores abertos mantêm o foco e as teclas dentro de suas opções até fechar.
 
 Abra **Skills**, cole uma URL pública do GitHub e clique em **Importar Skill**. São aceitos:
 

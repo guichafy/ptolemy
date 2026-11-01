@@ -67,7 +67,7 @@ export const Timing = {
 	RESULTS_POLL: 500,
 } as const;
 
-// Providers cycled by Tab, in the default `enabledOrder`. Tests use these
+// Providers cycled by Ctrl+Tab, in the default `enabledOrder`. Tests use these
 // indices to navigate deterministically between screenshots.
 export const Providers = ["apps", "github", "calc", "web", "claude"] as const;
 export type ProviderId = (typeof Providers)[number];

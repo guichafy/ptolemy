@@ -34,6 +34,8 @@ export interface ModelPickerProps {
 	 * shown muted next to the trigger label.
 	 */
 	resolvedLabel?: string | null;
+	/** Label when model discovery has no entries (loading or unavailable). */
+	emptyLabel?: string;
 }
 
 export function ModelPicker({
@@ -45,6 +47,7 @@ export function ModelPicker({
 	placeholder = "Selecionar modelo",
 	sessionDefault,
 	resolvedLabel,
+	emptyLabel = "Carregando modelos...",
 }: ModelPickerProps) {
 	const [open, setOpen] = useState(false);
 
@@ -58,7 +61,7 @@ export function ModelPicker({
 				className={cn("text-xs", variant === "session" && "h-6 px-2")}
 				aria-label={placeholder}
 			>
-				Carregando modelos...
+				{emptyLabel}
 			</Button>
 		);
 	}
@@ -91,7 +94,7 @@ export function ModelPicker({
 				: "h-8 px-3 text-sm";
 
 	return (
-		<div className="flex items-center gap-1">
+		<div className="flex min-w-0 items-center gap-1">
 			<ModelSelector open={open} onOpenChange={setOpen}>
 				<ModelSelectorTrigger asChild>
 					<Button

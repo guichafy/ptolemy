@@ -725,6 +725,7 @@ async function createCodexSession(
 	prompt: string,
 	project: Project,
 	skills: SessionSkill[],
+	model?: string,
 ): Promise<string> {
 	const settings = await loadSettings();
 	const now = new Date().toISOString();
@@ -736,7 +737,7 @@ async function createCodexSession(
 		title: generateTitle(prompt),
 		projectId: project.id,
 		projectPath: project.path,
-		model: settings.codex.model,
+		model: model ?? settings.codex.model,
 		createdAt: now,
 		updatedAt: now,
 		messageCount: 1,
@@ -787,12 +788,24 @@ export async function listSessions(): Promise<SessionMeta[]> {
  */
 export async function createSession(
 	prompt: string,
-	opts: { projectId?: string; agent?: AgentKind; skillIds?: string[] } = {},
+	opts: {
+		projectId?: string;
+		agent?: AgentKind;
+		skillIds?: string[];
+		model?: string;
+	} = {},
 ): Promise<string> {
 	const t0 = Date.now();
 	const id = crypto.randomUUID();
 	if (opts.agent && opts.agent !== "claude" && opts.agent !== "codex")
 		throw new Error("Agente inválido.");
+	if (
+		opts.model !== undefined &&
+		(typeof opts.model !== "string" ||
+			!opts.model.trim() ||
+			opts.model.length > 256)
+	)
+		throw new Error("Modelo inválido.");
 	const skillIds =
 		opts.skillIds ?? (await skillsStore.defaults(opts.agent ?? "claude"));
 	// Resolve before provisioning a project or mutating the session index.
@@ -821,14 +834,15 @@ export async function createSession(
 
 	if (opts.agent === "codex") {
 		const skills = await snapshotSkills(SESSIONS_DIR, id, selectedSkills);
-		return createCodexSession(id, prompt, project, skills);
+		return createCodexSession(id, prompt, project, skills, opts.model);
 	}
 	verbose(
 		`[claude:session] createSession prompt preview: id=${id} prompt="${previewText(prompt)}"`,
 	);
 
 	const settings = await loadSettings();
-	const { model, permissionMode, authMode } = settings.claude;
+	const { permissionMode, authMode } = settings.claude;
+	const model = opts.model ?? settings.claude.model;
 	verbose(
 		`[claude:session] createSession settings: model=${model} permissionMode=${permissionMode} authMode=${authMode}`,
 	);

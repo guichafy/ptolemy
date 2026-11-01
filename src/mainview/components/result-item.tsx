@@ -6,9 +6,15 @@ interface ResultItemProps {
 	result: SearchResult;
 	isSelected: boolean;
 	onSelect?: () => void;
+	onFocus?: () => void;
 }
 
-export function ResultItem({ result, isSelected, onSelect }: ResultItemProps) {
+export function ResultItem({
+	result,
+	isSelected,
+	onSelect,
+	onFocus,
+}: ResultItemProps) {
 	const ref = useRef<HTMLButtonElement>(null);
 
 	useEffect(() => {
@@ -21,6 +27,8 @@ export function ResultItem({ result, isSelected, onSelect }: ResultItemProps) {
 		<button
 			ref={ref}
 			type="button"
+			data-palette-result
+			onFocus={onFocus}
 			className={cn(
 				"group relative flex items-center gap-3 px-3 py-2.5 w-full text-left rounded-[10px] transition-colors",
 				isSelected
