@@ -139,3 +139,85 @@ test("OAuth scope draft retains separators during sequential typing and parses o
 		}),
 	});
 });
+
+test.each([
+	false,
+	true,
+])("untouched absent OAuth scopes remain absent when saved (existing=%s)", async (isSaved) => {
+	render(
+		<McpEditor
+			isSaved={isSaved}
+			initial={{
+				id: "x",
+				name: "Remote",
+				transport: "http",
+				url: "https://mcp.example",
+				auth: { type: "oauth" },
+				defaults: { claude: false, codex: false },
+			}}
+			onSaved={() => {}}
+			onCancel={() => {}}
+		/>,
+	);
+	if (isSaved) await userEvent.type(screen.getByLabelText("Nome"), " renamed");
+	await userEvent.click(
+		screen.getByRole("button", { name: "Salvar servidor" }),
+	);
+	const saved = request.agentMcpSave.mock.calls[0][0].draft;
+	expect(saved.auth).toEqual({ type: "oauth" });
+	expect(saved.auth).not.toHaveProperty("scopes");
+});
+
+test("untouched explicit empty OAuth scopes remain explicit", async () => {
+	render(
+		<McpEditor
+			isSaved
+			initial={{
+				id: "x",
+				name: "Remote",
+				transport: "http",
+				url: "https://mcp.example",
+				auth: { type: "oauth", scopes: [] },
+				defaults: { claude: false, codex: false },
+			}}
+			onSaved={() => {}}
+			onCancel={() => {}}
+		/>,
+	);
+	await userEvent.type(screen.getByLabelText("Nome"), " renamed");
+	await userEvent.click(
+		screen.getByRole("button", { name: "Salvar servidor" }),
+	);
+	expect(request.agentMcpSave.mock.calls[0][0].draft.auth).toEqual({
+		type: "oauth",
+		scopes: [],
+	});
+});
+
+test("deliberately clearing explicit OAuth scopes saves an empty selection", async () => {
+	render(
+		<McpEditor
+			isSaved
+			initial={{
+				id: "x",
+				name: "Remote",
+				transport: "http",
+				url: "https://mcp.example",
+				auth: { type: "oauth", scopes: ["read", "write"] },
+				defaults: { claude: false, codex: false },
+			}}
+			onSaved={() => {}}
+			onCancel={() => {}}
+		/>,
+	);
+	await userEvent.clear(
+		screen.getByLabelText("Escopos (separados por espaço)"),
+	);
+	await userEvent.click(
+		screen.getByRole("button", { name: "Salvar servidor" }),
+	);
+	expect(request.agentMcpSave.mock.calls[0][0].draft.auth).toEqual({
+		type: "oauth",
+		scopes: [],
+	});
+});

@@ -130,6 +130,7 @@ export function McpEditor({
 	const [scopes, setScopes] = useState(
 		initial.transport === "http" ? (initial.auth?.scopes?.join(" ") ?? "") : "",
 	);
+	const [scopesEdited, setScopesEdited] = useState(false);
 	const [args, setArgs] = useState(
 		initial.transport === "stdio" ? JSON.stringify(initial.args ?? []) : "[]",
 	);
@@ -260,7 +261,9 @@ export function McpEditor({
 						? {
 								auth: {
 									...draft.auth,
-									scopes: scopes.split(/\s+/).filter(Boolean),
+									...(scopesEdited
+										? { scopes: scopes.split(/\s+/).filter(Boolean) }
+										: {}),
 								},
 							}
 						: {}),
@@ -441,6 +444,7 @@ export function McpEditor({
 								value={scopes}
 								onChange={(e) => {
 									setScopes(e.target.value);
+									setScopesEdited(true);
 									change({});
 								}}
 							/>
