@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { beforeEach, expect, it, vi } from "vitest";
@@ -168,4 +168,72 @@ it("chooses the Codex plugin catalog independently of Claude", async () => {
 			screen.getByRole("combobox", { name: "Fonte de Plugins" }),
 		).toHaveValue("claude-plugins"),
 	);
+});
+
+it("immediately acknowledges a slow item inspection and prevents duplicate clicks until details open", async () => {
+	let finish!: (value: { summary: ExtensionSummary; capabilities: [] }) => void;
+	request.agentExtensionInspect.mockReturnValueOnce(
+		new Promise((resolve) => {
+			finish = resolve;
+		}),
+	);
+	render(<Harness />);
+	await userEvent.click(
+		screen.getByRole("tab", { name: "Marketplace de Skills" }),
+	);
+	const item = await screen.findByRole("button", { name: /Fixture Skill/ });
+	await userEvent.click(item);
+	expect(screen.getByRole("status")).toHaveTextContent(
+		"Carregando detalhes de Fixture Skill",
+	);
+	expect(item).toHaveAttribute("aria-busy", "true");
+	expect(item).toBeDisabled();
+	await userEvent.click(item);
+	expect(request.agentExtensionInspect).toHaveBeenCalledTimes(1);
+	await act(async () => {
+		finish({ summary: pkg, capabilities: [] });
+	});
+	expect(
+		await screen.findByRole("heading", { name: "Fixture Skill" }),
+	).toBeVisible();
+	expect(screen.queryByText(/Carregando detalhes de/)).not.toBeInTheDocument();
+	expect(
+		screen.getByRole("button", { name: "Voltar à lista de Skills" }),
+	).toBeEnabled();
+});
+it("replaces inspection feedback with a nearby error and lets the user retry without losing the catalog", async () => {
+	let fail!: (error: Error) => void;
+	request.agentExtensionInspect.mockReturnValueOnce(
+		new Promise((_resolve, reject) => {
+			fail = reject;
+		}),
+	);
+	render(<Harness />);
+	await userEvent.click(
+		screen.getByRole("tab", { name: "Marketplace de Skills" }),
+	);
+	const item = await screen.findByRole("button", { name: /Fixture Skill/ });
+	await userEvent.click(item);
+	expect(screen.getByRole("status")).toHaveTextContent(
+		"Carregando detalhes de Fixture Skill",
+	);
+	await act(async () => {
+		fail(new Error("Não foi possível buscar os detalhes."));
+	});
+	expect(screen.queryByText(/Carregando detalhes de/)).not.toBeInTheDocument();
+	const error = screen.getByRole("alert");
+	expect(error).toHaveTextContent("Não foi possível buscar os detalhes.");
+	expect(item).toBeEnabled();
+	expect(item).not.toHaveAttribute("aria-busy", "true");
+	request.agentExtensionInspect.mockResolvedValueOnce({
+		summary: pkg,
+		capabilities: [],
+	});
+	await userEvent.click(
+		within(error).getByRole("button", { name: "Tentar novamente" }),
+	);
+	expect(
+		await screen.findByRole("heading", { name: "Fixture Skill" }),
+	).toBeVisible();
+	expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 });
