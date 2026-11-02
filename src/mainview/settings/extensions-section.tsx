@@ -176,7 +176,7 @@ export function ExtensionsSection() {
 		});
 	}
 	const updateCapabilities = useCallback(
-		async (pkg: ExtensionSummary, ids: string[], trust: boolean) => {
+		async (pkg: ExtensionSummary, trust: boolean) => {
 			const request = ++sequence.current;
 			try {
 				const result = await rpc.request.agentExtensionReview({
@@ -185,11 +185,11 @@ export function ExtensionsSection() {
 					revision: pkg.revision,
 					...(trust ? { trustedHookDigest: pkg.revision } : {}),
 				});
-				if (request === sequence.current) setCaps(result);
+				if (mounted.current && request === sequence.current) setCaps(result);
 			} catch (err) {
-				if (request === sequence.current) setError(errorText(err));
+				if (mounted.current && request === sequence.current)
+					setError(errorText(err));
 			}
-			setEnabled(ids);
 		},
 		[agent],
 	);
@@ -739,15 +739,7 @@ export function ExtensionsSection() {
 																			?.kind !== "hook",
 																),
 															);
-															void updateCapabilities(
-																detail,
-																enabled.filter(
-																	(id) =>
-																		detail.components.find((c) => c.id === id)
-																			?.kind !== "hook",
-																),
-																e.target.checked,
-															);
+															void updateCapabilities(detail, e.target.checked);
 														}}
 													/>
 													Autorizar execução dos hooks desta revisão (

@@ -243,3 +243,27 @@ describe("Skills catalog", () => {
 		expect(await store.list("claude")).toEqual([]);
 	});
 });
+
+test("saved defaults distinguish absence from explicit none and do not depend on native availability", async () => {
+	const native = join(root, "native", "review");
+	await mkdir(native, { recursive: true });
+	await writeFile(
+		join(native, "SKILL.md"),
+		Buffer.from(bundle.files[0].content, "base64"),
+	);
+	const store = new SkillsStore({
+		root: join(root, "catalog"),
+		harnessRoots: { claude: [join(root, "native")], codex: [] },
+	});
+	expect(await store.savedDefaults("claude")).toBeUndefined();
+	const [skill] = await store.list("claude");
+	expect(await store.defaults("claude")).toEqual([skill.id]);
+	expect(await store.savedDefaults("claude")).toBeUndefined();
+	await store.setDefaults("claude", [skill.id]);
+	await rm(native, { recursive: true });
+	expect(await store.defaults("claude")).toEqual([]);
+	expect(await store.savedDefaults("claude")).toEqual([skill.id]);
+	await store.setDefaults("claude", []);
+	expect(await store.savedDefaults("claude")).toEqual([]);
+	expect(await store.savedDefaults("codex")).toBeUndefined();
+});

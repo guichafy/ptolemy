@@ -17,6 +17,8 @@ export interface ExtensionCapability {
 	reason: string;
 }
 export interface ExtensionInventory {
+	/** Persisted Skill IDs only, independent of availability; absence is distinct from explicit []. */
+	skillDefaults?: string[];
 	installed: ExtensionSummary[];
 	nativePlugins: {
 		id: string;

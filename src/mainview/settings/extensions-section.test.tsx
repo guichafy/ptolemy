@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+	act,
+	fireEvent,
+	render,
+	screen,
+	waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, test, vi } from "vitest";
 import { ExtensionsSection } from "./extensions-section";
@@ -13,6 +19,7 @@ const request = vi.hoisted(() => ({
 	agentExtensionAddSource: vi.fn(),
 	agentExtensionRemoveSource: vi.fn(),
 	agentExtensionCapabilities: vi.fn(),
+	agentExtensionReview: vi.fn(),
 	agentMcpList: vi.fn(),
 	agentMcpGetEditable: vi.fn(),
 	agentMcpSave: vi.fn(),
@@ -189,4 +196,110 @@ test("tabs support arrow focus and narrow layout preserves keyboard access", asy
 		"aria-labelledby",
 		"extension-tab-MCP",
 	);
+});
+
+const commandAndHook = {
+	...pkg,
+	components: [
+		...pkg.components,
+		{
+			id: "h",
+			name: "Hook",
+			kind: "hook",
+			sources: [{ effective: true, harness: "portable" }],
+			diagnostics: [],
+		},
+	],
+};
+const reviewCaps = (componentId = "c") => [
+	{ componentId, status: "adapted", reason: "Componente compatível" },
+	{
+		componentId: "h",
+		status: "requires-configuration",
+		reason: "Autorize hooks",
+	},
+];
+function deferredReview() {
+	let resolve!: (value: ReturnType<typeof reviewCaps>) => void;
+	const promise = new Promise<ReturnType<typeof reviewCaps>>((r) => {
+		resolve = r;
+	});
+	return { promise, resolve };
+}
+async function inspectInstalled(name = pkg.name) {
+	await userEvent.click(
+		await screen.findByRole("button", { name: `Inspecionar ${name}` }),
+	);
+	await screen.findByRole("checkbox", { name: "Ativar Comando" });
+}
+test("pending hook review never restores older component toggles", async () => {
+	request.agentExtensionInstalled.mockResolvedValue([commandAndHook]);
+	request.agentExtensionReview.mockResolvedValue(reviewCaps());
+	render(<ExtensionsSection />);
+	await inspectInstalled();
+	const pending = deferredReview();
+	request.agentExtensionReview.mockReturnValueOnce(pending.promise);
+	await userEvent.click(
+		screen.getByRole("checkbox", { name: /Autorizar execução/ }),
+	);
+	await userEvent.click(
+		screen.getByRole("checkbox", { name: "Ativar Comando" }),
+	);
+	expect(
+		screen.getByRole("checkbox", { name: "Ativar Comando" }),
+	).toBeChecked();
+	await act(async () => pending.resolve(reviewCaps()));
+	expect(
+		screen.getByRole("checkbox", { name: "Ativar Comando" }),
+	).toBeChecked();
+});
+test.each([
+	"detail",
+	"agent",
+] as const)("stale hook review cannot apply previous enabled IDs after changing %s", async (change) => {
+	const other = {
+		...pkg,
+		id: "other",
+		name: "Outro pacote",
+		components: [{ ...pkg.components[0], id: "different" }],
+	};
+	request.agentExtensionInstalled.mockResolvedValue([commandAndHook, other]);
+	request.agentExtensionReview.mockResolvedValue(reviewCaps());
+	request.agentExtensionInventory.mockImplementation(async ({ agent }) => ({
+		installed: [],
+		nativePlugins: [],
+		builtins: [],
+		defaults: {
+			selections: [
+				{
+					packageId: agent === "codex" ? "p" : "other",
+					revision: "final",
+					componentIds: [agent === "codex" ? "c" : "different"],
+				},
+			],
+		},
+	}));
+	render(<ExtensionsSection />);
+	await inspectInstalled();
+	const pending = deferredReview();
+	request.agentExtensionReview.mockReturnValueOnce(pending.promise);
+	await userEvent.click(
+		screen.getByRole("checkbox", { name: /Autorizar execução/ }),
+	);
+	if (change === "detail") {
+		request.agentExtensionReview.mockResolvedValue(reviewCaps("different"));
+		await inspectInstalled("Outro pacote");
+	} else {
+		fireEvent.change(screen.getByLabelText("Agente das extensões"), {
+			target: { value: "codex" },
+		});
+		await inspectInstalled();
+	}
+	expect(
+		screen.getByRole("checkbox", { name: "Ativar Comando" }),
+	).toBeChecked();
+	await act(async () => pending.resolve(reviewCaps()));
+	expect(
+		screen.getByRole("checkbox", { name: "Ativar Comando" }),
+	).toBeChecked();
 });

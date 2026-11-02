@@ -205,12 +205,7 @@ export function AgentComposer({
 				const signature = JSON.stringify({
 					agent,
 					extensions: library.defaults ?? null,
-					builtins:
-						library.defaults?.builtinCommandNames ??
-						library.builtins.map((b) => b.name),
-					skills: catalog
-						.filter((s) => s.defaultFor.includes(agent) && !s.unavailableReason)
-						.map((s) => s.id),
+					skills: library.skillDefaults ?? null,
 					mcp: mcp
 						.filter((s) => s.defaults[agent] && !s.packageId)
 						.map((s) => s.id),
@@ -219,15 +214,17 @@ export function AgentComposer({
 					!preserveSelection || signature !== defaultSignature.current;
 				defaultSignature.current = signature;
 				if (applyDefaults) {
-					setExtra({
+					setExtra((previous) => ({
 						extensionSelections: library.defaults?.selections ?? [],
 						builtinCommandNames:
 							library.defaults?.builtinCommandNames ??
-							library.builtins.map((b) => b.name),
+							(preserveSelection
+								? previous.builtinCommandNames
+								: library.builtins.map((b) => b.name)),
 						mcpServerIds: mcp
 							.filter((s) => s.defaults[agent] && !s.packageId)
 							.map((s) => s.id),
-					});
+					}));
 					setSelected(
 						catalog
 							.filter(

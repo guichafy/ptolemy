@@ -600,3 +600,112 @@ test("stale package defaults block creation until the old selection is removed",
 		screen.getByRole("button", { name: "Iniciar conversa" }),
 	).toBeDisabled();
 });
+
+test.each([
+	"addition",
+	"removal",
+] as const)("absent saved defaults preserve all four user selections after builtin %s", async (change) => {
+	const packageId = `extension:${"e".repeat(64)}`,
+		revision = "f".repeat(64);
+	const debug = {
+		name: "debug",
+		kind: "skill",
+		description: "Investigar",
+		limitation: "",
+	};
+	const clear = { name: "clear", kind: "command", description: "Limpar" };
+	const library = {
+		installed: [
+			{
+				id: packageId,
+				revision,
+				name: "Pacote",
+				components: [
+					{
+						id: "skill",
+						kind: "skill",
+						name: "Skill do pacote",
+						sources: [],
+						diagnostics: [],
+					},
+				],
+			},
+		],
+		nativePlugins: [],
+		builtins: [debug, clear],
+		verifiedRuntime: "test",
+	};
+	request.agentExtensionInventory.mockResolvedValue(library);
+	request.agentListSkills.mockResolvedValue([{ ...skill, defaultFor: [] }]);
+	request.agentMcpList.mockResolvedValue([
+		{
+			id: "server",
+			name: "Servidor",
+			transport: "http",
+			defaults: { claude: false, codex: false },
+			connection: { state: "disconnected" },
+		},
+	]);
+	request.agentExtensionReview.mockResolvedValue([
+		{
+			packageId,
+			componentId: "skill",
+			status: "adapted",
+			reason: "Compatível",
+		},
+	]);
+	const { rerender } = render(<Composer agent="claude" />);
+	await waitFor(() =>
+		expect(
+			screen.getByRole("button", { name: "Iniciar conversa" }),
+		).toBeEnabled(),
+	);
+	await userEvent.click(
+		screen.getByRole("button", { name: /Configurar Skills/ }),
+	);
+	await userEvent.click(
+		screen.getByRole("checkbox", { name: "Usar Skill interna debug" }),
+	);
+	await userEvent.click(screen.getByRole("checkbox", { name: "Usar review" }));
+	await userEvent.click(
+		await screen.findByRole("checkbox", {
+			name: "Usar Pacote: Skill do pacote",
+		}),
+	);
+	await userEvent.keyboard("{Escape}");
+	await userEvent.click(
+		screen.getByRole("button", { name: /Configurar extensões/ }),
+	);
+	await userEvent.click(
+		screen.getByRole("checkbox", { name: "Usar comando interno clear" }),
+	);
+	await userEvent.click(screen.getByRole("checkbox", { name: /^Servidor/ }));
+	await userEvent.keyboard("{Escape}");
+	settingsState.isOpen = true;
+	rerender(<Composer agent="claude" />);
+	request.agentExtensionInventory.mockResolvedValue({
+		...library,
+		builtins:
+			change === "addition"
+				? [debug, clear, { ...clear, name: "new-command" }]
+				: [clear],
+	});
+	settingsState.isOpen = false;
+	rerender(<Composer agent="claude" />);
+	await waitFor(() =>
+		expect(
+			screen.getByRole("button", { name: "Iniciar conversa" }),
+		).toBeEnabled(),
+	);
+	await userEvent.click(
+		screen.getByRole("button", { name: "Iniciar conversa" }),
+	);
+	expect(request.claudeCreateSession).toHaveBeenCalledWith(
+		expect.objectContaining({
+			skillIds: ["review"],
+			builtinCommandNames: [],
+			extensionSelections: [{ packageId, revision, componentIds: ["skill"] }],
+			mcpServerIds: ["server"],
+		}),
+	);
+});
