@@ -98,7 +98,16 @@ export function usePackageReview(
 		)
 			.then((caps) => {
 				if (!cancelled)
-					setState({ capabilities: caps.flat(), loading: false, error: null });
+					setState({
+						capabilities: caps.flatMap((values, index) =>
+							values.map((value) => ({
+								...value,
+								revision: entries[index].revision,
+							})),
+						),
+						loading: false,
+						error: null,
+					});
 			})
 			.catch((e) => {
 				if (!cancelled)

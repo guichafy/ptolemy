@@ -89,6 +89,13 @@ export async function createDriver() {
 			"appium:noReset": true,
 			"appium:skipAppKill": false,
 			"appium:newCommandTimeout": 120,
+			...(process.env.PTOLEMY_E2E_HOME
+				? {
+						"appium:environment": {
+							PTOLEMY_HOME: process.env.PTOLEMY_E2E_HOME,
+						},
+					}
+				: {}),
 		} as Record<string, unknown>,
 		logLevel: "warn",
 	});

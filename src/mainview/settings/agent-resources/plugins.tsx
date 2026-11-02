@@ -117,7 +117,9 @@ export function PluginsResources({
 								{pkg.components.map((c) => {
 									const cap = capabilities.find(
 										(cap) =>
-											cap.packageId === pkg.id && cap.componentId === c.id,
+											cap.packageId === pkg.id &&
+											cap.componentId === c.id &&
+											(!cap.revision || cap.revision === pkg.revision),
 									);
 									const checked =
 										selected?.componentIds.includes(c.id) ?? false;
@@ -184,6 +186,26 @@ export function PluginsResources({
 							Remover seleção indisponível
 						</Button>
 					</div>
+				))}
+			{choices.builtinCommandNames
+				.filter(
+					(name) => !library.inventory?.builtins.some((b) => b.name === name),
+				)
+				.map((name) => (
+					<ResourceRow
+						key={`missing:${name}`}
+						name={`comando interno ${name}`}
+						origin="Indisponível no runtime atual"
+						checked
+						onChange={() =>
+							onChange({
+								...choices,
+								builtinCommandNames: choices.builtinCommandNames.filter(
+									(n) => n !== name,
+								),
+							})
+						}
+					/>
 				))}
 			{library.inventory?.builtins.some((b) => b.kind === "command") && (
 				<h3 className="mt-5 text-sm font-medium">Comandos integrados</h3>

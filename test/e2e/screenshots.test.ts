@@ -191,24 +191,42 @@ describe("Ptolemy Screenshots", () => {
 		console.log(`Salvo: ${filePath} (resultados em ${report.elapsedMs}ms)`);
 	});
 
-	it("Composer de Claude: modelo e Skills disponíveis antes da conversa", async () => {
+	it("Composer de Claude: recursos resumidos e modal compartilhado", async () => {
 		await selectProvider(driver, "claude");
 		currentProviderIndex = Providers.indexOf("claude");
 		const composer = await waitForResults(
 			driver,
-			["Mensagem para Claude", "Configurar Skills", "Selecionar modelo"],
+			[
+				"Mensagem para Claude",
+				"Configurar recursos da conversa",
+				"Selecionar modelo",
+			],
 			Timing.RESULTS_WAIT,
 			Timing.RESULTS_POLL,
 		);
 		expect(composer.missing, composer.source.slice(0, 1800)).toEqual([]);
 		const skills = await driver.$(
-			'//*[@label="Configurar Skills" or @title="Configurar Skills" or @identifier="Configurar Skills"]',
+			'//*[@label="Configurar recursos da conversa" or @title="Configurar recursos da conversa" or @identifier="Configurar recursos da conversa"]',
 		);
 		await clickPaletteElement(skills);
+		const summary = await waitForResults(
+			driver,
+			["Recursos da conversa", "Skills", "Plugins", "MCP"],
+			Timing.RESULTS_WAIT,
+			Timing.RESULTS_POLL,
+		);
+		expect(summary.missing, summary.source.slice(0, 1800)).toEqual([]);
+		const configureSkills = await driver.$(
+			'//*[contains(@label,"Configurar Skills da conversa") or contains(@title,"Configurar Skills da conversa") or contains(@identifier,"Configurar Skills da conversa")]',
+		);
+		await clickPaletteElement(configureSkills);
+
 		const picker = await waitForResults(
 			driver,
 			[
-				"Skills da conversa",
+				"Configuração da conversa",
+				"Aplicar",
+				"Cancelar",
 				"URL da Skill no GitHub",
 				"Usar seleção como padrão",
 			],

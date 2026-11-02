@@ -14,6 +14,7 @@ import {
 	type ResourceLibrary,
 	type ResourcePage,
 	resourceLabels,
+	sessionCapabilities,
 } from "./model";
 import { PluginsResources } from "./plugins";
 import { SkillsResources } from "./skills";
@@ -43,22 +44,12 @@ export function ResourceWorkspace(props: ResourceWorkspaceProps) {
 		setBusy(value);
 		onBusyChange?.(value);
 	};
-	const capabilities = review.capabilities.map((c) => {
-		const old = props.archived?.choices.extensionSelections.find(
-			(s) => s.packageId === c.packageId,
-		);
-		const current = props.choices.extensionSelections.find(
-			(s) => s.packageId === c.packageId,
-		);
-		return old &&
-			current &&
-			old.revision === current.revision &&
-			old.trustedHookDigest === current.trustedHookDigest
-			? (props.archived?.capabilities.find(
-					(a) => a.packageId === c.packageId && a.componentId === c.componentId,
-				) ?? c)
-			: c;
-	});
+	const capabilities = sessionCapabilities(
+		props.choices,
+		review.capabilities,
+		props.archived,
+	);
+
 	const childProps = {
 		...props,
 		onBusyChange: busyChange,

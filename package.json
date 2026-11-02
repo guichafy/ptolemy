@@ -7,7 +7,7 @@
 		"url": "https://github.com/guichafy/ptolemy.git"
 	},
 	"scripts": {
-		"build:native": "clang -dynamiclib -framework AppKit -framework Carbon -framework Security -fobjc-arc -o src/bun/native/liboverlay.dylib src/bun/native/overlay.m src/bun/native/window-material.m -arch arm64",
+		"build:native": "clang -dynamiclib -mmacosx-version-min=14.0 -framework AppKit -framework Carbon -framework Security -fobjc-arc -o src/bun/native/liboverlay.dylib src/bun/native/overlay.m src/bun/native/window-material.m -arch arm64",
 		"build:vite": "vite build && vite build --config vite.chat.config.ts",
 		"build:chat": "vite build --config vite.chat.config.ts",
 		"start": "bun run build:native && bun run build:vite && electrobun dev",

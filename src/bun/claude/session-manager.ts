@@ -123,7 +123,7 @@ export interface SessionMeta {
 	sdkSessionId: string;
 	/** Which agent backs this session. Absent on pre-Codex sessions = claude. */
 	agent?: AgentKind;
-	/** Immutable file Skill snapshots selected before the first turn. */
+	/** Immutable file Skill snapshots for the current resource revision. */
 	skills?: SessionSkill[];
 	title: string;
 	/** Project this conversation belongs to. Many sessions can share one project. */

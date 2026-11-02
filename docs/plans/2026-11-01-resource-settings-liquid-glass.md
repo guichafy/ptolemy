@@ -1,6 +1,6 @@
 # Resource Settings and Liquid Glass Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Separate agent resource settings, replace overflowing composer pickers with a shared configuration modal, allow existing-session changes, and adopt native glass with system appearance.
 
@@ -37,12 +37,12 @@
 
 **Interfaces:** `SessionResourceConfiguration` contains agent, revision, legacy, choices, archived Skill summaries, package summaries and safe MCP summaries. `agentSessionConfiguration({sessionId})` reads it; `agentSessionSetConfiguration({sessionId, expectedRevision, choices})` returns it after validated application. Private snapshots never cross RPC. Session manager owns serialized lifecycle and idle-runtime rebuild.
 
-- [ ] Write failing tests for snapshot retention, empty selections, stale revision, busy/reentrant apply, preparation failure and restoration; add integration scenario retaining memory after an edit.
-- [ ] Run focused tests and record RED.
-- [ ] Implement shared types and preparation helper, resolve retained IDs from frozen snapshots and new IDs from registries; validate hooks, native restrictions and duplicates.
-- [ ] Implement lifecycle serialization and explicit busy detection (a waiting Claude stream is not a busy turn), staged snapshot publication/rollback, idle runtime teardown/recreation and safe stale-materialization cleanup.
-- [ ] Run focused unit tests and local integration for both agents. Expected: new resources next turn, removed resources absent, transcript and cold-resume memory preserved.
-- [ ] Commit `feat(agents): edit conversation resources between turns`.
+- [x] Write failing tests for snapshot retention, empty selections, stale revision, busy/reentrant apply, preparation failure and restoration; add integration scenario retaining memory after an edit.
+- [x] Run focused tests and record RED.
+- [x] Implement shared types and preparation helper, resolve retained IDs from frozen snapshots and new IDs from registries; validate hooks, native restrictions and duplicates.
+- [x] Implement lifecycle serialization and explicit busy detection (a waiting Claude stream is not a busy turn), staged snapshot publication/rollback, idle runtime teardown/recreation and safe stale-materialization cleanup.
+- [x] Run focused unit tests and local integration for both agents. Expected: new resources next turn, removed resources absent, transcript and cold-resume memory preserved.
+- [x] Commit `feat(agents): edit conversation resources between turns`.
 
 ### Task 2: Shared resource workspace and scoped preferences
 
@@ -50,13 +50,13 @@
 
 **Interfaces:** `ResourcePage = "skills" | "plugins" | "mcp"`; `ResourceWorkspace({agent,page,choices,onChange,onLibraryChange,archived?,mode})` is controlled and never implicitly persists choices. Preferences wrapper loads/saves per-agent defaults with `agentExtensionSetDefaults`. Marketplace accepts resource page and uses shared install/source APIs.
 
-- [ ] Write failing UI tests for nested Claude/Codex navigation, absence of top-level Extensões, dedicated skill library/marketplace, defaults isolated per agent and shared mixed-package installation.
-- [ ] Run focused UI tests. Expected: RED on new navigation/workspace.
-- [ ] Extract focused reusable controls with search, concise rows, expandable details and one scrolling owner. Skills includes local/system/builtin/package Skills; Plugins includes native import, all component types and hook trust; MCP reuses editor/OAuth with explicit activation.
-- [ ] Scope marketplace views to matching packages/components in existing GitHub catalogs; preserve custom sources and skills.sh external discovery, distinguish unresolved catalog entries from confirmed nonmatching packages.
-- [ ] Replace central preferences navigation and route old internal extension destinations to the appropriate agent resource page.
-- [ ] Run preferences/resource UI tests and typecheck. Expected: PASS with per-agent persistence and errors/retry visible.
-- [ ] Commit `feat(settings): organize Skills plugins and MCP by agent`.
+- [x] Write failing UI tests for nested Claude/Codex navigation, absence of top-level Extensões, dedicated skill library/marketplace, defaults isolated per agent and shared mixed-package installation.
+- [x] Run focused UI tests. Expected: RED on new navigation/workspace.
+- [x] Extract focused reusable controls with search, concise rows, expandable details and one scrolling owner. Skills includes local/system/builtin/package Skills; Plugins includes native import, all component types and hook trust; MCP reuses editor/OAuth with explicit activation.
+- [x] Scope marketplace views to matching packages/components in existing GitHub catalogs; preserve custom sources and skills.sh external discovery, distinguish unresolved catalog entries from confirmed nonmatching packages.
+- [x] Replace central preferences navigation and route old internal extension destinations to the appropriate agent resource page.
+- [x] Run preferences/resource UI tests and typecheck. Expected: PASS with per-agent persistence and errors/retry visible.
+- [x] Commit `feat(settings): organize Skills plugins and MCP by agent`.
 
 ### Task 3: Compact conversation controls in palette and chat
 
@@ -64,13 +64,13 @@
 
 **Interfaces:** `ConversationConfiguration` wraps Task 2 workspace in a controlled modal, edits a cloned `ExtensionChoices`, commits via callback and offers explicit save-defaults. Palette passes draft choices; chat loads/applies Task 1 revision API. Modal visibility contributes to native window sizing.
 
-- [ ] Write failing tests: no selected Skill chips, one configuration button, constant summary size with many selections, cancel/apply separation, defaults action explicit, correct counts and archived choices retained.
-- [ ] Run tests. Expected: RED on new compact controls.
-- [ ] Replace old picker UI while preserving discovery/review hooks and command suggestions; share loading/error/capability state, block sending invalid selections and allow opening configuration to repair them.
-- [ ] Add same control to existing chat, refresh commands/summary after apply, block applying during generation and display errors without losing draft.
-- [ ] Wire modal resize/restore and focus handling; test Escape/Enter cannot submit behind modal and short viewport has one primary scroll region.
-- [ ] Run composer, chat and resource UI tests. Expected: PASS.
-- [ ] Commit `feat(chat): configure conversation resources in a shared modal`.
+- [x] Write failing tests: no selected Skill chips, one configuration button, constant summary size with many selections, cancel/apply separation, defaults action explicit, correct counts and archived choices retained.
+- [x] Run tests. Expected: RED on new compact controls.
+- [x] Replace old picker UI while preserving discovery/review hooks and command suggestions; share loading/error/capability state, block sending invalid selections and allow opening configuration to repair them.
+- [x] Add same control to existing chat, refresh commands/summary after apply, block applying during generation and display errors without losing draft.
+- [x] Wire modal resize/restore and focus handling; test Escape/Enter cannot submit behind modal and short viewport has one primary scroll region.
+- [x] Run composer, chat and resource UI tests. Expected: PASS.
+- [x] Commit `feat(chat): configure conversation resources in a shared modal`.
 
 ### Task 4: Native glass and live system appearance
 
@@ -78,12 +78,12 @@
 
 **Interfaces:** `subscribeSystemAppearance()` installs initial OS color scheme and live listeners on document root and returns cleanup. `configureWindowMaterial(void*, int)` configures a window once, retaining Electrobun content hierarchy and resize behavior; overlay show does not reinstall it.
 
-- [ ] Write failing appearance tests for initial light/dark, live change and cleanup; cover repeated native material setup and accessibility fallback in native harness.
-- [ ] Run focused tests. Expected: RED on missing appearance module/material.
-- [ ] Implement native NSGlassEffectView with contentView on macOS 26 and NSVisualEffectView fallback, transparency, corner geometry, shadow, system appearance/accessibility and idempotent installation.
-- [ ] Make web surfaces transparent where material should show, use system font and readable system-adaptive tokens, remove hardcoded dark. Preserve code/transcript readability and reduced-motion rules.
-- [ ] Run appearance tests, build:native, typecheck and build:vite. Expected: PASS.
-- [ ] Commit `feat(ui): adopt native glass and follow system appearance`.
+- [x] Write failing appearance tests for initial light/dark, live change and cleanup; cover repeated native material setup and accessibility fallback in native harness.
+- [x] Run focused tests. Expected: RED on missing appearance module/material.
+- [x] Implement native NSGlassEffectView with contentView on macOS 26 and NSVisualEffectView fallback, transparency, corner geometry, shadow, system appearance/accessibility and idempotent installation.
+- [x] Make web surfaces transparent where material should show, use system font and readable system-adaptive tokens, remove hardcoded dark. Preserve code/transcript readability and reduced-motion rules.
+- [x] Run appearance tests, build:native, typecheck and build:vite. Expected: PASS.
+- [x] Commit `feat(ui): adopt native glass and follow system appearance`.
 
 ### Task 5: End-to-end proof, docs and whole-branch review
 
@@ -91,9 +91,12 @@
 
 **Interfaces:** All previous public interfaces, unchanged external CLI configs and native window lifecycle.
 
-- [ ] Extend integration/E2E coverage for create/edit/send/cold-resume, archived selection, failed apply, modal navigation/focus/resize and long inventories.
-- [ ] Run full tests, lint, typecheck, local integration, native and Vite builds; diagnose real failures before changes. Expected: all gates green.
+- [x] Extend integration/E2E coverage for create/edit/send/cold-resume, archived selection, failed apply, modal navigation/focus/resize and long inventories.
+- [x] Run full tests, lint, typecheck, local integration, native and Vite builds; diagnose real failures before changes. Expected: all gates green.
 - [ ] Capture light/dark UI screenshots and inspect real native glass over the desktop, including hotkey show/hide and accessibility behavior; retain evidence paths.
-- [ ] Update bilingual feature documentation and implementation decisions.
+- [x] Update bilingual feature documentation and implementation decisions.
 - [ ] Commit docs/E2E, obtain a fresh whole-branch review, fix material findings with RED→GREEN verification and run affected gates.
 - [ ] Deliver branch and visual/test evidence; do not merge or publish without instruction.
+
+
+Native validation note: the AppKit smoke passed for glass and forced vibrancy and the development bundle started successfully with a registered hotkey. Full native desktop visual inspection is pending: local Mac2 WebDriverAgent startup failed before app launch, and CUA timed out / returned cgWindowNotFound. Chat Chromium screenshots (light/dark, 80 Skills, one scroll region) were inspected and do not replace that desktop proof.

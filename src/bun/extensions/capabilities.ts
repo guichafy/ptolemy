@@ -1,6 +1,7 @@
 import type { AgentKind } from "@/shared/agent-protocol";
 import type { ExtensionComponent } from "@/shared/extensions";
 export interface ComponentCapability {
+	revision?: string;
 	packageId?: string;
 	componentId: string;
 	status: "native" | "adapted" | "requires-configuration" | "incompatible";

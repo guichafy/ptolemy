@@ -113,6 +113,7 @@ export function resourceCounts(
 			(c) =>
 				c.packageId === p.id &&
 				c.componentId === id &&
+				(!c.revision || c.revision === p.revision) &&
 				["native", "adapted"].includes(c.status),
 		);
 	let skills = choices.skillIds.filter((id) =>
@@ -143,4 +144,37 @@ export function resourceCounts(
 			mcp.add(`${pkg.id}:${pkg.revision}:${c.id}`);
 	}
 	return { skills, plugins, mcp: mcp.size };
+}
+
+/** Preserve a selected MCP's frozen readiness without borrowing capabilities
+ * from a different revision or a newly authorized hook digest. */
+export function sessionCapabilities(
+	choices: ExtensionChoices,
+	live: ExtensionCapability[],
+	archived?: SessionResourceConfiguration,
+): ExtensionCapability[] {
+	return live.map((cap) => {
+		const old = archived?.choices.extensionSelections.find(
+			(s) => s.packageId === cap.packageId,
+		);
+		const current = choices.extensionSelections.find(
+			(s) => s.packageId === cap.packageId,
+		);
+		if (
+			!old ||
+			!current ||
+			old.revision !== current.revision ||
+			old.trustedHookDigest !== current.trustedHookDigest ||
+			(cap.revision && cap.revision !== current.revision)
+		)
+			return cap;
+		return (
+			archived?.capabilities.find(
+				(c) =>
+					c.packageId === cap.packageId &&
+					c.componentId === cap.componentId &&
+					(!c.revision || c.revision === current.revision),
+			) ?? cap
+		);
+	});
 }

@@ -70,6 +70,26 @@ Custo assumido: MCP fornecido pelo pacote exige o fluxo do componente, não duas
 
 A listagem pública carrega somente indicadores seguros de autenticação necessária/disponível e uma orientação de configuração. O backend consulta a credencial vinculada à definição, sem requisições de rede: token utilizável ou refresh disponível mantém a seleção; falta de credencial ou expiração sem refresh exige conexão. O estado de uma tentativa de reautenticação cancelada/com erro não substitui a validade de uma autorização anterior. Componentes MCP de pacote e servidores independentes seguem a mesma regra de capacidade, contagem e preflight de novas seleções; escolhas antigas continuam removíveis. Isso não certifica conectividade nem compatibilidade com provedores reais.
 
+## 12. Páginas por agente e um rascunho explícito de conversa
+
+A revisão de uso da v0.16.0 separou a navegação dentro de Claude e Codex em Skills, Plugins e MCP, cada qual com descoberta dedicada. Os catálogos GitHub e instalações continuam compartilhados; o tipo do recurso filtra a inspeção, sem criar um registro MCP fictício. `agent-resources/workspace.tsx` é controlado: Preferências persiste padrões e o modal da conversa aplica somente seu rascunho. Ações de biblioteca/autenticação têm alcance compartilhado explícito e não são revertidas por Cancelar.
+
+Custo assumido: pacotes mistos podem ser descobertos em mais de uma página e exigem inspeção quando o catálogo não traz componentes. A integração de UI usa `resource-rpc.ts`, vinculado ao transporte da própria webview; importar componentes compartilhados não inicializa o RPC da outra janela.
+
+## 13. Revisões de recursos entre turnos
+
+`SessionResourceCoordinator` serializa criação, retomada, envio e aplicação. O contador de turnos é separado do iterador duradouro Claude: um stream esperando mensagens não representa uma geração ativa. Stop/troca/exclusão/shutdown cancelam expansões antes da fila, para não esperar comandos de shell que precisam interromper.
+
+A seleção retém Skills de arquivo, pacotes e MCP dos snapshots anteriores, resolvendo somente adições no catálogo atual. Uma nova revisão de Skills é preparada em diretório separado e o índice publica sua referência atomicamente. O runtime ocioso é encerrado e reconstruído com a nova seleção, mantendo histórico, projeto e ID do harness. Falhas restauram a configuração anterior; se a restauração falhar, envio/retomada ficam bloqueados até revisão. Uma revisão esperada impede salvar um rascunho antigo sobre outra alteração.
+
+Arquivos gerados são comparados aos bytes arquivados antes da substituição. A preparação move somente materializações verificadas para backup fora do projeto, preservando DATA e arquivos do usuário; rollback restaura o anterior. O custo é armazenamento histórico adicional e a necessidade de restaurar/conservar alterações feitas diretamente nas cópias geradas antes de reconfigurar. Trocar uma Skill não faz o modelo esquecer mensagens antigas.
+
+## 14. Material nativo e aparência herdada
+
+`window-material.m` envolve o content view do Electrobun uma vez: `NSGlassEffectView.contentView` no macOS 26+ e `NSVisualEffectView` nas versões anteriores. O host preserva redimensionamento e conteúdo, acompanha aparência/contraste e troca para fundo opaco ao reduzir transparência. Os HTMLs inicializam o tema antes da primeira pintura e `system-appearance.ts` acompanha mudanças nas duas janelas. O chat conserva fundos legíveis; o vidro do desktop pertence ao host nativo da paleta. O helper é compilado com deployment target macOS 14.0, igual ao mínimo da dylib nativa do Electrobun distribuída; usar o padrão do SDK 26 tornaria o fallback indisponível em instalações anteriores.
+
+Custo assumido: aparência exata depende do compositor, desktop e opções de acessibilidade do macOS. O ensaio AppKit verifica instalação idempotente, resize, aparência e fallback; Chromium verifica layout/temas, não prova o vidro sobre o desktop. Nesta entrega, Appium falhou antes de iniciar o app (WebDriverAgent indisponível) e o controle de interface retornou timeout/cgWindowNotFound, impedindo concluir a inspeção visual do desktop. O bundle de teste iniciou com sucesso e registrou o hotkey; não foi usado para enviar mensagens reais.
+
 ## Evidência e manutenção
 
 [Testes de integração](../testing/integration-tests.md) distingue unitários com HTTP real, CLIs contra mocks locais, UI com RPC fake, chat com backend real e launchers no bundle. O teste `extension-snapshot.test.ts` liga catálogo HTTP local, instalação completa, seleção parcial, comando dinâmico, MCP de pacote e retomada após remoção da instalação/alteração do binding/troca de agente. O histórico arquivado permanece; não há novo download na retomada. Não se deve substituir esses limites por alegações de validação com provedores reais ou atualizar a semântica de inventário só com documentação de um CLI mais novo.
