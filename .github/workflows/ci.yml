@@ -77,6 +77,24 @@ jobs:
         env:
           CI: "true"
 
+      - name: Collect native failure diagnostics
+        if: failure()
+        run: |
+          mkdir -p docs/screenshots/diagnostics
+          python3 - <<'PYDIAGNOSTICS'
+          from pathlib import Path
+          import shutil
+          destination = Path("docs/screenshots/diagnostics")
+          for root in [Path.home() / "Library/Logs/DiagnosticReports", Path("/Library/Logs/DiagnosticReports")]:
+              if not root.exists():
+                  continue
+              for report in root.rglob("*"):
+                  if report.is_file() and report.suffix in {".ips", ".crash"} and any(name in report.name.lower() for name in ["bun", "ptolemy", "launcher"]):
+                      shutil.copy2(report, destination / report.name)
+          PYDIAGNOSTICS
+          log show --style compact --last 10m --predicate 'process == "bun" OR process == "launcher" OR process == "ptolemy-dev"' > docs/screenshots/diagnostics/native-system.log 2>&1 || true
+          pgrep -lf 'bun|ptolemy|launcher' > docs/screenshots/diagnostics/processes.log || true
+
       - name: Upload screenshots
         if: always()
         uses: actions/upload-artifact@v4
