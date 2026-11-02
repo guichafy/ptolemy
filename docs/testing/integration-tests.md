@@ -7,7 +7,7 @@ Este guia explica o que a suíte de integração cobre, como rodar nos modos loc
 
 ## O que é testado
 
-A suíte conduz uma conversa por agente pelo **session manager real** (`src/bun/claude/session-manager.ts`), o mesmo módulo que a camada de RPC chama quando a interface cria ou retoma uma sessão. Nada nesse caminho é simulado: os SDKs, os CLIs, a persistência e o mapeamento de eventos são os de produção. O único ponto trocado no modo local é o servidor do modelo.
+A suíte conduz uma conversa por agente pelo **session manager real** (`src/bun/claude/session-manager.ts`), o mesmo módulo que a camada de RPC chama quando a interface cria ou retoma uma sessão. Nada nesse caminho é simulado: os SDKs, os CLIs, a persistência e o mapeamento de eventos são os de produção. O cenário de conversa troca os servidores dos modelos por mocks locais; cenários adicionais fornecem catálogos/MCP/OAuth locais e configuração de CLI descartável.
 
 O cenário é o mesmo para os dois agentes:
 
@@ -20,7 +20,20 @@ O cenário é o mesmo para os dois agentes:
 | 5. Troca de agente | Abre uma sessão do outro agente (o ativo é derrubado), volta para a primeira com retomada a frio e o agente ainda lembra o conteúdo do arquivo. No Claude, confere também que o modelo da sessão não mudou |
 | 6. Exclusão | Apagar as sessões remove a pasta do projeto e não deixa sessão ativa |
 
-São 6 testes por agente, 12 no total. As permissões de ferramenta do Claude (HITL) são aprovadas automaticamente pelo teste, como se o usuário clicasse em "Permitir".
+O cenário básico tem 6 testes por agente; há também testes de seleção vazia e as suítes adicionais abaixo. As permissões de ferramenta do Claude (HITL) são aprovadas automaticamente pelo teste, como se o usuário clicasse em "Permitir".
+
+## Extensões, MCP e limites da evidência
+
+| Caminho | Evidência verificada | Limite |
+|---|---|---|
+| `extension-snapshot.test.ts` + `helpers/extension-snapshot.ts` | Catálogo HTTP local com hash/commit, browse/inspect/install completos; seleção parcial de Skill/comando/MCP; comando dinâmico e chamada MCP dos dois CLIs pelo session manager; remoção de fonte/instalação, binding atual alterado, espelho descartado e retomada a frio/troca de agente usando revisão/definição congeladas sem novo download | Biblioteca de teste preserva o arquivo histórico; não testa exclusão/corrupção manual do arquivo histórico. Servidor stdio sem credencial não acessa Keychain |
+| `extensions.test.ts` | Plugins globais enabled/cache, Skills e builtins realmente desligados; agentes nativos delegam; hooks antes do Write, ordem/matchers/contexto, prompt Claude nativo, scripts protegidos, filhos/escape/symlink/prazo e read-only | Prompts/modelos são determinísticos locais. Descrição parcial de builtin Claude pode persistir; não há equivalência presumida de todos os hooks |
+| `extensions-review.test.ts` + `helpers/extension-lifecycle.ts` | Inventário nativo sem rede, ID existente intacto e chmod/unlink negados; PATH/proxy vivo sem segredos; assets da Skill consumidos pelo Codex; stop/shutdown/troca durante expansão mata filhos, inclusive corrida de fork | Somente política/versões efetivamente exercitadas; não libera reparo de configuração real |
+| `mcp.test.ts` + `helpers/mcp-scenario.ts` | Chamadas reais dos CLIs ao gateway, selected-only/none/herança, OAuth local com login/refresh após rejeição, nomes isolados, env stdio independente e cleanup | OAuth usa navegador injetado para concluir callback local, sem conta real |
+| `src/bun/mcp/*.test.ts` via Vitest | Registry/migração, edição segura, discovery/PKCE/state/callback/cancel/expiração/refresh/disconnect com HTTP local e vault em memória; SDK tools/resources/prompts/notificações/reverse calls, ferramentas/SSE de 16s e falhas de transporte | Não são testes de provedor real. Native Keychain usa teste opt-in separado |
+| `mcp-native-vault.test.ts` | Smoke opt-in com conta única nova: criar/ler/atualizar vazio/Unicode/excluir | Normalmente pulado; nunca lê credenciais existentes |
+
+A confiança executável se refere à revisão arquivada, não ao espelho gravável. Veja [decisões de arquitetura](../architecture/agent-extension-decisions.md) para a emenda de ROOT protegido e para experimentos de inventário que foram substituídos pelo caminho nativo final.
 
 ## Os dois modos
 
@@ -32,8 +45,8 @@ São 6 testes por agente, 12 no total. As permissões de ferramenta do Claude (H
 | Login | Nenhum (chave falsa) | O login que já existe na máquina |
 | Rede | Só loopback (`127.0.0.1`) | Internet |
 | Asserções | Exatas (nomes das ferramentas, arquivos, respostas) | Flexíveis onde o modelo varia (qualquer ferramenta serve), rígidas onde importa (conteúdo do arquivo e memória entre turnos) |
-| Duração típica | ~10 s | De segundos a poucos minutos, conforme os modelos |
-| Custo | Zero | Centavos por execução (com `haiku` no Claude, menos de US$ 0,02) |
+| Duração típica | Dezenas de segundos, incluindo extensões | De segundos a poucos minutos, conforme os modelos |
+| Custo | Sem chamadas de modelo cobradas | Conforme modelos e uso |
 | CI | Roda em todo PR (`build-and-test`, macOS) | Não roda |
 
 ## Rodando no modo local
@@ -131,6 +144,24 @@ Ponto central do desenho: **os servidores falsos não guardam estado da conversa
 Variáveis: `PTOLEMY_SCREENSHOTS_DIR` muda a pasta de saída; `PTOLEMY_E2E_SKIP_BUILD=1` reaproveita o último build da interface. Na primeira vez, instale o navegador do Playwright com `bunx playwright install chromium`.
 
 Diferente do `bun run screenshots` (Appium no app do macOS), este roda em qualquer sistema e não precisa do dev bundle. A renderização é do Chromium, não do WebKit do macOS, então fontes e bordas podem variar um pouco em relação ao app.
+
+## UI de extensões e launchers empacotados
+
+```bash
+PTOLEMY_UI_SCREENSHOTS=/tmp/ptolemy-ui bun test --timeout 60000 test/e2e-extensions
+PTOLEMY_SCREENSHOTS_DIR=/tmp/ptolemy-chat bun test --timeout 300000 test/e2e-chat
+```
+
+`e2e-extensions` constrói os fontes atuais em diretório temporário antes de servir Preferências/composer/CSS reais em Chromium com RPC fake local: navegação, rascunho inválido/foco/aria, callback copiado, estados OAuth, seleção de Skills/builtins/pacotes e teclado de comandos, inclusive largura de 480px e CLI ausente com erro visível/importação acessível/criação bloqueada. Não comprova OAuth/backend real. `e2e-chat` usa backend/session managers e ambos os CLIs reais contra mocks locais, validando turnos, ferramentas, modelo/contexto e ausência de erros do renderer. Não é o webview Appium da distribuição; `bun run test:e2e` cobre esse boundary separadamente.
+
+Após construir um bundle real, execute:
+
+```bash
+bun scripts/verify-mcp-bundle.ts /caminho/ptolemy-dev.app
+bun scripts/verify-extension-bundle.ts /caminho/ptolemy-dev.app
+```
+
+Os scripts usam Bun/launchers/executor do próprio `.app`, cwd descartável e PATH mínimo; verificam conexão MCP e confinamento/read-only/cancelamento dos filhos do executor. Se houver watcher Electrobun ativo, copie fonte/config/assets para diretório temporário, vincule dependências e construa lá; não pare o watcher nem altere configuração/build ativos. Não afirme distribuição empacotada com base só em executar fonte pelo Bun de desenvolvimento.
 
 ## CI
 

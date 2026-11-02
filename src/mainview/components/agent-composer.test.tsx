@@ -91,6 +91,69 @@ beforeEach(() => {
 });
 
 describe("Agent composer", () => {
+	test("missing CLI inventory keeps Skill import and management reachable without allowing unvalidated creation/defaults", async () => {
+		const reason =
+			"Claude Code CLI não encontrado. Instale o CLI para validar os recursos.";
+		request.agentExtensionInventory.mockRejectedValue(new Error(reason));
+		request.agentImportSkill.mockResolvedValue({
+			...skill,
+			id: "imported",
+			name: "imported",
+		});
+		render(<Composer agent="claude" />);
+		await screen.findByText(reason);
+		const opener = screen.getByRole("button", { name: /Configurar Skills/ });
+		expect(opener).toBeEnabled();
+		await userEvent.click(opener);
+		expect(screen.getByText("Skills da conversa")).toBeVisible();
+		expect(screen.getAllByText(reason)).toHaveLength(2);
+		expect(
+			screen.queryByText("Consultando Skills de pacotes…"),
+		).not.toBeInTheDocument();
+		expect(
+			screen.getByRole("button", { name: "Gerenciar biblioteca" }),
+		).toBeEnabled();
+		expect(
+			screen.getByRole("button", { name: "Usar seleção como padrão" }),
+		).toBeDisabled();
+		await userEvent.type(
+			screen.getByLabelText("URL da Skill no GitHub"),
+			"https://github.com/offline/skill",
+		);
+		await userEvent.click(
+			screen.getByRole("button", { name: "Importar Skill" }),
+		);
+		await waitFor(() =>
+			expect(request.agentImportSkill).toHaveBeenCalledWith({
+				url: "https://github.com/offline/skill",
+			}),
+		);
+		expect(
+			await screen.findByRole("checkbox", { name: "Usar imported" }),
+		).toBeDisabled();
+		await userEvent.keyboard("{Escape}");
+		expect(
+			screen.getByRole("button", { name: "Iniciar conversa" }),
+		).toBeDisabled();
+		expect(request.claudeCreateSession).not.toHaveBeenCalled();
+		expect(request.agentExtensionSetDefaults).not.toHaveBeenCalled();
+	});
+	test("pending inventory allows opening Skills while selection and defaults wait for validation", async () => {
+		request.agentExtensionInventory.mockReturnValue(new Promise(() => {}));
+		render(<Composer agent="claude" />);
+		await userEvent.click(
+			screen.getByRole("button", { name: /Configurar Skills/ }),
+		);
+		expect(screen.getByText("Skills da conversa")).toBeVisible();
+		expect(screen.getByText("Consultando Skills de pacotes…")).toBeVisible();
+		expect(
+			screen.getByRole("button", { name: "Usar seleção como padrão" }),
+		).toBeDisabled();
+		expect(
+			screen.getByRole("button", { name: "Iniciar conversa" }),
+		).toBeDisabled();
+	});
+
 	test.each([
 		"claude",
 		"codex",

@@ -468,8 +468,8 @@ export function AgentComposer({
 						/>
 						<SkillPicker
 							extraSkills={extraSkills}
-							extraLoading={libraryReview.loading}
-							extraError={libraryReview.error}
+							extraLoading={!catalogError && (loading || libraryReview.loading)}
+							extraError={catalogError ?? libraryReview.error}
 							onSaveDefaults={async () => {
 								await rpc.request.agentExtensionSetDefaults({
 									agent,
@@ -487,7 +487,8 @@ export function AgentComposer({
 								setSkills((items) => [...items, skill]);
 								setSelected((ids) => [...ids, skill.id]);
 							}}
-							disabled={loading || submitting || !!catalogError}
+							disabled={submitting}
+							selectionDisabled={loading || !!catalogError}
 						/>
 						<ExtensionPicker
 							onReviewChange={setLibraryReview}
