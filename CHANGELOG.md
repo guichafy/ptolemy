@@ -1,3 +1,30 @@
+# [0.16.0](https://github.com/guichafy/ptolemy/compare/v0.15.0...v0.16.0) (2026-11-02)
+
+
+### Bug Fixes
+
+* **extensions:** close activation review gaps ([f514bbd](https://github.com/guichafy/ptolemy/commit/f514bbd16a4959c4e6ead24d68a1369ce5503a25))
+* **extensions:** enforce OAuth readiness and settle final review ([7bc2a58](https://github.com/guichafy/ptolemy/commit/7bc2a587f159c2774010f49051e6a8d0fb6e933c))
+* **extensions:** inspect superseded inline package defaults ([8e64782](https://github.com/guichafy/ptolemy/commit/8e64782f5ea2d875f1d6b2e12a204409ad08b66a))
+* **extensions:** preserve declarations and bound public downloads ([dd5358b](https://github.com/guichafy/ptolemy/commit/dd5358b9efc8b27611ba0cfd2f5aac7f3b63d8c7))
+* **extensions:** preserve management access and verify frozen runtimes ([f0e424c](https://github.com/guichafy/ptolemy/commit/f0e424c6360c5a2bcfbe1987bf3d0e5f8fbf5d75))
+* **extensions:** preserve read-only execution policy ([7cb8a86](https://github.com/guichafy/ptolemy/commit/7cb8a8661e09e2afc82cf87d7e959fe2abe7608c))
+* **mcp:** bind registered redirects to discovered issuers ([f5f604e](https://github.com/guichafy/ptolemy/commit/f5f604e629896a4958615908072143fe95d812ab))
+* **mcp:** correct OAuth redirects, capacity and empty secrets ([e80b8c8](https://github.com/guichafy/ptolemy/commit/e80b8c89dc33f8fd4e302678933e3e5afb6a424d))
+* **mcp:** preserve long-running tools and streams ([cb28cb2](https://github.com/guichafy/ptolemy/commit/cb28cb2e99e6e28ebd7c7cd1ddc53e8d4606a66c))
+* **mcp:** preserve scope discovery on untouched drafts ([6bc8549](https://github.com/guichafy/ptolemy/commit/6bc8549d831136afc38f9fb4d502ed71e68e97e7))
+* **ui:** preserve extension choices during refresh ([bdeff67](https://github.com/guichafy/ptolemy/commit/bdeff679a5f00ec0c5b07f25f80245f60d18ae52))
+
+
+### Features
+
+* **extensions:** activate portable plugin components ([e691838](https://github.com/guichafy/ptolemy/commit/e6918389d75f35b6e6b11c009086de5c8969a4d4))
+* **extensions:** add GitHub plugin catalogs and package library ([66efc30](https://github.com/guichafy/ptolemy/commit/66efc308017b8c777d97f2984540abba49650f50))
+* **mcp:** add shared registry and browser OAuth ([706086b](https://github.com/guichafy/ptolemy/commit/706086b8419dd5cf7517c6936a44e1fe1a0d95b0))
+* **mcp:** connect selected servers to both agent runtimes ([353db40](https://github.com/guichafy/ptolemy/commit/353db40e9c0e24848cfdff6d02b0750776121789))
+* **skills:** control native skills per conversation ([7c281eb](https://github.com/guichafy/ptolemy/commit/7c281eb04cc96a68ff95b039b9f47abb45ded0b5))
+* **ui:** manage agent extensions and MCP connections ([026471d](https://github.com/guichafy/ptolemy/commit/026471d91cd72c01c7bb12157d6a17e3df954ecf))
+
 # [0.15.0](https://github.com/guichafy/ptolemy/compare/v0.14.0...v0.15.0) (2026-11-01)
 
 

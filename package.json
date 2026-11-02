@@ -1,6 +1,6 @@
 {
 	"name": "ptolemy",
-	"version": "0.15.0",
+	"version": "0.16.0",
 	"description": "macOS menu bar command palette with plugin-based search and an embedded Claude chat, built with Electrobun, React, and Tailwind CSS",
 	"repository": {
 		"type": "git",
