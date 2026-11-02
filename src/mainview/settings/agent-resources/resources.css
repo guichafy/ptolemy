@@ -1,0 +1,27 @@
+.resource-row {
+	padding: 0.75rem 0.125rem;
+	border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+}
+.resource-scroll {
+	scrollbar-width: thin;
+	scrollbar-color: color-mix(in srgb, var(--foreground) 25%, transparent)
+		transparent;
+}
+.resource-scroll::-webkit-scrollbar {
+	width: 7px;
+}
+.resource-scroll::-webkit-scrollbar-track {
+	background: transparent;
+}
+.resource-scroll::-webkit-scrollbar-thumb {
+	background: color-mix(in srgb, var(--foreground) 25%, transparent);
+	border-radius: 8px;
+}
+.resource-scroll details > summary {
+	list-style-position: outside;
+	margin-left: 0.85rem;
+}
+.resource-scroll :focus-visible {
+	outline: 2px solid var(--ring);
+	outline-offset: 3px;
+}

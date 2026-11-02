@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
+import { resourceRpc as rpc } from "@/components/agents/resource-rpc";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type {
@@ -7,7 +8,6 @@ import type {
 	McpEditableServer,
 	McpOAuthRegistration,
 } from "@/shared/mcp";
-import { rpc } from "../providers/rpc";
 import {
 	ExtensionError,
 	errorText,
@@ -119,12 +119,14 @@ export function McpEditor({
 	binding,
 	onSaved,
 	onCancel,
+	onBusyChange,
 }: {
 	initial: McpEditableServer;
 	isSaved?: boolean;
 	binding?: { packageId: string; revision: string; componentId: string };
 	onSaved: () => void;
 	onCancel: () => void;
+	onBusyChange?: (busy: boolean) => void;
 }) {
 	const [draft, setDraft] = useState(initial);
 	const [scopes, setScopes] = useState(
@@ -139,6 +141,9 @@ export function McpEditor({
 	);
 	const [dirty, setDirty] = useState(!isSaved);
 	const [busy, setBusy] = useState(false);
+	useEffect(() => {
+		onBusyChange?.(busy);
+	}, [busy, onBusyChange]);
 	const [error, setError] = useState<string | null>(null);
 	const [argsError, setArgsError] = useState<string | null>(null);
 	const argsRef = useRef<HTMLInputElement>(null);

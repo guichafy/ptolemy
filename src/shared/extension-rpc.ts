@@ -50,6 +50,7 @@ export interface ExtensionChoices {
 	mcpServerIds: string[];
 }
 export interface SessionResourceConfiguration {
+	capabilities: ExtensionCapability[];
 	agent: AgentKind;
 	revision: number;
 	legacy: boolean;

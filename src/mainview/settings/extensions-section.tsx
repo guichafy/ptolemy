@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { configureResourceRpc } from "@/components/agents/resource-rpc";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { AgentKind } from "@/shared/agent-protocol";
@@ -22,6 +23,7 @@ import { McpEditor } from "./extensions-mcp-editor";
 
 const tabs = ["Instaladas", "Marketplace", "MCP"] as const;
 export function ExtensionsSection() {
+	configureResourceRpc(rpc);
 	const [tab, setTab] = useState<(typeof tabs)[number]>("Instaladas");
 	const [agent, setAgent] = useState<AgentKind>("claude");
 	const [attempt, setAttempt] = useState(0);

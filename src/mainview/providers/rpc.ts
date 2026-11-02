@@ -171,6 +171,7 @@ export type SettingsSection =
 	| "general"
 	| "network"
 	| "extensions"
+	| `agent:${"claude" | "codex"}:${"general" | "skills" | "plugins" | "mcp"}`
 	| `plugin:${string}`;
 
 export type ClaudeCliStatus =

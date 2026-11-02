@@ -2042,6 +2042,11 @@ async function readSessionConfiguration(
 	);
 	return {
 		agent: sessionAgent(meta),
+		capabilities: await extensionSelectionCapabilities(
+			sessionAgent(meta),
+			meta.extensionSelections ?? [],
+			meta.mcpSelection,
+		).catch(() => []),
 		revision: meta.resourceRevision ?? 0,
 		legacy:
 			meta.skillSelection === undefined ||
