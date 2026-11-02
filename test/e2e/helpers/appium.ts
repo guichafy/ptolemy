@@ -4,7 +4,7 @@ import {
 	execSync,
 	spawn,
 } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { createWriteStream, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { type ChainablePromiseElement, remote } from "webdriverio";
 import {
@@ -43,6 +43,11 @@ export async function startAppiumServer(): Promise<ChildProcess> {
 		},
 	);
 
+	mkdirSync(SCREENSHOTS_DIR, { recursive: true });
+	const output = createWriteStream(path.join(SCREENSHOTS_DIR, "appium.log"));
+	proc.stdout?.pipe(output, { end: false });
+	proc.stderr?.pipe(output, { end: false });
+	proc.once("close", () => output.end());
 	await waitForAppium(proc, Timing.APPIUM_STARTUP);
 	return proc;
 }
