@@ -61,8 +61,14 @@ export async function extensionInventory(agent: AgentKind, cwd: string) {
 export async function extensionSelectionCapabilities(
 	agent: AgentKind,
 	selections: ExtensionSelection[],
+	snapshot?: import("../../shared/mcp").McpSnapshot,
 ) {
-	const servers = await mcpRegistry.list();
+	const current = await mcpRegistry.list();
+	const frozen = snapshot ? await mcpRegistry.summarize(snapshot) : [];
+	const servers = [
+		...frozen,
+		...current.filter((s) => !frozen.some((f) => f.id === s.id)),
+	];
 	const prepared = await prepareSessionExtensions(
 		"preview",
 		join(ptolemyDataDir(), "projects", "extension-preview"),

@@ -5,8 +5,15 @@ export function publicSessionMcp<T extends object>(
 		mcpSelection?: McpSnapshot;
 		skillSelection?: unknown;
 		builtinCommands?: { all: string[]; selected: string[] };
+		skillSnapshotRevision?: number;
 	},
-): Omit<T, "mcpSelection" | "skillSelection" | "builtinCommands"> & {
+): Omit<
+	T,
+	| "mcpSelection"
+	| "skillSelection"
+	| "builtinCommands"
+	| "skillSnapshotRevision"
+> & {
 	mcpServerIds?: string[];
 	builtinCommandNames?: string[];
 } {
@@ -14,6 +21,7 @@ export function publicSessionMcp<T extends object>(
 		mcpSelection,
 		skillSelection: _skillSelection,
 		builtinCommands,
+		skillSnapshotRevision: _revision,
 		...rest
 	} = value;
 	const safe = {

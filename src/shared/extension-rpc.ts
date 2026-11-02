@@ -49,11 +49,33 @@ export interface ExtensionChoices {
 	builtinCommandNames: string[];
 	mcpServerIds: string[];
 }
+export interface SessionResourceConfiguration {
+	agent: AgentKind;
+	revision: number;
+	legacy: boolean;
+	busy: boolean;
+	choices: ExtensionChoices;
+	skills: import("./skills").SkillSummary[];
+	packages: ExtensionSummary[];
+	servers: McpServerSummary[];
+}
 export interface ExtensionCommandSummary {
 	name: string;
 	description: string;
 }
 export type ExtensionRequests = {
+	agentSessionConfiguration: {
+		params: { sessionId: string };
+		response: SessionResourceConfiguration;
+	};
+	agentSessionSetConfiguration: {
+		params: {
+			sessionId: string;
+			expectedRevision: number;
+			choices: ExtensionChoices;
+		};
+		response: SessionResourceConfiguration;
+	};
 	agentExtensionSources: { params: void; response: ExtensionSource[] };
 	agentExtensionAddSource: {
 		params: { url: string };

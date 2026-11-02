@@ -32,6 +32,8 @@ test("all three schemas consume the same extension request contract and expose n
 			...Object.keys(extensionRequestHandlers),
 			"agentSessionCommands",
 			"agentSessionResources",
+			"agentSessionConfiguration",
+			"agentSessionSetConfiguration",
 		].sort(),
 	);
 });

@@ -16,6 +16,10 @@ import type {
 	SessionInfoPatch,
 	SessionStats,
 } from "@/shared/agent-protocol";
+import type {
+	ExtensionChoices,
+	SessionResourceConfiguration,
+} from "@/shared/extension-rpc";
 import type { ExtensionSelection } from "@/shared/extensions";
 import type { McpSnapshot } from "@/shared/mcp";
 import type { SessionSkill, SessionSkillSelection } from "@/shared/skills";
@@ -23,6 +27,7 @@ import { backupCorruptJson, writeJsonAtomic } from "../atomic-json";
 import { readCodexContextBreakdown } from "../codex/rollout-info";
 import { CodexSessionRuntime } from "../codex/session-runtime";
 import { prepareSessionExtensions } from "../extensions/activation";
+import { packageSummary } from "../extensions/catalog";
 import { extensionSelectionCapabilities } from "../extensions/inventory";
 import { extensionMcpId, snapshotExtensionMcp } from "../extensions/mcp";
 import {
@@ -58,6 +63,7 @@ import { skillsStore } from "../skills/store";
 import {
 	activateSkills,
 	buildCodexSkillConfig,
+	readSkillSnapshot,
 	snapshotSkills,
 } from "../skills/workspace";
 import { findClaudeCli } from "./claude-cli";
@@ -66,7 +72,17 @@ import { createMessageInbox, type MessageInbox } from "./message-inbox";
 import { PermissionGate } from "./permission-gate";
 import { type Project, ProjectStore } from "./persistence/project-store";
 import { ToolDecisionStore } from "./persistence/tool-decisions";
+import {
+	expectedResourceWorkspace,
+	stageManagedResourceWorkspace,
+	verifyManagedResourceWorkspace,
+} from "./resource-workspace";
 import { buildQueryOptions } from "./session-options";
+import {
+	resolveSessionSkills,
+	retainSelectedMcp,
+	SessionResourceCoordinator,
+} from "./session-resources";
 import type {
 	MessagePersister,
 	PersistBlock,
@@ -136,6 +152,8 @@ export interface SessionMeta {
  * the project model and is not worth migrating.
  */
 interface StoredSessionMeta extends SessionMeta {
+	resourceRevision?: number;
+	skillSnapshotRevision?: number;
 	builtinCommands?: { all: string[]; selected: string[] };
 	/** Internal native Skill denial universe, never a renderer response. */
 	skillSelection?: SessionSkillSelection;
@@ -234,6 +252,8 @@ interface ActiveQuery {
 }
 
 const claudeExpansions = new SessionExecutions();
+const resourceLifecycle = new SessionResourceCoordinator();
+const blockedResourceSessions = new Set<string>();
 
 let active: { sessionId: string; q: ActiveQuery } | null = null;
 
@@ -267,15 +287,21 @@ function buildUserMessage(text: string): SDKUserMessage {
  * Injected by the RPC layer (Etapa 5) before any session is created.
  * Falls back to no-op implementations so the module works stand-alone.
  */
-let sender: StreamMessageSender = {
-	sendEvent: () => {},
+let targetSender: StreamMessageSender = { sendEvent: () => {} };
+const sender: StreamMessageSender = {
+	sendEvent(id, event) {
+		if (event.type === "finish") resourceLifecycle.finishTurn(id);
+		if (event.type === "error" && !event.error.recoverable)
+			resourceLifecycle.clear(id);
+		targetSender.sendEvent(id, event);
+	},
 };
 
 /**
  * Configure the sender used to push stream events to the renderer.
  */
 export function setSender(s: StreamMessageSender): void {
-	sender = s;
+	targetSender = s;
 }
 
 // ---------------------------------------------------------------------------
@@ -702,6 +728,7 @@ function startLoopForActive(sessionId: string): boolean {
 		},
 	).finally(() => {
 		if (active && active.sessionId === sessionId) {
+			resourceLifecycle.clear(sessionId);
 			active.q.streamingLoop = null;
 		}
 	});
@@ -775,7 +802,7 @@ async function prepareStoredSessionMcp(
 }
 
 /** App shutdown owns both CLI runtimes, all gateways and pending prompt streams. */
-export async function shutdownSessions(): Promise<void> {
+async function shutdownSessionsImpl(): Promise<void> {
 	discardPendingClaude("application shutdown");
 	await claudeExpansions.cancel();
 	pendingCodex = null;
@@ -968,7 +995,7 @@ export async function getSessionResources(sessionId: string) {
  * same project (shared files/memory across sessions); otherwise a fresh
  * project is auto-provisioned from the prompt title.
  */
-export async function createSession(
+async function createSessionImpl(
 	prompt: string,
 	opts: {
 		projectId?: string;
@@ -1209,7 +1236,7 @@ export async function createSession(
  * triggers `query()` + `startStreamingLoop` — by then the renderer is
  * subscribed.
  */
-export async function resumeSession(sessionId: string): Promise<boolean> {
+async function resumeSessionImpl(sessionId: string): Promise<boolean> {
 	await ensureMcpCutover();
 	await claudeExpansions.cancelExcept(sessionId);
 	console.log(`[claude:session] resumeSession start: id=${sessionId}`);
@@ -1224,7 +1251,7 @@ export async function resumeSession(sessionId: string): Promise<boolean> {
 		const pending = pendingCodex;
 		await deactivateClaude("switching to Codex session");
 		await deactivateCodex("session changed");
-		await activateSkills(SESSIONS_DIR, sessionId, pending.cwd, "codex");
+		await activateStoredSkills(SESSIONS_DIR, sessionId, pending.cwd, "codex");
 		const runtime = await createCodexRuntime(pending.id, pending.cwd, null);
 		// Activation can fail on a workspace conflict. Retain the deferred
 		// prompt until preparation succeeds so reopening the chat can retry.
@@ -1263,7 +1290,7 @@ export async function resumeSession(sessionId: string): Promise<boolean> {
 			let mcp: PreparedSessionMcp | undefined;
 			let attached = false;
 			try {
-				await activateSkills(
+				await activateStoredSkills(
 					SESSIONS_DIR,
 					sessionId,
 					pending.options.cwd as string,
@@ -1378,7 +1405,7 @@ export async function resumeSession(sessionId: string): Promise<boolean> {
 			await deactivateClaude("switching to Codex session");
 			await deactivateCodex("session changed");
 			const cwd = await resolveProjectPath(meta);
-			await activateSkills(SESSIONS_DIR, sessionId, cwd, "codex");
+			await activateStoredSkills(SESSIONS_DIR, sessionId, cwd, "codex");
 			activeCodex = await createCodexRuntime(
 				sessionId,
 				cwd,
@@ -1427,7 +1454,7 @@ export async function resumeSession(sessionId: string): Promise<boolean> {
 		const cwd = await resolveProjectPath(meta);
 		const mcp = await prepareStoredSessionMcp(sessionId, cwd, "claude");
 		preparedMcp = mcp;
-		await activateSkills(SESSIONS_DIR, sessionId, cwd, "claude");
+		await activateStoredSkills(SESSIONS_DIR, sessionId, cwd, "claude");
 		const extensions = await prepareSessionExtensions(
 			sessionId,
 			cwd,
@@ -1510,7 +1537,7 @@ export async function resumeSession(sessionId: string): Promise<boolean> {
  * model is restored via the `turnCompletionQueue`, fired when the streaming
  * loop reports the next `result`.
  */
-export async function sendMessage(
+async function sendMessageImpl(
 	message: string,
 	opts: { modelOverride?: string } = {},
 ): Promise<void> {
@@ -1680,7 +1707,7 @@ export async function stopGeneration(): Promise<boolean> {
  * means deleting a conversation wipes its workspace too. The lookup keeps
  * working once multiple sessions share a project.
  */
-export async function deleteSession(sessionId: string): Promise<boolean> {
+async function deleteSessionImpl(sessionId: string): Promise<boolean> {
 	await claudeExpansions.cancel(sessionId);
 	if (pendingNew?.id === sessionId) discardPendingClaude("session deleted");
 	console.log(`[claude:session] deleteSession start: id=${sessionId}`);
@@ -1798,7 +1825,7 @@ export async function listProjects(): Promise<Project[]> {
  * model when that session is currently active. Refuses while a streaming
  * loop is in flight (the SDK can't safely change models mid-turn).
  */
-export async function setSessionModel(
+async function setSessionModelImpl(
 	sessionId: string,
 	model: string,
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
@@ -1915,4 +1942,357 @@ export async function getContextBreakdown(
 			reason: `O Claude não informou o uso do contexto (${err instanceof Error ? err.message : String(err)}).`,
 		};
 	}
+}
+
+async function storedSkillLocation(meta: StoredSessionMeta) {
+	return meta.skillSnapshotRevision === undefined
+		? { root: SESSIONS_DIR, id: meta.id }
+		: {
+				root: join(SESSIONS_DIR, meta.id, "resource-revisions"),
+				id: String(meta.skillSnapshotRevision),
+			};
+}
+async function activateStoredSkills(
+	_root: string,
+	sessionId: string,
+	cwd: string,
+	agent: AgentKind,
+) {
+	const meta = (await readIndex()).sessions.find((s) => s.id === sessionId);
+	if (!meta) throw Error("Conversa não encontrada.");
+	const location = await storedSkillLocation(meta);
+	await activateSkills(location.root, location.id, cwd, agent);
+}
+export function createSession(...args: Parameters<typeof createSessionImpl>) {
+	claudeExpansions.abort();
+	return resourceLifecycle.run(() => createSessionImpl(...args));
+}
+export function resumeSession(sessionId: string) {
+	const cancelling = claudeExpansions.cancelExcept(sessionId);
+	return resourceLifecycle.run(async () => {
+		await cancelling;
+		if (blockedResourceSessions.has(sessionId))
+			throw Error("Revise a configuração da conversa antes de continuar.");
+		const first =
+			pendingNew?.id === sessionId || pendingCodex?.id === sessionId;
+		if (first) resourceLifecycle.startTurn(sessionId);
+		try {
+			const ok = await resumeSessionImpl(sessionId);
+			if (!ok && first) resourceLifecycle.clear(sessionId);
+			return ok;
+		} catch (error) {
+			if (first) resourceLifecycle.clear(sessionId);
+			throw error;
+		}
+	});
+}
+export function sendMessage(...args: Parameters<typeof sendMessageImpl>) {
+	return resourceLifecycle.run(async () => {
+		const id = getActiveSessionId();
+		if (!id) throw Error("Nenhuma conversa ativa.");
+		if (blockedResourceSessions.has(id))
+			throw Error("Revise a configuração da conversa antes de continuar.");
+		resourceLifecycle.startTurn(id);
+		try {
+			return await sendMessageImpl(...args);
+		} catch (error) {
+			resourceLifecycle.finishTurn(id);
+			throw error;
+		}
+	});
+}
+export function deleteSession(sessionId: string) {
+	claudeExpansions.abort(sessionId);
+	return resourceLifecycle.run(async () => {
+		const result = await deleteSessionImpl(sessionId);
+		resourceLifecycle.clear(sessionId);
+		blockedResourceSessions.delete(sessionId);
+		return result;
+	});
+}
+export function setSessionModel(
+	...args: Parameters<typeof setSessionModelImpl>
+) {
+	return resourceLifecycle.run(() => setSessionModelImpl(...args));
+}
+export function shutdownSessions() {
+	claudeExpansions.abort();
+	return resourceLifecycle.run(shutdownSessionsImpl);
+}
+
+export function getSessionConfiguration(
+	sessionId: string,
+): Promise<SessionResourceConfiguration> {
+	return resourceLifecycle.run(() => readSessionConfiguration(sessionId));
+}
+async function readSessionConfiguration(
+	sessionId: string,
+): Promise<SessionResourceConfiguration> {
+	const meta = (await readIndex()).sessions.find((s) => s.id === sessionId);
+	if (!meta) throw Error("Conversa não encontrada.");
+	const location = await storedSkillLocation(meta);
+	const skills = await readSkillSnapshot(location.root, location.id);
+	const packages = await Promise.all(
+		(meta.extensionSelections ?? []).map(async (p) =>
+			packageSummary(await extensionsStore.getPackage(p.packageId, p.revision)),
+		),
+	);
+	const servers = await mcpRegistry.summarize(
+		meta.mcpSelection ?? { version: 1, servers: [] },
+	);
+	return {
+		agent: sessionAgent(meta),
+		revision: meta.resourceRevision ?? 0,
+		legacy:
+			meta.skillSelection === undefined ||
+			meta.extensionSelections === undefined ||
+			meta.mcpSelection === undefined,
+		busy:
+			resourceLifecycle.busy(sessionId) ||
+			!!(activeCodex?.sessionId === sessionId && activeCodex.busy) ||
+			pendingNew?.id === sessionId ||
+			pendingCodex?.id === sessionId,
+		choices: {
+			skillIds: (meta.skills ?? []).map((s) => s.id),
+			extensionSelections: meta.extensionSelections ?? [],
+			builtinCommandNames: meta.builtinCommands?.selected ?? [],
+			mcpServerIds: (meta.mcpSelection?.servers ?? [])
+				.filter((s) => !s.packageId)
+				.map((s) => s.id),
+		},
+		skills: skills.map(({ id, name, description, source }) => ({
+			id,
+			name,
+			description,
+			source,
+			defaultFor: [],
+		})),
+		packages,
+		servers,
+	};
+}
+export function setSessionConfiguration(
+	sessionId: string,
+	expectedRevision: number,
+	choices: ExtensionChoices,
+): Promise<SessionResourceConfiguration> {
+	return resourceLifecycle.run(async () => {
+		const meta = (await readIndex()).sessions.find((s) => s.id === sessionId);
+		if (!meta) throw Error("Conversa não encontrada.");
+		resourceLifecycle.assertEditable(
+			sessionId,
+			expectedRevision,
+			meta.resourceRevision ?? 0,
+		);
+		if (
+			(activeCodex?.sessionId === sessionId && activeCodex.busy) ||
+			pendingNew?.id === sessionId ||
+			pendingCodex?.id === sessionId
+		)
+			throw Error("Aguarde a resposta terminar para aplicar a configuração.");
+		const agent = sessionAgent(meta);
+		selectionValidation.choices({ agent, ...choices });
+		const selection = structuredClone(choices);
+		const retained = meta.extensionSelections ?? [];
+		await validateInstalledSelections(
+			selection.extensionSelections.filter(
+				(s) =>
+					!retained.some(
+						(p) => p.packageId === s.packageId && p.revision === s.revision,
+					),
+			),
+		);
+		const oldLocation = await storedSkillLocation(meta);
+		const oldSkills = await readSkillSnapshot(oldLocation.root, oldLocation.id);
+		const selectedSkills = await resolveSessionSkills(
+			selection.skillIds,
+			oldSkills,
+			(ids) => skillsStore.resolveForSession(agent, ids),
+		);
+		const newMcpIds = selection.mcpServerIds.filter(
+			(id) =>
+				!meta.mcpSelection?.servers.some((s) => s.id === id && !s.packageId),
+		);
+		await validateStandaloneMcp(newMcpIds);
+		const standalone = {
+			version: 1 as const,
+			servers: (meta.mcpSelection?.servers ?? []).filter((s) => !s.packageId),
+		};
+		const mcp = await retainSelectedMcp(
+			selection.mcpServerIds,
+			standalone,
+			(ids) => mcpRegistry.snapshot(ids),
+		);
+		const prepared = await prepareSessionExtensions(
+			sessionId,
+			meta.projectPath,
+			selection.extensionSelections,
+			agent,
+			{ materialize: false },
+		);
+		const retainedPluginIds = prepared.mcpComponents.map((c) =>
+			extensionMcpId(c.packageId, c.componentId, c.revision),
+		);
+		const oldPluginServers = (meta.mcpSelection?.servers ?? []).filter(
+			(s) => s.packageId && retainedPluginIds.includes(s.id),
+		);
+		const freshPlugin = await snapshotExtensionMcp({
+			...prepared,
+			mcpComponents: prepared.mcpComponents.filter(
+				(c) =>
+					!oldPluginServers.some(
+						(s) =>
+							s.id === extensionMcpId(c.packageId, c.componentId, c.revision),
+					),
+			),
+		});
+		mcp.servers.push(...oldPluginServers, ...freshPlugin.servers);
+		if (new Set(mcp.servers.map((s) => s.name)).size !== mcp.servers.length)
+			throw Error("Servidores MCP com mesmo nome na seleção.");
+		await mcpRegistry.resolve(mcp);
+		const readiness = await mcpRegistry.summarize(mcp);
+		if (readiness.some((s) => !s.authentication.ready))
+			throw Error("Conecte os servidores MCP antes de aplicar a seleção.");
+		const caps = await extensionSelectionCapabilities(
+			agent,
+			selection.extensionSelections,
+			mcp,
+		);
+		const unavailable = caps.find(
+			(c) =>
+				c.status === "incompatible" || c.status === "requires-configuration",
+		);
+		if (unavailable) throw Error(unavailable.reason);
+		if (
+			prepared.skills.some((s) =>
+				selectedSkills.some((other) => other.name === s.name),
+			)
+		)
+			throw Error("Skills com mesmo nome na seleção.");
+		const builtins =
+			agent === "claude"
+				? await inventoryClaudeBuiltins(await findClaudeCli())
+				: [];
+		if (
+			selection.builtinCommandNames.some(
+				(n) => !builtins.some((b) => b.name === n),
+			)
+		)
+			throw Error("Comando interno indisponível.");
+		const revision = (meta.resourceRevision ?? 0) + 1;
+		const skills = await snapshotSkills(
+			join(SESSIONS_DIR, sessionId, "resource-revisions"),
+			String(revision),
+			selectedSkills,
+		);
+		const next = {
+			...meta,
+			skills,
+			skillSnapshotRevision: revision,
+			resourceRevision: revision,
+			skillSelection: {
+				nativePaths: await skillsStore.nativePaths(agent, meta.projectPath),
+			},
+			extensionSelections: selection.extensionSelections,
+			mcpSelection: mcp,
+			builtinCommands: {
+				all: builtins.map((b) => b.name),
+				selected: selection.builtinCommandNames,
+			},
+			updatedAt: new Date().toISOString(),
+		};
+		const wasActive = getActiveSessionId() === sessionId;
+		const publish = (value: StoredSessionMeta) =>
+			mutateIndex((index) => {
+				const i = index.sessions.findIndex((s) => s.id === sessionId);
+				if (i < 0) throw Error("Conversa removida.");
+				// Preserve usage/model writes from the old stream's drain.
+				const latest = index.sessions[i];
+				index.sessions[i] = {
+					...latest,
+					skills: value.skills,
+					skillSnapshotRevision: value.skillSnapshotRevision,
+					resourceRevision: value.resourceRevision,
+					skillSelection: value.skillSelection,
+					extensionSelections: value.extensionSelections,
+					mcpSelection: value.mcpSelection,
+					builtinCommands: value.builtinCommands,
+					updatedAt: value.updatedAt,
+				};
+			});
+		const oldPackages = await Promise.all(
+			retained.map((p) => extensionsStore.getPackage(p.packageId, p.revision)),
+		);
+		const oldWorkspace = wasActive
+			? await expectedResourceWorkspace(
+					meta.projectPath,
+					agent,
+					oldSkills,
+					oldPackages,
+					retained,
+				)
+			: null;
+		const newPackages = await Promise.all(
+			selection.extensionSelections.map((p) =>
+				extensionsStore.getPackage(p.packageId, p.revision),
+			),
+		);
+		const newWorkspace = wasActive
+			? await expectedResourceWorkspace(
+					meta.projectPath,
+					agent,
+					selectedSkills,
+					newPackages,
+					selection.extensionSelections,
+					false,
+				)
+			: null;
+		if (oldWorkspace)
+			await verifyManagedResourceWorkspace(meta.projectPath, oldWorkspace);
+		if (wasActive) {
+			await deactivateClaude("resource configuration changed");
+			await deactivateCodex("resource configuration changed");
+		}
+		let stage:
+			| Awaited<ReturnType<typeof stageManagedResourceWorkspace>>
+			| undefined;
+		try {
+			if (oldWorkspace)
+				stage = await stageManagedResourceWorkspace(
+					meta.projectPath,
+					join(SESSIONS_DIR, sessionId, "workspace-backups"),
+					oldWorkspace,
+				);
+			await publish(next);
+			if (wasActive && !(await resumeSessionImpl(sessionId)))
+				throw Error(
+					"Não foi possível preparar o agente com a nova configuração.",
+				);
+			if (wasActive)
+				await prepareSessionExtensions(
+					sessionId,
+					meta.projectPath,
+					selection.extensionSelections,
+					agent,
+				);
+			await stage?.commit();
+			blockedResourceSessions.delete(sessionId);
+		} catch (error) {
+			try {
+				if (getActiveSessionId() === sessionId) {
+					await deactivateClaude("configuration rollback");
+					await deactivateCodex("configuration rollback");
+				}
+				if (stage)
+					await stage.rollback(newWorkspace ? [...newWorkspace.keys()] : []);
+				await publish(meta);
+				if (wasActive && !(await resumeSessionImpl(sessionId)))
+					throw Error("Falha ao restaurar a configuração anterior.");
+			} catch {
+				blockedResourceSessions.add(sessionId);
+			}
+			throw error;
+		}
+		return readSessionConfiguration(sessionId);
+	});
 }
