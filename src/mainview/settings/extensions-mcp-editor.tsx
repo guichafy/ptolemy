@@ -127,6 +127,9 @@ export function McpEditor({
 	onCancel: () => void;
 }) {
 	const [draft, setDraft] = useState(initial);
+	const [scopes, setScopes] = useState(
+		initial.transport === "http" ? (initial.auth?.scopes?.join(" ") ?? "") : "",
+	);
 	const [args, setArgs] = useState(
 		initial.transport === "stdio" ? JSON.stringify(initial.args ?? []) : "[]",
 	);
@@ -249,7 +252,19 @@ export function McpEditor({
 				if (!Array.isArray(parsed) || parsed.some((v) => typeof v !== "string"))
 					throw Error("Argumentos devem ser um array JSON de strings.");
 				value = { ...draft, args: parsed, env: map };
-			} else value = { ...draft, headers: map };
+			} else
+				value = {
+					...draft,
+					headers: map,
+					...(draft.auth
+						? {
+								auth: {
+									...draft.auth,
+									scopes: scopes.split(/\s+/).filter(Boolean),
+								},
+							}
+						: {}),
+				};
 			await rpc.request.agentMcpSave({
 				draft: value,
 				...(binding ? { binding } : {}),
@@ -423,15 +438,11 @@ export function McpEditor({
 						))}
 						<Field label="Escopos (separados por espaço)">
 							<Input
-								value={oauth.scopes?.join(" ") ?? ""}
-								onChange={(e) =>
-									change({
-										auth: {
-											...oauth,
-											scopes: e.target.value.split(/\s+/).filter(Boolean),
-										},
-									})
-								}
+								value={scopes}
+								onChange={(e) => {
+									setScopes(e.target.value);
+									change({});
+								}}
 							/>
 						</Field>
 						<Field label="Client secret (opcional)">

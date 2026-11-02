@@ -184,7 +184,10 @@ export class McpOAuthService {
 		this.timeoutMs = options.timeoutMs ?? 120_000;
 		this.requestTimeoutMs = options.requestTimeoutMs ?? 15_000;
 		this.now = options.now ?? Date.now;
-		this.registry.setStatusProvider((id) => this.status(id));
+		this.registry.setStatusProvider(
+			(id) => this.status(id),
+			(server) => this.isAuthenticationReady(server),
+		);
 	}
 	private serial<T>(id: string, work: () => Promise<T>): Promise<T> {
 		const run = (this.locks.get(id) ?? Promise.resolve()).then(work);
@@ -577,13 +580,17 @@ export class McpOAuthService {
 					: {}),
 			};
 			record.identity = identity(record);
+			const previous = await this.vault.get(storageKey(flow.definition.id));
+			this.active(flow);
 			await this.vault.set(
 				storageKey(flow.definition.id),
 				JSON.stringify(record),
 			);
 			// A cancellation can occur while the native vault write is pending.
 			if (flow.controller.signal.aborted) {
-				await this.vault.delete(storageKey(flow.definition.id));
+				if (previous === undefined)
+					await this.vault.delete(storageKey(flow.definition.id));
+				else await this.vault.set(storageKey(flow.definition.id), previous);
 				return;
 			}
 			flow.status = { state: "connected" };
@@ -631,6 +638,25 @@ export class McpOAuthService {
 				expired: true,
 			} satisfies ExpiredRecord),
 		);
+	}
+
+	/** Read only: login attempt status is independent from an older usable grant. */
+	private async isAuthenticationReady(
+		server: McpServerDefinition,
+	): Promise<boolean> {
+		try {
+			const record = await this.readRecord(server.id);
+			return (
+				!!record &&
+				!("expired" in record) &&
+				record.definitionKey === definitionKey(server) &&
+				(record.expiresAt === undefined ||
+					record.expiresAt > this.now() + 30_000 ||
+					!!record.tokens.refresh_token)
+			);
+		} catch {
+			return false;
+		}
 	}
 
 	async status(serverId: string): Promise<McpConnectionStatus> {

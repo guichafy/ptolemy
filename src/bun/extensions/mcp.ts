@@ -1,13 +1,47 @@
 import { createHash } from "node:crypto";
-import type { McpServerDefinition, McpSnapshot } from "@/shared/mcp";
+import type {
+	McpServerDefinition,
+	McpServerSummary,
+	McpSnapshot,
+} from "@/shared/mcp";
 import { type McpRegistry, mcpRegistry } from "../mcp/registry";
 import type { PreparedSessionExtensions } from "./activation";
+import type { ComponentCapability } from "./capabilities";
 export function extensionMcpId(
 	packageId: string,
 	componentId: string,
 	revision: string,
 ): string {
 	return `extension-mcp:${createHash("sha256").update(`${packageId}:${componentId}:${revision}`).digest("hex")}`;
+}
+/** Existing bindings override declarative readiness, including previously public endpoints. */
+export function boundMcpCapability(
+	cap: ComponentCapability,
+	servers: McpServerSummary[],
+	packageId: string,
+	revision: string,
+): ComponentCapability {
+	if (cap.status === "incompatible") return cap;
+	const server = servers.find(
+		(s) =>
+			s.id === extensionMcpId(packageId, cap.componentId, revision) &&
+			s.packageId === packageId,
+	);
+	if (!server) return cap;
+	if (!server.authentication.ready)
+		return {
+			...cap,
+			status: "requires-configuration",
+			reason:
+				server.authentication.reason ?? "Conecte o OAuth em Extensões → MCP.",
+		};
+	return {
+		...cap,
+		status: "adapted",
+		reason: server.authentication.required
+			? "OAuth disponível; conexão com o servidor não testada."
+			: "Configurado no registro MCP compartilhado; conexão não testada.",
+	};
 }
 /** Registration and credentials are owned exclusively by the shared registry. */
 export async function snapshotExtensionMcp(

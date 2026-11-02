@@ -159,3 +159,70 @@ it("new selections require the currently installed revision while historical pac
 	).resolves.toBeUndefined();
 	spy.mockRestore();
 });
+
+it.each([
+	"claude",
+	"codex",
+] as const)("%s package MCP capabilities require authentication readiness in both review paths", async (agent) => {
+	const { extensionsStore } = await import("./store");
+	const { extensionMcpId } = await import("./mcp");
+	const id = `extension:${"c".repeat(64)}`,
+		revision = "d".repeat(64);
+	const spy = vi.spyOn(extensionsStore, "getPackage").mockResolvedValue({
+		id,
+		name: "Tools",
+		revision,
+		files: [],
+		diagnostics: [],
+		components: [
+			{
+				id: "mcp",
+				name: "Docs",
+				kind: "mcp",
+				sources: [{ effective: true, harness: "portable" }],
+				diagnostics: [],
+				definition: {
+					config: {
+						url: "https://mcp.example",
+						oauth_resource: "https://mcp.example",
+					},
+				},
+			},
+		],
+	} as never);
+	try {
+		for (const ready of [false, true]) {
+			registry.list.mockResolvedValue([
+				{
+					id: extensionMcpId(id, "mcp", revision),
+					packageId: id,
+					authentication: {
+						required: true,
+						ready,
+						reason: ready ? undefined : "Conecte o OAuth em Extensões → MCP.",
+					},
+				},
+			]);
+			const expected = ready ? "adapted" : "requires-configuration";
+			expect(
+				(
+					await handlers.agentExtensionReview({
+						agent,
+						packageId: id,
+						revision,
+					})
+				)[0].status,
+			).toBe(expected);
+			expect(
+				(
+					await handlers.agentExtensionCapabilities({
+						agent,
+						selections: [{ packageId: id, revision, componentIds: ["mcp"] }],
+					})
+				)[0].status,
+			).toBe(expected);
+		}
+	} finally {
+		spy.mockRestore();
+	}
+});

@@ -158,6 +158,7 @@ export function AgentComposer({
 	const inFlight = useRef(false);
 	const mounted = useRef(true);
 	const catalogRequest = useRef(0);
+	const selectionInitialized = useRef<AgentKind | null>(null);
 	const label = agent === "claude" ? "Claude" : "Codex";
 	const resolvedId = models.find((item) => item.value === model)?.resolvesTo;
 	const resolvedLabel =
@@ -210,6 +211,8 @@ export function AgentComposer({
 						.filter((s) => s.defaults[agent] && !s.packageId)
 						.map((s) => s.id),
 				});
+				const wasInitialized = selectionInitialized.current === agent;
+				selectionInitialized.current = agent;
 				const applyDefaults =
 					!preserveSelection || signature !== defaultSignature.current;
 				defaultSignature.current = signature;
@@ -218,7 +221,7 @@ export function AgentComposer({
 						extensionSelections: library.defaults?.selections ?? [],
 						builtinCommandNames:
 							library.defaults?.builtinCommandNames ??
-							(preserveSelection
+							(preserveSelection && wasInitialized
 								? previous.builtinCommandNames
 								: library.builtins.map((b) => b.name)),
 						mcpServerIds: mcp
@@ -271,6 +274,22 @@ export function AgentComposer({
 						pkg.revision === selection.revision,
 				),
 		);
+		const unavailableMcp = extra.mcpServerIds.find(
+			(id) =>
+				!servers.some(
+					(s) =>
+						s.id === id && !s.packageId && s.authentication?.ready !== false,
+				),
+		);
+		if (unavailableMcp) {
+			setSelectionError(
+				servers.find((s) => s.id === unavailableMcp)?.authentication?.reason ??
+					"Servidor MCP indisponível. Revise em Extensões → MCP.",
+			);
+			setChecking(false);
+			setSelectionCapabilities([]);
+			return;
+		}
 		if (stale) {
 			setSelectionError(
 				"Extensão removida ou atualizada. Remova a seleção antiga e selecione a revisão instalada; autorize seus hooks novamente.",
@@ -318,7 +337,7 @@ export function AgentComposer({
 		return () => {
 			cancelled = true;
 		};
-	}, [agent, extra, inventory, loading, catalogError]);
+	}, [agent, extra, inventory, loading, catalogError, servers]);
 
 	useWindowShown(() => {
 		textarea.current?.focus();

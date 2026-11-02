@@ -672,13 +672,39 @@ test("explicit plugin selection suppresses inherited components, preserves selec
 				() => null,
 			),
 		).toBeNull();
-		codexProbe = startMockResponsesServer({
-			name: "spawn_agent",
-			namespace: "collaboration",
-			arguments: {
-				agent_type: codexPrepared.agents[0].name,
-				message: "Reply briefly",
-				task_name: "probe",
+
+		codexProbe = startMockResponsesServer(undefined, {
+			beforeRequest: async (body) => {
+				// Inject a bounded child scheduling delay; synchronization must come from native wait.
+				if (body.model === "haiku") await Bun.sleep(1500);
+			},
+			respond: (body) => {
+				if (body.model === "haiku") return { text: "Child completed." };
+				const input = body.input as Array<{ type: string; output?: string }>;
+				const results = input.filter((i) => i.type === "function_call_output");
+				if (!results.length)
+					return {
+						name: "spawn_agent",
+						namespace: "collaboration",
+						arguments: {
+							agent_type: codexPrepared.agents[0].name,
+							message: "Reply briefly",
+							task_name: "probe",
+						},
+					};
+				const spawn = JSON.parse(results[0].output ?? "{}");
+				if (spawn.task_name !== "/root/probe")
+					throw Error(`Native spawn failed: ${JSON.stringify(results)}`);
+				if (results.length === 1)
+					return {
+						name: "wait_agent",
+						namespace: "collaboration",
+						arguments: { timeout_ms: 10000 },
+					};
+				const waited = JSON.parse(results.at(-1)?.output ?? "{}");
+				if (waited.timed_out !== false || waited.message !== "Wait completed.")
+					throw Error(`Native child wait failed: ${JSON.stringify(results)}`);
+				return { text: "Parent completed after native wait." };
 			},
 		});
 		const overrides = await codexExtensionOverrides(
@@ -716,6 +742,15 @@ test("explicit plugin selection suppresses inherited components, preserves selec
 				"Crie o arquivo unused.txt na pasta atual contendo exatamente o texto: inert",
 				{ signal: AbortSignal.timeout(20000) },
 			);
+		const parentRequests = codexProbe.requests.filter(
+			(r) => r.body.model !== "haiku",
+		);
+		expect(JSON.stringify(parentRequests)).toContain('"name":"wait_agent"');
+		expect(JSON.stringify(parentRequests)).toContain('\\"timed_out\\":false');
+		const childRequests = codexProbe.requests.filter(
+			(r) => r.body.model === "haiku",
+		);
+		expect(childRequests).toHaveLength(1);
 		expect(JSON.stringify(codexProbe.requests)).not.toContain(
 			"UNSELECTED_SKILL_CONTEXT",
 		);

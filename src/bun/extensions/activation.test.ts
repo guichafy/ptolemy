@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test } from "vitest";
 import { prepareSessionExtensions } from "./activation";
+import { resolveExtensionCommand } from "./commands";
 import { ExtensionsStore } from "./store";
 import { githubFixture, skill } from "./test-fixtures";
 
@@ -314,4 +315,49 @@ test("Codex selected Skills resolve known package root/data tokens while scripts
 	expect(
 		await readFile(join(prepared.roots[0], "scripts/check.sh"), "utf8"),
 	).toBe(`echo "\${PLUGIN_ROOT}"`);
+});
+
+test.each([
+	"claude",
+	"codex",
+] as const)("prepared %s command and agent resolve DATA only in authored spans", async (agent) => {
+	const literal = `\${PLUGIN_DATA} \${CLAUDE_PLUGIN_DATA} \${PLUGIN_ROOT}`;
+	const prompt = `root=\${PLUGIN_ROOT}; claudeRoot=\${CLAUDE_PLUGIN_ROOT}; data=\${PLUGIN_DATA}; claudeData=\${CLAUDE_PLUGIN_DATA}`;
+	const { cwd, store, pkg } = await fixture({
+		"plugin.json": JSON.stringify({ name: "paths" }),
+		"commands/probe.md": `---\ndescription: Probe\n---\n${prompt}\n$ARGUMENTS\n!\`echo authored\``,
+		"agents/probe.md": `---\nname: probe\ndescription: Probe\n---\n${prompt}`,
+	});
+	const prepared = await prepareSessionExtensions(
+		"paths",
+		cwd,
+		[
+			{
+				packageId: pkg.id,
+				revision: pkg.revision,
+				componentIds: pkg.components.map((c) => c.id),
+				trustedHookDigest: pkg.revision,
+			},
+		],
+		agent,
+		{
+			store,
+			executionDirectory: join(cwd, "..", `backend-${cwd.split("/").pop()}`),
+		},
+	);
+	const command = prepared.commands[0];
+	expect(command).toBeDefined();
+	const rendered = await resolveExtensionCommand(
+		command,
+		{ arguments: literal },
+		async () => literal,
+	);
+	expect(rendered).toContain(
+		`root=${command.root}; claudeRoot=${command.root}; data=${command.data}; claudeData=${command.data}`,
+	);
+	expect(rendered).toContain(`${literal}\n${literal}`);
+	expect(prepared.agents[0].prompt).toContain(
+		`root=${prepared.roots[0]}; claudeRoot=${prepared.roots[0]}; data=${command.data}; claudeData=${command.data}`,
+	);
+	expect(command.root).not.toBe(prepared.roots[0]);
 });

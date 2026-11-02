@@ -109,3 +109,33 @@ test("saved OAuth shows real status and exact issuer callback, then connects and
 		screen.getByRole("button", { name: "Obter URI de registro" }),
 	).toBeDisabled();
 });
+
+test("OAuth scope draft retains separators during sequential typing and parses on save", async () => {
+	render(
+		<McpEditor
+			initial={{
+				id: "x",
+				name: "Remote",
+				transport: "http",
+				url: "https://mcp.example",
+				auth: { type: "oauth" },
+				defaults: { claude: false, codex: false },
+			}}
+			onSaved={() => {}}
+			onCancel={() => {}}
+		/>,
+	);
+	const scopes = screen.getByLabelText("Escopos (separados por espaço)");
+	await userEvent.type(scopes, "read ");
+	expect(scopes).toHaveValue("read ");
+	await userEvent.type(scopes, "write  ");
+	expect(request.agentMcpSave).not.toHaveBeenCalled();
+	await userEvent.click(
+		screen.getByRole("button", { name: "Salvar servidor" }),
+	);
+	expect(request.agentMcpSave).toHaveBeenCalledWith({
+		draft: expect.objectContaining({
+			auth: { type: "oauth", scopes: ["read", "write"] },
+		}),
+	});
+});

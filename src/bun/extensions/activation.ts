@@ -376,8 +376,8 @@ export async function prepareSessionExtensions(
 				result.agents.push({
 					name: `${extensionNamespace(pkg.id)}-${c.name}`,
 					prompt: c.definition.prompt.replace(
-						/\$\{(?:CLAUDE_)?PLUGIN_ROOT\}/g,
-						() => root,
+						/\$\{(?:CLAUDE_)?PLUGIN_(ROOT|DATA)\}/g,
+						(_token, kind) => (kind === "ROOT" ? root : data),
 					),
 					metadata: c.definition.metadata,
 				});

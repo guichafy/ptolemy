@@ -150,6 +150,9 @@ export function ExtensionsSection() {
 		setMessage("");
 		setError(null);
 		await run(async () => {
+			const saved = selections.find(
+				(s) => s.packageId === pkg.id && s.revision === pkg.revision,
+			);
 			const review =
 				tab === "Marketplace"
 					? await rpc.request.agentExtensionInspect({
@@ -163,14 +166,14 @@ export function ExtensionsSection() {
 								agent,
 								packageId: pkg.id,
 								revision: pkg.revision,
+								...(saved?.trustedHookDigest === pkg.revision
+									? { trustedHookDigest: pkg.revision }
+									: {}),
 							}),
 						};
 			if (sequence.current !== request) return;
 			setDetail(review.summary);
 			setCaps(review.capabilities);
-			const saved = selections.find(
-				(s) => s.packageId === pkg.id && s.revision === pkg.revision,
-			);
 			setEnabled(saved?.componentIds ?? []);
 			setTrusted(saved?.trustedHookDigest === pkg.revision);
 		});

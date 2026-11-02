@@ -8,7 +8,7 @@ import { mcpRegistry } from "../mcp/registry";
 import { ptolemyDataDir } from "../paths";
 import { skillsStore } from "../skills/store";
 import { prepareSessionExtensions } from "./activation";
-import { extensionMcpId } from "./mcp";
+import { boundMcpCapability } from "./mcp";
 import {
 	inventoryClaudeBuiltins,
 	inventoryClaudePlugins,
@@ -99,28 +99,18 @@ export async function extensionSelectionCapabilities(
 			(s) => s.packageId === capability.packageId,
 		)!;
 		if (
-			capability.status === "requires-configuration" &&
 			prepared.mcpComponents.some(
 				(c) =>
 					c.packageId === capability.packageId &&
 					c.componentId === capability.componentId,
-			) &&
-			servers.some(
-				(s) =>
-					s.id ===
-						extensionMcpId(
-							selected.packageId,
-							capability.componentId,
-							selected.revision,
-						) && s.packageId === selected.packageId,
 			)
 		)
-			return {
-				...capability,
-				status: "adapted" as const,
-				reason:
-					"Configurado no registro MCP compartilhado; conexão não testada.",
-			};
+			return boundMcpCapability(
+				capability,
+				servers,
+				selected.packageId,
+				selected.revision,
+			);
 		return capability;
 	});
 }

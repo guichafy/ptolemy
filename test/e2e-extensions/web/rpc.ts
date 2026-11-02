@@ -225,6 +225,16 @@ const request: Record<string, (args?: any) => Promise<any>> = {
 				oauthClientSecret: true,
 			},
 			connection: { state: oauth },
+			authentication: {
+				required: true,
+				ready: oauth === "connected",
+				...(oauth !== "connected"
+					? {
+							reason:
+								"OAuth indisponível. Conecte novamente em Extensões → MCP.",
+						}
+					: {}),
+			},
 		},
 	],
 	agentMcpGetEditable: async () => draft,
