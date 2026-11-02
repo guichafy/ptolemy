@@ -135,7 +135,7 @@ void makeWindowOverlay(void *nsWindowPtr) {
         }
 
         [window setOpaque:NO];
-        [window setBackgroundColor:[[NSColor blackColor] colorWithAlphaComponent:0.85]];
+        [window setBackgroundColor:NSColor.clearColor];
         [window setCollectionBehavior:
             NSWindowCollectionBehaviorMoveToActiveSpace |
             NSWindowCollectionBehaviorFullScreenAuxiliary];

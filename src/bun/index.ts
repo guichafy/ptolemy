@@ -36,6 +36,10 @@ await ensureMcpCutover().catch(() =>
 // The dylib is copied to Resources/app/native/ via electrobun.config.ts
 const dylibPath = join(import.meta.dir, "..", "native", "liboverlay.dylib");
 const overlaySymbols = {
+	configureWindowMaterial: {
+		args: [FFIType.ptr, FFIType.i32],
+		returns: FFIType.void,
+	},
 	makeWindowOverlay: {
 		args: [FFIType.ptr],
 		returns: FFIType.void,
@@ -108,6 +112,7 @@ function openChatWindow(sessionId?: string) {
 		url: "views://chatview/index.html",
 		hidden: false,
 		titleBarStyle: "default",
+		transparent: true,
 		styleMask: {
 			Borderless: false,
 			Titled: true,
@@ -123,6 +128,8 @@ function openChatWindow(sessionId?: string) {
 		},
 		rpc: chatRpc,
 	});
+
+	overlayLib.symbols.configureWindowMaterial(chatWindow.ptr, 0);
 
 	// Electrobun removes the window from its internal map on close, but our
 	// reference here would remain stale — causing the next open to take the
@@ -181,6 +188,7 @@ const mainWindow = new BrowserWindow({
 	url,
 	hidden: true,
 	titleBarStyle: "hidden",
+	transparent: true,
 	styleMask: {
 		Borderless: true,
 		Titled: false,
@@ -197,6 +205,7 @@ const mainWindow = new BrowserWindow({
 	rpc: mainRpc,
 });
 
+overlayLib.symbols.configureWindowMaterial(mainWindow.ptr, 1);
 setMainWindow(mainWindow);
 setMainWindowVisibilityChecker(
 	() => overlayLib.symbols.isMainWindowVisible() !== 0,
