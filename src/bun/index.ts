@@ -6,6 +6,7 @@ import {
 	listSessions as claudeListSessions,
 	shutdownSessions,
 } from "./claude/session-manager";
+import { ensureMcpCutover } from "./mcp/cutover";
 import { mcpOAuthService } from "./mcp/oauth";
 import { initProxy } from "./net/proxy";
 import {
@@ -23,6 +24,12 @@ import { loadSettings } from "./settings";
 // (PostHog). Em modo manual, a senha vem do Keychain.
 const bootSettings = await loadSettings();
 await initProxy(bootSettings.proxy?.mode ?? "auto", bootSettings.proxy?.manual);
+// A failed cutover remains recoverable through Preferences; no legacy writer survives.
+await ensureMcpCutover().catch(() =>
+	console.error(
+		"[mcp] Migração pendente. Abra Extensões para recuperar os dados preservados.",
+	),
+);
 
 // Load native helper for window overlay on fullscreen
 // import.meta.dir points to Resources/app/bun/ in the bundle

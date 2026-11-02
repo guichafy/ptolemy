@@ -23,7 +23,8 @@ import { backupCorruptJson, writeJsonAtomic } from "../atomic-json";
 import { readCodexContextBreakdown } from "../codex/rollout-info";
 import { CodexSessionRuntime } from "../codex/session-runtime";
 import { prepareSessionExtensions } from "../extensions/activation";
-import { snapshotExtensionMcp } from "../extensions/mcp";
+import { extensionSelectionCapabilities } from "../extensions/inventory";
+import { extensionMcpId, snapshotExtensionMcp } from "../extensions/mcp";
 import {
 	denyUnselectedSlash,
 	inventoryClaudeBuiltins,
@@ -35,6 +36,13 @@ import {
 } from "../extensions/runtime";
 import { SessionExecutions } from "../extensions/session-execution";
 import { extensionsStore } from "../extensions/store";
+import {
+	selectedCommands,
+	validateInstalledSelections,
+	validateStandaloneMcp,
+} from "../extensions/ui-service";
+import * as selectionValidation from "../extensions/ui-validation";
+import { ensureMcpCutover } from "../mcp/cutover";
 import { mcpRegistry } from "../mcp/registry";
 import {
 	disposeSessionMcp,
@@ -88,7 +96,7 @@ function previewText(text: string, max = 60): string {
 
 export interface SessionMeta {
 	extensionSelections?: ExtensionSelection[];
-	builtinCommands?: { all: string[]; selected: string[] };
+	builtinCommandNames?: string[];
 	/** Safe logical selection for listings; no credential references. */
 	mcpServerIds?: string[];
 	id: string;
@@ -101,8 +109,6 @@ export interface SessionMeta {
 	agent?: AgentKind;
 	/** Immutable file Skill snapshots selected before the first turn. */
 	skills?: SessionSkill[];
-	/** Undefined retains legacy native discovery; explicit selection is frozen at creation. */
-	skillSelection?: SessionSkillSelection;
 	title: string;
 	/** Project this conversation belongs to. Many sessions can share one project. */
 	projectId: string;
@@ -130,6 +136,9 @@ export interface SessionMeta {
  * the project model and is not worth migrating.
  */
 interface StoredSessionMeta extends SessionMeta {
+	builtinCommands?: { all: string[]; selected: string[] };
+	/** Internal native Skill denial universe, never a renderer response. */
+	skillSelection?: SessionSkillSelection;
 	/** Undefined is a pre-selection legacy session; [] is an explicit frozen none. */
 	mcpSelection?: McpSnapshot;
 }
@@ -398,7 +407,7 @@ async function mutateIndex<T>(
 	return next;
 }
 
-async function refreshSessionBuiltins(meta: SessionMeta) {
+async function refreshSessionBuiltins(meta: StoredSessionMeta) {
 	if (!meta.builtinCommands) return undefined;
 	const current = await inventoryClaudeBuiltins(await findClaudeCli());
 	const refreshed = refreshClaudeBuiltinSelection(
@@ -897,6 +906,59 @@ export async function listSessions(): Promise<SessionMeta[]> {
 		);
 }
 
+export async function getSessionCommands(sessionId: string) {
+	const meta = (await readIndex()).sessions.find((s) => s.id === sessionId);
+	if (!meta) throw Error("Conversa não encontrada.");
+	const commands = await selectedCommands(
+		meta.agent ?? "claude",
+		meta.extensionSelections ?? [],
+	);
+	const builtins =
+		meta.agent !== "codex" && meta.builtinCommands
+			? await inventoryClaudeBuiltins(await findClaudeCli())
+			: [];
+	return [
+		...commands,
+		...builtins
+			.filter((b) => meta.builtinCommands?.selected.includes(b.name))
+			.map((b) => ({ name: b.name, description: b.description })),
+	];
+}
+
+export async function getSessionResources(sessionId: string) {
+	const meta = (await readIndex()).sessions.find((s) => s.id === sessionId);
+	if (!meta) throw Error("Conversa não encontrada.");
+	const prepared = await prepareSessionExtensions(
+		"preview",
+		meta.projectPath,
+		meta.extensionSelections,
+		meta.agent ?? "claude",
+		{ materialize: false },
+	);
+	const unavailable = prepared.capabilities.filter(
+		(c) =>
+			c.status === "incompatible" ||
+			(c.status === "requires-configuration" &&
+				!prepared.mcpComponents.some(
+					(m) =>
+						m.componentId === c.componentId &&
+						m.packageId === c.packageId &&
+						meta.mcpSelection?.servers.some(
+							(s) =>
+								s.id === extensionMcpId(m.packageId, m.componentId, m.revision),
+						),
+				)),
+	);
+	return {
+		legacy: meta.extensionSelections === undefined,
+		skillCount: meta.skills?.length ?? 0,
+		componentCount: prepared.capabilities.length - unavailable.length,
+		mcpCount: meta.mcpSelection?.servers.length ?? 0,
+		builtinCount: meta.builtinCommands?.selected.length ?? 0,
+		unavailableReasons: unavailable.map((c) => c.reason),
+	};
+}
+
 /**
  * Creates a new Claude session, sends the initial prompt, and starts the
  * streaming loop. Returns our internal session UUID.
@@ -929,12 +991,21 @@ export async function createSession(
 			opts.model.length > 256)
 	)
 		throw new Error("Modelo inválido.");
+	await ensureMcpCutover();
+	if (opts.skillIds !== undefined) selectionValidation.ids(opts.skillIds);
+	if (opts.mcpServerIds !== undefined)
+		selectionValidation.ids(opts.mcpServerIds);
+	if (opts.extensionSelections !== undefined)
+		selectionValidation.selections(opts.extensionSelections);
+	if (opts.builtinCommandNames !== undefined)
+		selectionValidation.ids(opts.builtinCommandNames);
 	const mcpSelection = await mcpRegistry.snapshot(
 		opts.mcpServerIds ??
 			(await mcpRegistry.list())
 				.filter((server) => server.defaults[opts.agent ?? "claude"])
 				.map((server) => server.id),
 	);
+	await validateStandaloneMcp(mcpSelection.servers.map((s) => s.id));
 	const skillIds =
 		opts.skillIds ?? (await skillsStore.defaults(opts.agent ?? "claude"));
 	// Resolve before provisioning a project or mutating the session index.
@@ -952,6 +1023,7 @@ export async function createSession(
 	const extensionSelections = structuredClone(
 		opts.extensionSelections ?? extensionDefaults?.selections ?? [],
 	);
+	await validateInstalledSelections(extensionSelections);
 	const builtins =
 		opts.agent !== "codex"
 			? await inventoryClaudeBuiltins(await findClaudeCli())
@@ -979,6 +1051,14 @@ export async function createSession(
 		opts.agent ?? "claude",
 		{ materialize: false },
 	);
+	const unavailable = (
+		await extensionSelectionCapabilities(
+			opts.agent ?? "claude",
+			extensionSelections,
+		)
+	).find((c) => ["incompatible", "requires-configuration"].includes(c.status));
+	if (unavailable) throw Error(unavailable.reason);
+
 	const duplicate = extensions.skills.find((s) =>
 		selectedSkills.some((existing) => existing.name === s.name),
 	);
@@ -1130,6 +1210,7 @@ export async function createSession(
  * subscribed.
  */
 export async function resumeSession(sessionId: string): Promise<boolean> {
+	await ensureMcpCutover();
 	await claudeExpansions.cancelExcept(sessionId);
 	console.log(`[claude:session] resumeSession start: id=${sessionId}`);
 

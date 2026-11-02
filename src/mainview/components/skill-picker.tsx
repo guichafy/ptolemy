@@ -12,7 +12,21 @@ import type { AgentKind } from "@/shared/agent-protocol";
 import type { SkillSummary } from "@/shared/skills";
 import { rpc } from "../providers/rpc";
 
+export interface SkillOption {
+	id: string;
+	name: string;
+	description: string;
+	origin: string;
+	checked: boolean;
+	unavailableReason?: string;
+	onToggle: (checked: boolean) => void;
+}
 interface SkillPickerProps {
+	extraSkills?: SkillOption[];
+	extraLoading?: boolean;
+	extraError?: string | null;
+	onSaveDefaults?: () => Promise<void>;
+	onManage?: () => void;
 	agent: AgentKind;
 	skills: SkillSummary[];
 	selected: string[];
@@ -24,6 +38,11 @@ interface SkillPickerProps {
 
 export function SkillPicker({
 	agent,
+	extraSkills = [],
+	extraLoading = false,
+	extraError = null,
+	onSaveDefaults,
+	onManage,
 	skills,
 	selected,
 	onSelect,
@@ -62,7 +81,9 @@ export function SkillPicker({
 		setError(null);
 		setSaved(false);
 		try {
-			await rpc.request.agentSetDefaultSkills({ agent, skillIds: selected });
+			if (onSaveDefaults) await onSaveDefaults();
+			else
+				await rpc.request.agentSetDefaultSkills({ agent, skillIds: selected });
 			setSaved(true);
 		} catch (err) {
 			setError(
@@ -75,6 +96,9 @@ export function SkillPicker({
 			onBusyChange(false);
 		}
 	}
+	const count =
+		selected.length +
+		extraSkills.filter((s) => s.checked && !s.unavailableReason).length;
 	return (
 		<Popover>
 			<PopoverTrigger asChild>
@@ -83,13 +107,13 @@ export function SkillPicker({
 					variant="ghost"
 					size="sm"
 					disabled={disabled}
-					aria-label={`Configurar Skills${selected.length ? ` (${selected.length})` : ""}`}
+					aria-label={`Configurar Skills${count ? ` (${count})` : ""}`}
 					className="h-8 gap-1.5 text-xs text-muted-foreground"
 				>
 					<BookOpen className="h-3.5 w-3.5" /> Skills{" "}
-					{selected.length > 0 && (
+					{count > 0 && (
 						<span className="rounded bg-primary/15 px-1.5 text-primary">
-							{selected.length}
+							{count}
 						</span>
 					)}
 				</Button>
@@ -109,7 +133,53 @@ export function SkillPicker({
 					Selecione as Skills disponíveis para esta conversa. A seleção fica
 					salva ao iniciar.
 				</p>
-				<div className="max-h-32 overflow-y-auto space-y-1">
+				<div className="max-h-72 overflow-y-auto space-y-1">
+					{extraLoading && (
+						<p role="status" className="text-xs text-muted-foreground">
+							Consultando Skills de pacotes…
+						</p>
+					)}
+					{extraError && (
+						<p role="alert" className="text-xs text-destructive">
+							{extraError}
+						</p>
+					)}
+					{extraSkills.map((option) => (
+						<label
+							key={option.id}
+							className="flex cursor-pointer items-start gap-2 rounded-md px-2 py-2 hover:bg-accent"
+						>
+							<input
+								type="checkbox"
+								className="mt-0.5 accent-primary"
+								aria-label={`Usar ${option.name}`}
+								checked={option.checked}
+								disabled={
+									busy ||
+									disabled ||
+									(!option.checked && !!option.unavailableReason)
+								}
+								onChange={(e) => {
+									option.onToggle(e.target.checked);
+									setSaved(false);
+								}}
+							/>
+							<span className="min-w-0 break-words">
+								<span className="block text-xs font-medium">{option.name}</span>
+								<span className="block text-[10px] text-muted-foreground">
+									{option.origin}
+								</span>
+								<span className="block text-xs text-muted-foreground">
+									{option.description}
+								</span>
+								{option.unavailableReason && (
+									<span className="block text-xs text-destructive">
+										{option.unavailableReason}
+									</span>
+								)}
+							</span>
+						</label>
+					))}
 					{skills.map((skill) => (
 						<label
 							key={skill.id}
@@ -121,7 +191,11 @@ export function SkillPicker({
 								className="mt-0.5 accent-primary"
 								aria-label={`Usar ${skill.name}`}
 								checked={selected.includes(skill.id)}
-								disabled={busy || disabled || !!skill.unavailableReason}
+								disabled={
+									busy ||
+									disabled ||
+									(!selected.includes(skill.id) && !!skill.unavailableReason)
+								}
 								onChange={(event) => {
 									onSelect(
 										event.target.checked
@@ -151,7 +225,7 @@ export function SkillPicker({
 							</span>
 						</label>
 					))}
-					{!skills.length && (
+					{!skills.length && !extraSkills.length && !extraLoading && (
 						<p className="px-2 py-2 text-xs text-muted-foreground">
 							Importe uma Skill do GitHub para começar.
 						</p>
@@ -206,7 +280,7 @@ export function SkillPicker({
 						{error}
 					</p>
 				)}
-				<div className="mt-3 flex items-center justify-between gap-2">
+				<div className="mt-3 flex flex-wrap items-center justify-between gap-2">
 					<Button
 						type="button"
 						size="sm"
@@ -218,6 +292,17 @@ export function SkillPicker({
 						<Star className="h-3 w-3" />
 						Usar seleção como padrão
 					</Button>
+					{onManage && (
+						<Button
+							type="button"
+							size="sm"
+							variant="ghost"
+							disabled={busy}
+							onClick={onManage}
+						>
+							Gerenciar biblioteca
+						</Button>
+					)}
 					{saved && (
 						<span role="status" className="text-xs text-muted-foreground">
 							Padrão salvo

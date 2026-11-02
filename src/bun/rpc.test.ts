@@ -68,6 +68,8 @@ vi.mock("./claude/session-manager", () => ({
 	getSessionMessages: claudeGetSessionMessagesMock,
 	setSender: claudeSetSenderMock,
 	getPermissionGate: getPermissionGateMock,
+	getSessionCommands: vi.fn(),
+	getSessionResources: vi.fn(),
 }));
 vi.mock("./claude/auth", () => ({
 	getClaudeAuthStatus: getClaudeAuthStatusMock,
@@ -178,8 +180,8 @@ describe("rpc.requestHandlers", () => {
 			"claudeOpenChat",
 			"agentApproveTool",
 			"agentRejectTool",
-			"agentListMcpServers",
-			"agentSaveMcpServers",
+			"agentMcpList",
+			"agentMcpSave",
 		])("%s handler is a function", (name) => {
 			const handler = (requestHandlers as unknown as Record<string, unknown>)[
 				name
@@ -469,23 +471,9 @@ describe("rpc.requestHandlers", () => {
 		});
 	});
 
-	describe("agentSaveMcpServers", () => {
-		it("returns true on successful save", async () => {
-			mcpLoaderMock.save.mockResolvedValue(undefined);
-			const r = await requestHandlers.agentSaveMcpServers({ servers: [] });
-			expect(r).toBe(true);
-			expect(mcpLoaderMock.save).toHaveBeenCalledWith({
-				version: 1,
-				servers: [],
-			});
-		});
-
-		it("returns false when save throws", async () => {
-			vi.spyOn(console, "error").mockImplementation(() => {});
-			mcpLoaderMock.save.mockRejectedValue(new Error("disk full"));
-			const r = await requestHandlers.agentSaveMcpServers({ servers: [] });
-			expect(r).toBe(false);
-		});
+	it("retires plaintext MCP RPC methods", () => {
+		expect("agentSaveMcpServers" in requestHandlers).toBe(false);
+		expect("agentListMcpServers" in requestHandlers).toBe(false);
 	});
 
 	describe("githubFetchSearch", () => {

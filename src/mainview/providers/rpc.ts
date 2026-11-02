@@ -5,6 +5,7 @@ import type {
 	ContextUsageInfo,
 	SessionStats,
 } from "@/shared/agent-protocol";
+import type { ExtensionRequests } from "@/shared/extension-rpc";
 import type { ExtensionSelection } from "@/shared/extensions";
 import type { SessionSkill, SkillSummary } from "@/shared/skills";
 
@@ -69,14 +70,6 @@ export interface CodexAuthStatus {
 	cliStatus: CodexCliStatus;
 	method?: "chatgpt" | "api-key";
 	cliPath?: string;
-}
-
-export interface McpServerEntry {
-	name: string;
-	command: string;
-	args?: string[];
-	env?: Record<string, string>;
-	enabled?: boolean;
 }
 
 export type ProxyMode = "auto" | "system" | "env" | "none" | "manual";
@@ -177,6 +170,7 @@ export type SettingsSection =
 	| "plugins"
 	| "general"
 	| "network"
+	| "extensions"
 	| `plugin:${string}`;
 
 export type ClaudeCliStatus =
@@ -197,6 +191,8 @@ export interface BedrockConfig {
 }
 
 export interface SessionMeta {
+	extensionSelections?: ExtensionSelection[];
+	builtinCommandNames?: string[];
 	mcpServerIds?: string[];
 	id: string;
 	sdkSessionId: string;
@@ -257,7 +253,7 @@ export interface StoredMessage {
 
 interface PtolemyRPCSchema extends ElectrobunRPCSchema {
 	bun: {
-		requests: {
+		requests: ExtensionRequests & {
 			listApps: { params: void; response: { name: string; path: string }[] };
 			openApp: { params: { path: string }; response: boolean };
 			openUrl: { params: { url: string }; response: boolean };
@@ -377,11 +373,6 @@ interface PtolemyRPCSchema extends ElectrobunRPCSchema {
 			};
 			agentRejectTool: {
 				params: { permissionId: string; reason?: string };
-				response: boolean;
-			};
-			agentListMcpServers: { params: void; response: McpServerEntry[] };
-			agentSaveMcpServers: {
-				params: { servers: McpServerEntry[] };
 				response: boolean;
 			};
 			getProxyStatus: { params: void; response: ProxyStatus };

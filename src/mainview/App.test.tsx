@@ -11,6 +11,10 @@ const { request, settings } = vi.hoisted(() => ({
 		resizeWindow: vi.fn(),
 		githubGetTokenStatus: vi.fn(),
 		agentListSkills: vi.fn(),
+		agentExtensionInventory: vi.fn(),
+		agentMcpList: vi.fn(),
+		agentExtensionCapabilities: vi.fn(),
+		agentExtensionCommands: vi.fn(),
 		claudeListSessions: vi.fn(),
 		claudeOpenChat: vi.fn(),
 		claudeCreateSession: vi.fn(),
@@ -56,6 +60,14 @@ beforeEach(() => {
 	request.resizeWindow.mockResolvedValue(true);
 	request.githubGetTokenStatus.mockResolvedValue({ hasToken: false });
 	request.agentListSkills.mockResolvedValue([]);
+	request.agentExtensionInventory.mockResolvedValue({
+		installed: [],
+		nativePlugins: [],
+		builtins: [],
+	});
+	request.agentMcpList.mockResolvedValue([]);
+	request.agentExtensionCapabilities.mockResolvedValue([]);
+	request.agentExtensionCommands.mockResolvedValue([]);
 	request.claudeListSessions.mockResolvedValue([
 		{
 			id: "one",

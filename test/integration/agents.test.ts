@@ -525,12 +525,19 @@ for (const agent of ["codex", "claude"] as const) {
 				...createOptions(agent),
 				skillIds: [],
 			});
-			expect((await metaOf(id)).skillSelection).toBeDefined();
+			expect((await metaOf(id)) as object).not.toHaveProperty("skillSelection");
+			expect((await metaOf(id)) as object).not.toHaveProperty(
+				"builtinCommands",
+			);
 			expect((await metaOf(id)).mcpServerIds).toEqual([]);
 			expect((await metaOf(id)) as object).not.toHaveProperty("mcpSelection");
 			const persisted = JSON.parse(
 				await readFile(join(TMP, ".ptolomeu/sessions/index.json"), "utf8"),
 			);
+			expect(
+				persisted.sessions.find((s: { id: string }) => s.id === id)
+					.skillSelection.nativePaths,
+			).toBeArray();
 			expect(
 				persisted.sessions.find((s: { id: string }) => s.id === id)
 					.mcpSelection,

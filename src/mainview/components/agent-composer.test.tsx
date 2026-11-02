@@ -4,8 +4,15 @@ import { useState } from "react";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { AgentComposer } from "./agent-composer";
 
+const settingsState = vi.hoisted(() => ({ isOpen: false }));
 const request = vi.hoisted(() => ({
 	agentListSkills: vi.fn(),
+	agentExtensionInventory: vi.fn(),
+	agentExtensionReview: vi.fn(),
+	agentMcpList: vi.fn(),
+	agentExtensionCapabilities: vi.fn(),
+	agentExtensionCommands: vi.fn(),
+	agentExtensionSetDefaults: vi.fn(),
 	agentImportSkill: vi.fn(),
 	agentSetDefaultSkills: vi.fn(),
 	claudeCreateSession: vi.fn(),
@@ -16,6 +23,7 @@ vi.mock("../providers/rpc", () => ({ rpc: { request } }));
 vi.mock("../settings/settings-context", () => ({
 	useSettings: () => ({
 		settings: { claude: { model: "sonnet" } },
+		isOpen: settingsState.isOpen,
 		codexSettings: { model: "default" },
 	}),
 }));
@@ -45,7 +53,18 @@ function Composer({ agent = "codex" }: { agent?: "codex" | "claude" }) {
 }
 beforeEach(() => {
 	vi.resetAllMocks();
+	settingsState.isOpen = false;
 	request.agentListSkills.mockResolvedValue([skill]);
+	request.agentExtensionInventory.mockResolvedValue({
+		installed: [],
+		nativePlugins: [],
+		builtins: [],
+		verifiedRuntime: "test",
+	});
+	request.agentMcpList.mockResolvedValue([]);
+	request.agentExtensionReview.mockResolvedValue([]);
+	request.agentExtensionCapabilities.mockResolvedValue([]);
+	request.agentExtensionCommands.mockResolvedValue([]);
 	request.claudeCreateSession.mockResolvedValue({ sessionId: "new" });
 	request.agentSetDefaultSkills.mockResolvedValue(true);
 	request.claudeListSupportedModels.mockResolvedValue({
@@ -254,6 +273,9 @@ describe("Agent composer", () => {
 			agent: "codex",
 			prompt: "Revisar alteração",
 			skillIds: ["review"],
+			extensionSelections: [],
+			builtinCommandNames: [],
+			mcpServerIds: [],
 			model: "default",
 		});
 		await waitFor(() =>
@@ -301,9 +323,12 @@ describe("Agent composer", () => {
 		await userEvent.click(
 			screen.getByRole("button", { name: "Usar seleção como padrão" }),
 		);
-		expect(request.agentSetDefaultSkills).toHaveBeenCalledWith({
+		expect(request.agentExtensionSetDefaults).toHaveBeenCalledWith({
 			agent: "claude",
 			skillIds: ["debug"],
+			extensionSelections: [],
+			builtinCommandNames: [],
+			mcpServerIds: [],
 		});
 	});
 	test("keeps a validation error visible and never selects an invalid import", async () => {
@@ -343,4 +368,235 @@ describe("Agent composer", () => {
 			expect(request.claudeCreateSession).toHaveBeenCalledTimes(1),
 		);
 	});
+});
+
+test("explicit builtin and MCP defaults are frozen alongside package components", async () => {
+	request.agentExtensionInventory.mockResolvedValue({
+		installed: [],
+		nativePlugins: [],
+		builtins: [
+			{
+				name: "review",
+				kind: "command",
+				description: "Revisar",
+				limitation: "Descrições podem continuar visíveis.",
+			},
+		],
+		defaults: { selections: [], builtinCommandNames: ["review"] },
+		verifiedRuntime: "test",
+	});
+	request.agentMcpList.mockResolvedValue([
+		{
+			id: "server",
+			name: "Servidor",
+			transport: "http",
+			defaults: { codex: true, claude: false },
+			connection: { state: "disconnected" },
+		},
+	]);
+	render(<Composer />);
+	await waitFor(() =>
+		expect(
+			screen.getByRole("button", { name: "Iniciar conversa" }),
+		).toBeEnabled(),
+	);
+	await userEvent.click(
+		screen.getByRole("button", { name: /Configurar extensões/ }),
+	);
+	expect(
+		screen.getByRole("checkbox", { name: "Usar comando interno review" }),
+	).toBeChecked();
+	expect(
+		screen.getByText(/sem confirmação a cada chamada/),
+	).toBeInTheDocument();
+	await userEvent.keyboard("{Escape}");
+	await userEvent.click(
+		screen.getByRole("button", { name: "Iniciar conversa" }),
+	);
+	expect(request.claudeCreateSession).toHaveBeenCalledWith(
+		expect.objectContaining({
+			builtinCommandNames: ["review"],
+			mcpServerIds: ["server"],
+			extensionSelections: [],
+		}),
+	);
+});
+
+test("Skills picker combines builtin Skills and package Skills without selecting sibling commands", async () => {
+	const packageId = `extension:${"a".repeat(64)}`,
+		revision = "b".repeat(64);
+	request.agentExtensionInventory.mockResolvedValue({
+		installed: [
+			{
+				id: packageId,
+				revision,
+				name: "Pacote",
+				components: [
+					{
+						id: "skill",
+						kind: "skill",
+						name: "Revisão do pacote",
+						description: "Inspecionar alterações",
+						sources: [],
+						diagnostics: [],
+					},
+					{
+						id: "command",
+						kind: "command",
+						name: "tool",
+						sources: [],
+						diagnostics: [],
+					},
+				],
+			},
+		],
+		nativePlugins: [],
+		builtins: [
+			{
+				name: "debug",
+				kind: "skill",
+				description: "Investigar",
+				limitation: "Descrições podem continuar visíveis.",
+			},
+			{ name: "clear", kind: "command", description: "Limpar" },
+		],
+		defaults: { selections: [], builtinCommandNames: ["debug"] },
+		verifiedRuntime: "test",
+	});
+	request.agentExtensionReview.mockResolvedValue([
+		{
+			packageId,
+			componentId: "skill",
+			status: "adapted",
+			reason: "Compatível",
+		},
+		{
+			packageId,
+			componentId: "command",
+			status: "adapted",
+			reason: "Compatível",
+		},
+	]);
+	request.agentExtensionCapabilities.mockImplementation(
+		async ({ selections }) =>
+			selections.flatMap((s: { componentIds: string[] }) =>
+				s.componentIds.map((componentId) => ({
+					packageId,
+					componentId,
+					status: "adapted",
+					reason: "Compatível",
+				})),
+			),
+	);
+	render(<Composer agent="claude" />);
+	await waitFor(() =>
+		expect(
+			screen.getByRole("button", { name: "Iniciar conversa" }),
+		).toBeEnabled(),
+	);
+	await userEvent.click(
+		screen.getByRole("button", { name: /Configurar Skills/ }),
+	);
+	expect(
+		screen.getByRole("checkbox", { name: "Usar Skill interna debug" }),
+	).toBeChecked();
+	expect(
+		screen.queryByRole("checkbox", { name: /clear/ }),
+	).not.toBeInTheDocument();
+	await userEvent.click(
+		await screen.findByRole("checkbox", {
+			name: "Usar Pacote: Revisão do pacote",
+		}),
+	);
+	await userEvent.keyboard("{Escape}");
+	expect(
+		screen.getByRole("button", { name: "Remover Skill interna debug" }),
+	).toBeInTheDocument();
+	expect(
+		screen.getByRole("button", { name: "Remover Pacote: Revisão do pacote" }),
+	).toBeInTheDocument();
+	await waitFor(() =>
+		expect(
+			screen.getByRole("button", { name: "Iniciar conversa" }),
+		).toBeEnabled(),
+	);
+	await userEvent.click(
+		screen.getByRole("button", { name: "Iniciar conversa" }),
+	);
+	expect(request.claudeCreateSession).toHaveBeenCalledWith(
+		expect.objectContaining({
+			skillIds: [],
+			builtinCommandNames: ["debug"],
+			extensionSelections: [{ packageId, revision, componentIds: ["skill"] }],
+			mcpServerIds: [],
+		}),
+	);
+});
+
+test("closing the library refreshes newly saved defaults for the next conversation", async () => {
+	const builtin = {
+		name: "debug",
+		kind: "skill",
+		description: "Investigar",
+		limitation: "",
+	};
+	request.agentExtensionInventory.mockResolvedValue({
+		installed: [],
+		nativePlugins: [],
+		builtins: [builtin],
+		defaults: { selections: [], builtinCommandNames: [] },
+	});
+	const { rerender } = render(<Composer agent="claude" />);
+	await waitFor(() =>
+		expect(
+			screen.getByRole("button", { name: "Iniciar conversa" }),
+		).toBeEnabled(),
+	);
+	settingsState.isOpen = true;
+	rerender(<Composer agent="claude" />);
+	request.agentExtensionInventory.mockResolvedValue({
+		installed: [],
+		nativePlugins: [],
+		builtins: [builtin],
+		defaults: { selections: [], builtinCommandNames: ["debug"] },
+	});
+	settingsState.isOpen = false;
+	rerender(<Composer agent="claude" />);
+	expect(
+		await screen.findByRole("button", { name: "Remover Skill interna debug" }),
+	).toBeInTheDocument();
+});
+
+test("stale package defaults block creation until the old selection is removed", async () => {
+	const packageId = `extension:${"a".repeat(64)}`,
+		revision = "b".repeat(64);
+	request.agentExtensionInventory.mockResolvedValue({
+		installed: [{ id: packageId, name: "Pacote", revision, components: [] }],
+		nativePlugins: [],
+		builtins: [],
+		defaults: {
+			selections: [
+				{
+					packageId,
+					revision: "c".repeat(64),
+					componentIds: ["old"],
+					trustedHookDigest: "c".repeat(64),
+				},
+			],
+			builtinCommandNames: [],
+		},
+	});
+	request.agentExtensionCapabilities.mockResolvedValue([
+		{
+			packageId,
+			componentId: "old",
+			status: "adapted",
+			reason: "Old archive still valid",
+		},
+	]);
+	render(<Composer />);
+	await screen.findByRole("alert");
+	expect(
+		screen.getByRole("button", { name: "Iniciar conversa" }),
+	).toBeDisabled();
 });
