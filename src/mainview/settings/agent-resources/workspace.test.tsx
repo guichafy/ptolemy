@@ -1,12 +1,15 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { expect, it, vi } from "vitest";
-import type { ExtensionChoices } from "@/shared/extension-rpc";
+import type {
+	ExtensionCapability,
+	ExtensionChoices,
+} from "@/shared/extension-rpc";
 import { ResourceWorkspace } from "./workspace";
 
 const request = vi.hoisted(() => ({
-	agentExtensionReview: vi.fn(async () => []),
+	agentExtensionReview: vi.fn(async (): Promise<ExtensionCapability[]> => []),
 	agentImportSkill: vi.fn(),
 	agentExtensionSources: vi.fn(async () => []),
 }));
@@ -120,4 +123,74 @@ it("shows harness ownership and a clear return from native Skill details", async
 	expect(
 		screen.getByRole("button", { name: "Detalhes de review" }),
 	).toHaveFocus();
+});
+
+it("enables a packaged Skill in open details when its deferred compatibility review completes", async () => {
+	let complete!: (caps: ExtensionCapability[]) => void;
+	request.agentExtensionReview.mockReturnValueOnce(
+		new Promise((resolve) => {
+			complete = resolve;
+		}),
+	);
+	const pkg = {
+		id: "package",
+		name: "Fixture",
+		description: "Fixture description",
+		sourceId: "source",
+		url: "https://github.com/a/b",
+		revision: "revision",
+		diagnostics: [],
+		components: [
+			{
+				id: "skill",
+				name: "Package Skill",
+				kind: "skill" as const,
+				sources: [],
+				diagnostics: [],
+			},
+		],
+	};
+	function DeferredWorkspace() {
+		const [choices, onChange] = useState<ExtensionChoices>({
+			skillIds: [],
+			extensionSelections: [],
+			builtinCommandNames: [],
+			mcpServerIds: [],
+		});
+		return (
+			<ResourceWorkspace
+				agent="codex"
+				page="skills"
+				library={{
+					...library,
+					inventory: { ...library.inventory, installed: [pkg] },
+				}}
+				choices={choices}
+				onChange={onChange}
+				onRefresh={() => {}}
+			/>
+		);
+	}
+	render(<DeferredWorkspace />);
+	await userEvent.click(
+		screen.getByRole("button", { name: "Detalhes de Fixture: Package Skill" }),
+	);
+	const enabled = screen.getByRole("checkbox", { name: "Usar Package Skill" });
+	expect(enabled).toBeDisabled();
+	await act(async () => {
+		complete([
+			{
+				packageId: "package",
+				componentId: "skill",
+				status: "adapted",
+				reason: "Compatível",
+			},
+		]);
+	});
+	await waitFor(() => expect(enabled).toBeEnabled());
+	expect(
+		screen.queryByText("Verificando compatibilidade…"),
+	).not.toBeInTheDocument();
+	await userEvent.click(enabled);
+	expect(enabled).toBeChecked();
 });
