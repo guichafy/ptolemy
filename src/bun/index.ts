@@ -252,14 +252,14 @@ initAnalytics(bootSettings.analytics);
 trackEvent("app_launched", { version: "1.2.0" });
 
 // Native template tint follows the menu bar appearance. The source artwork
-// includes transparent padding: a 26 pt canvas gives an ~18 pt astrolabe.
+// has balanced transparent margins: a 22 pt canvas gives an ~18 pt glyph.
 const trayIconPath = join(import.meta.dir, "..", "native", "tray-icon.png");
 const tray = new Tray({
 	title: "",
 	image: trayIconPath,
 	template: true,
-	width: 26,
-	height: 26,
+	width: 22,
+	height: 22,
 });
 
 // Shrink the menu bar slot beyond what Electrobun's `width` allows — that
