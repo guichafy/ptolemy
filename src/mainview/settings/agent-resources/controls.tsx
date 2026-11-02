@@ -8,6 +8,8 @@ export function ResourceRow({
 	onChange,
 	children,
 	unavailableReason,
+	onDetails,
+	resourceId,
 }: {
 	name: string;
 	description?: string;
@@ -17,6 +19,8 @@ export function ResourceRow({
 	onChange: (checked: boolean) => void;
 	children?: ReactNode;
 	unavailableReason?: string;
+	onDetails?: () => void;
+	resourceId?: string;
 }) {
 	const [expanded, setExpanded] = useState(false);
 	return (
@@ -44,15 +48,17 @@ export function ResourceRow({
 					{unavailableReason}
 				</p>
 			)}
-			{description && (
+			{(description || onDetails) && (
 				<div className="mt-1 pl-7 text-xs text-muted-foreground">
 					<button
 						type="button"
-						aria-expanded={expanded}
-						onClick={() => setExpanded((value) => !value)}
+						aria-expanded={onDetails ? undefined : expanded}
+						aria-label={`Detalhes de ${name}`}
+						data-resource-id={resourceId}
+						onClick={onDetails ?? (() => setExpanded((value) => !value))}
 						className="text-left hover:underline"
 					>
-						Detalhes
+						{expanded ? "Ocultar detalhes" : "Detalhes"}
 					</button>
 					{expanded && (
 						<p className="mt-2 whitespace-pre-wrap break-words leading-relaxed">

@@ -267,3 +267,50 @@ test("saved defaults distinguish absence from explicit none and do not depend on
 	expect(await store.savedDefaults("claude")).toEqual([]);
 	expect(await store.savedDefaults("codex")).toBeUndefined();
 });
+
+test("removes only Ptolemy imports while preserving native files and stored harness choices", async () => {
+	const native = join(root, "native", "review");
+	await mkdir(native, { recursive: true });
+	await writeFile(
+		join(native, "SKILL.md"),
+		Buffer.from(bundle.files[0].content, "base64"),
+	);
+	const importedBundle = {
+		...bundle,
+		name: "imported",
+		description: "Imported fixture",
+		files: [
+			{
+				...bundle.files[0],
+				content: Buffer.from(
+					"---\nname: imported\ndescription: Imported fixture\n---\nImported",
+				).toString("base64"),
+			},
+		],
+	};
+	const store = new SkillsStore({
+		root: join(root, "store"),
+		download: async () => importedBundle,
+		harnessRoots: { claude: [join(root, "native")], codex: [] },
+	});
+	const imported = await store.importGithub("https://github.com/a/b");
+	const nativeSkill = (await store.list("claude")).find(
+		(s) => s.source.kind === "harness",
+	)!;
+	await store.setDefaults("claude", [nativeSkill.id, imported.id]);
+	await store.setDefaults("codex", [imported.id]);
+	await store.remove(imported.id);
+	expect((await store.list("claude")).map((s) => s.id)).toEqual([
+		nativeSkill.id,
+	]);
+	expect(await store.savedDefaults("claude")).toEqual([
+		nativeSkill.id,
+		imported.id,
+	]);
+	expect(await store.savedDefaults("codex")).toEqual([imported.id]);
+	expect(await store.defaults("codex")).toEqual([]);
+	await expect(store.remove(nativeSkill.id)).rejects.toThrow(
+		/CLI|gerenciada|nativa/i,
+	);
+	expect(await readFile(join(native, "SKILL.md"), "utf8")).toContain("Review.");
+});

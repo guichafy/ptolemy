@@ -13,7 +13,13 @@ import {
 } from "./model";
 import { useResourceLibrary } from "./use-resource-library";
 import { ResourceWorkspace } from "./workspace";
-export function AgentResourcePreferences({
+export function AgentResourcePreferences(props: {
+	agent: AgentKind;
+	page: ResourcePage;
+}) {
+	return <ScopedAgentResourcePreferences key={props.agent} {...props} />;
+}
+function ScopedAgentResourcePreferences({
 	agent,
 	page,
 }: {

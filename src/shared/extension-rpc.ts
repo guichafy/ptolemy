@@ -66,6 +66,7 @@ export interface ExtensionCommandSummary {
 	description: string;
 }
 export type ExtensionRequests = {
+	agentRemoveSkill: { params: { id: string }; response: boolean };
 	agentSessionConfiguration: {
 		params: { sessionId: string };
 		response: SessionResourceConfiguration;

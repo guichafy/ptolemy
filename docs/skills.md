@@ -77,6 +77,14 @@ As integrações foram verificadas com Claude Code 2.1.118 / Agent SDK 0.2.118 e
 
 Skills/espelho de assets ficam no projeto. Código executável de hooks/comandos e ROOT dos processos MCP usa snapshot backend protegido, gerado dos bytes arquivados validados, fora da raiz gravável do agente. Nesses contextos `PLUGIN_ROOT`/`CLAUDE_PLUGIN_ROOT` apontam para essa raiz; `PLUGIN_DATA`/`CLAUDE_PLUGIN_DATA` e cwd ficam na conversa. Hooks/comandos executados não podem escrever na raiz do pacote: use DATA. Os dois aliases DATA também são resolvidos no texto autoral estático dos comandos e nas instruções de agentes; argumentos do usuário e saída dinâmica permanecem literais. A cópia de Skill pode referenciar assets no espelho do projeto; isso não torna código mutável um novo hook autorizado. O jail Claude, permission gate e sandbox Codex continuam ativos, sem `danger-full-access`.
 
+## Detalhes, instalação e isolamento por harness
+
+A biblioteca de Skills e pacotes importados é reutilizável entre Claude e Codex; ativações, rascunhos e padrões são independentes. Ao trocar de harness, o inventário anterior desaparece durante o carregamento. Skills nativas de um harness não entram na lista do outro. A origem distingue **Integrada ao Codex/Claude**, **Instalada no Codex/Claude**, **Diretório compartilhado** (`~/.agents/skills`) e **Biblioteca compartilhada** (importações portáteis).
+
+**Detalhes** abre uma tela com **Voltar à lista de Skills**, que preserva a busca e retorna ao ponto da listagem com o foco restaurado. Os controles de retorno e instalação/remoção ficam visíveis durante o scroll. **Habilitar nesta seleção** configura uso; **Instalar Skill** adiciona à biblioteca. O marketplace indica a revisão já instalada, permite atualizar/desinstalar e oferece acesso à lista de instalados.
+
+**Desinstalar da biblioteca** exige confirmação de que a remoção é compartilhada por Claude e Codex. Uma Skill de pacote é removida junto com o pacote. Importações manuais podem ser removidas do Ptolemy; instalações locais/integradas mostram sua origem e são desinstaladas pelo gerenciador do CLI. O Ptolemy preserva arquivos/configurações externos e os snapshots de conversas existentes. Remover uma instalação não reescreve os padrões do outro harness; recursos ausentes continuam sujeitos à validação de disponibilidade.
+
 ## Persistência e arquitetura
 
 Skills/padrões portáteis ficam em `~/.ptolomeu/skills/index.json` e snapshots por sessão em `sessions/<id>/skills.json`. A biblioteca completa e revisões históricas ficam em `~/.ptolomeu/extensions/index.json`; snapshots executáveis em `extensions/execution/<sessão>/…`; MCP em `mcp-registry.json`; dados OAuth e segredos ficam no Keychain. Dados/projetos preservam o identificador histórico `ptolomeu`; testes isolam tudo por `PTOLEMY_HOME`.

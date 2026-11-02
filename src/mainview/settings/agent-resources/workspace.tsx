@@ -1,5 +1,5 @@
 import "./resources.css";
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -11,6 +11,7 @@ import type {
 import { ResourceMarketplace } from "./marketplace";
 import { McpResources } from "./mcp";
 import {
+	libraryForAgent,
 	type ResourceLibrary,
 	type ResourcePage,
 	resourceLabels,
@@ -30,10 +31,24 @@ export interface ResourceWorkspaceProps {
 	archived?: SessionResourceConfiguration;
 }
 export function ResourceWorkspace(props: ResourceWorkspaceProps) {
+	return (
+		<ScopedResourceWorkspace
+			key={`${props.agent}:${props.page}`}
+			{...props}
+			library={libraryForAgent(props.agent, props.library)}
+		/>
+	);
+}
+function ScopedResourceWorkspace(props: ResourceWorkspaceProps) {
 	const { agent, page, library, onRefresh, onBusyChange } = props;
 	const [tab, setTab] = useState<"installed" | "marketplace">("installed");
 	const [query, setQuery] = useState("");
 	const [busy, setBusy] = useState(false);
+	const scrollRef = useRef<HTMLDivElement>(null);
+	useLayoutEffect(() => {
+		void tab;
+		if (scrollRef.current) scrollRef.current.scrollTop = 0;
+	}, [tab]);
 	const review = usePackageReview(
 		agent,
 		library.inventory?.installed ?? [],
@@ -101,6 +116,7 @@ export function ResourceWorkspace(props: ResourceWorkspaceProps) {
 			<div
 				className="resource-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain pr-2"
 				data-resource-scroll
+				ref={scrollRef}
 			>
 				{tab === "marketplace" ? (
 					<ResourceMarketplace
@@ -109,6 +125,32 @@ export function ResourceWorkspace(props: ResourceWorkspaceProps) {
 						page={page}
 						onRefresh={onRefresh}
 						onBusyChange={busyChange}
+						installed={
+							library.inventory?.installed.filter(
+								(p) =>
+									!library.archiveOnly?.packageRevisions.includes(
+										`${p.id}:${p.revision}`,
+									),
+							) ?? []
+						}
+						onRemoved={(id) =>
+							props.onChange({
+								...props.choices,
+								extensionSelections: props.choices.extensionSelections.filter(
+									(s) =>
+										s.packageId !== id ||
+										props.archived?.choices.extensionSelections.some(
+											(a) =>
+												a.packageId === s.packageId &&
+												a.revision === s.revision,
+										),
+								),
+							})
+						}
+						onShowInstalled={() => {
+							setQuery("");
+							setTab("installed");
+						}}
 					/>
 				) : (
 					<>

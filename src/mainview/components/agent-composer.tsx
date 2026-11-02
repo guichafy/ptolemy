@@ -212,7 +212,7 @@ export function AgentComposer({
 		if (unavailableMcp) {
 			setSelectionError(
 				servers.find((s) => s.id === unavailableMcp)?.authentication?.reason ??
-					"Servidor MCP indisponível. Revise em Extensões → MCP.",
+					"Servidor MCP indisponível. Revise em Configurar → MCP.",
 			);
 			setChecking(false);
 			return;

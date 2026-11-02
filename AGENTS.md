@@ -67,7 +67,7 @@ Registry in `registry.ts` (`PLUGIN_REGISTRY`, `PLUGIN_META`); the active plugin 
 
 ### Settings
 
-`src/mainview/settings/` is a dialog with four sections: **Extensões** (shared installed packages, Marketplace and MCP), **Plugins** (per-plugin enable, with per-plugin config nested as sub-items, e.g. GitHub token, Claude auth and model), **Rede** (proxy mode + manual proxy with a Keychain-backed password) and **Geral** (analytics consent, etc.). State lives in `SettingsContext` with debounced RPC persistence to `~/Library/Application Support/com.ptolomeu.app/settings.json`. Plugin reordering and custom GitHub filters use `@dnd-kit` drag-drop. Main-process IO lives in `src/bun/settings.ts` + `settings-io.ts`.
+`src/mainview/settings/` is a dialog with three sections: **Plugins** (per-plugin enable, with per-plugin config nested as sub-items, e.g. GitHub token, Claude auth/model and per-agent Skills, Plugins and MCP libraries/marketplaces), **Rede** (proxy mode + manual proxy with a Keychain-backed password) and **Geral** (analytics consent, etc.). State lives in `SettingsContext` with debounced RPC persistence to `~/Library/Application Support/com.ptolomeu.app/settings.json`. Plugin reordering and custom GitHub filters use `@dnd-kit` drag-drop. Main-process IO lives in `src/bun/settings.ts` + `settings-io.ts`.
 
 ### State management
 
@@ -134,7 +134,7 @@ Built on `@anthropic-ai/claude-agent-sdk` using the stable `query()` API. Authen
 - **agentEvent buffer** (`src/chatview/lib/agent-event-buffer.ts`): the streaming loop can start before the chat window's React tree mounts, and early `text-start`/`text-delta` events would be lost without this buffer, so every new subscriber first drains pending events. Change carefully; it has a dedicated suite in `agent-event-buffer.test.ts`.
 - **Permission gate** (`permission-gate.ts`) + **risk classifier** (`risk-classifier.ts`): every `canUseTool` call creates a pending request; the renderer approves/rejects via `agentApproveTool`/`agentRejectTool`. Low-risk tools are auto-whitelisted, there is a per-session whitelist, and decisions are audited via `persistence/tool-decisions.ts`.
 - **Workspace jail** (`workspace-jail.ts`): hard pre-check that rejects Write/Edit/NotebookEdit/Bash invocations whose target path escapes the project workspace, *before* the permission gate sees them. `cwd` alone is not sufficient because the SDK accepts absolute paths.
-- **MCP**: shared v2 registry/gateway in `src/bun/mcp/`, edited in **Extensões → MCP** for both agents. `mcp-loader.ts` remains for historical migration fixtures, with no active UI/RPC writer. The repo's `.mcp.json` is for agents working on this codebase.
+- **MCP**: shared v2 registry/gateway in `src/bun/mcp/`, edited inside each agent in **Preferences → Plugins → Claude/Codex → MCP**. `mcp-loader.ts` remains for historical migration fixtures, with no active UI/RPC writer. The repo's `.mcp.json` is for agents working on this codebase.
 - **Auth** (`auth.ts`): reports CLI status (`not-installed` / `not-authenticated` / `authenticated`), opens the CLI login flow, and stores Bedrock config (endpoint, profile, region) in `~/.ptolomeu/auth/bedrock.json`.
 
 ### Codex integration (`src/bun/codex/`)

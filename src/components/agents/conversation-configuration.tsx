@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import {
+	libraryForAgent,
 	type ResourceLibrary,
 	type ResourcePage,
 	resourceCounts,
@@ -55,7 +56,7 @@ export function ConversationConfiguration(
 ) {
 	return (
 		<ScopedConversationConfiguration
-			key={props.scopeKey ?? props.agent}
+			key={`${props.agent}:${props.scopeKey ?? "draft"}`}
 			{...props}
 		/>
 	);
@@ -73,7 +74,7 @@ function ScopedConversationConfiguration(
 		disabled,
 		onOpenChange,
 	} = props;
-	const library = withArchived(props.library, archived);
+	const library = withArchived(libraryForAgent(agent, props.library), archived);
 	const localReview = usePackageReview(
 		agent,
 		library.inventory?.installed ?? [],
