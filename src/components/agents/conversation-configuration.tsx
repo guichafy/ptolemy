@@ -38,6 +38,8 @@ const pages = ["skills", "plugins", "mcp"] as const;
 const icons = { skills: BookOpen, plugins: Blocks, mcp: Plug };
 export interface ConversationConfigurationProps {
 	agent: AgentKind;
+	scopeKey?: string;
+	configurationReady?: boolean;
 	library: ResourceLibrary;
 	choices: ExtensionChoices;
 	onApply: (choices: ExtensionChoices) => void | Promise<void>;
@@ -49,6 +51,16 @@ export interface ConversationConfigurationProps {
 	review?: PackageReviewState;
 }
 export function ConversationConfiguration(
+	props: ConversationConfigurationProps,
+) {
+	return (
+		<ScopedConversationConfiguration
+			key={props.scopeKey ?? props.agent}
+			{...props}
+		/>
+	);
+}
+function ScopedConversationConfiguration(
 	props: ConversationConfigurationProps,
 ) {
 	const {
@@ -81,6 +93,14 @@ export function ConversationConfiguration(
 	const [open, setOpen] = useState(false);
 	const [page, setPage] = useState<ResourcePage>("skills");
 	const [draft, setDraft] = useState(choices);
+	const selectionReady = props.configurationReady ?? !props.library.loading;
+	const [draftInitialized, setDraftInitialized] = useState(false);
+	useEffect(() => {
+		if (open && !draftInitialized && selectionReady) {
+			setDraft(structuredClone(choices));
+			setDraftInitialized(true);
+		}
+	}, [open, draftInitialized, selectionReady, choices]);
 	const [busy, setBusy] = useState(false);
 	const [libraryBusy, setLibraryBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
@@ -94,6 +114,7 @@ export function ConversationConfiguration(
 		setSummary(false);
 		setPage(target);
 		setDraft(structuredClone(choices));
+		setDraftInitialized(selectionReady);
 		setError(null);
 		setMessage(null);
 		setOpen(true);
@@ -101,7 +122,14 @@ export function ConversationConfiguration(
 	}
 	useEffect(() => () => onOpenChange?.(false), [onOpenChange]);
 	async function apply() {
-		if (busy || libraryBusy || blocked || library.loading || library.error)
+		if (
+			!draftInitialized ||
+			busy ||
+			libraryBusy ||
+			blocked ||
+			library.loading ||
+			library.error
+		)
 			return;
 		setBusy(true);
 		setError(null);
@@ -143,6 +171,7 @@ export function ConversationConfiguration(
 		}
 	}
 	async function saveDefaults() {
+		if (!draftInitialized) return;
 		setBusy(true);
 		setError(null);
 		setMessage(null);
@@ -294,6 +323,7 @@ export function ConversationConfiguration(
 								library={library}
 								choices={draft}
 								onChange={(value) => {
+									if (!draftInitialized) return;
 									setDraft(value);
 									setMessage(null);
 								}}
@@ -328,6 +358,7 @@ export function ConversationConfiguration(
 								size="sm"
 								variant="ghost"
 								disabled={
+									!draftInitialized ||
 									busy ||
 									libraryBusy ||
 									library.loading ||
@@ -350,6 +381,7 @@ export function ConversationConfiguration(
 								<Button
 									size="sm"
 									disabled={
+										!draftInitialized ||
 										busy ||
 										libraryBusy ||
 										library.loading ||

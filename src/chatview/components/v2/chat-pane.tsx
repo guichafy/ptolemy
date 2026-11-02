@@ -4,7 +4,7 @@
  */
 
 import { Bot, Paperclip, Sparkles, SquareTerminal } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ConversationConfiguration } from "@/components/agents/conversation-configuration";
 import { configureResourceRpc } from "@/components/agents/resource-rpc";
 import {
@@ -148,7 +148,19 @@ export function ChatPaneV2() {
 	} | null>(null);
 	const [resourceError, setResourceError] = useState<string | null>(null);
 	const [resourceAttempt, setResourceAttempt] = useState(0);
-	const [resourceDialogOpen, setResourceDialogOpen] = useState(false);
+	const [resourceDialogSessionId, setResourceDialogSessionId] = useState<
+		string | null
+	>(null);
+	const resourceDialogOpen =
+		resourceDialogSessionId === sessionId && !!sessionId;
+	const setResourceDialogOpen = useCallback(
+		(open: boolean) => {
+			setResourceDialogSessionId((current) =>
+				open ? sessionId : current === sessionId ? null : current,
+			);
+		},
+		[sessionId],
+	);
 	const currentResourceConfiguration =
 		resourceConfiguration?.sessionId === sessionId
 			? resourceConfiguration.value
@@ -436,6 +448,9 @@ export function ChatPaneV2() {
 									resolvedLabel={sessionModelLabel}
 								/>
 								<ConversationConfiguration
+									key={sessionId ?? "loading"}
+									scopeKey={sessionId ?? "loading"}
+									configurationReady={!!currentResourceConfiguration}
 									agent={agent}
 									library={{
 										...resourceLibrary,
@@ -467,7 +482,11 @@ export function ChatPaneV2() {
 												expectedRevision: currentResourceConfiguration.revision,
 												choices,
 											});
-										setResourceConfiguration({ sessionId, value });
+										setResourceConfiguration((current) =>
+											current?.sessionId === sessionId
+												? { sessionId, value }
+												: current,
+										);
 										setCommandAttempt((a) => a + 1);
 									}}
 								/>

@@ -24,6 +24,7 @@ import type { ExtensionSelection } from "@/shared/extensions";
 import type { McpSnapshot } from "@/shared/mcp";
 import type { SessionSkill, SessionSkillSelection } from "@/shared/skills";
 import { backupCorruptJson, writeJsonAtomic } from "../atomic-json";
+import { buildCodexEnv, findCodexCli } from "../codex/codex-cli";
 import { readCodexContextBreakdown } from "../codex/rollout-info";
 import { CodexSessionRuntime } from "../codex/session-runtime";
 import { prepareSessionExtensions } from "../extensions/activation";
@@ -2095,7 +2096,22 @@ export function setSessionConfiguration(
 			pendingCodex?.id === sessionId
 		)
 			throw Error("Aguarde a resposta terminar para aplicar a configuração.");
+		const currentActive = getActiveSessionId();
+		if (
+			(currentActive && currentActive !== sessionId) ||
+			(pendingNew && pendingNew.id !== sessionId) ||
+			(pendingCodex && pendingCodex.id !== sessionId)
+		)
+			throw Error(
+				"Conversa alterada. Abra a conversa desejada antes de aplicar a configuração.",
+			);
 		const agent = sessionAgent(meta);
+		await assertSkillSelectionSupport(
+			agent,
+			agent === "claude" ? await findClaudeCli() : await findCodexCli(),
+			undefined,
+			agent === "codex" ? await buildCodexEnv() : undefined,
+		);
 		selectionValidation.choices({ agent, ...choices });
 		const selection = structuredClone(choices);
 		const retained = meta.extensionSelections ?? [];
@@ -2228,32 +2244,32 @@ export function setSessionConfiguration(
 		const oldPackages = await Promise.all(
 			retained.map((p) => extensionsStore.getPackage(p.packageId, p.revision)),
 		);
-		const oldWorkspace = wasActive
-			? await expectedResourceWorkspace(
-					meta.projectPath,
-					agent,
-					oldSkills,
-					oldPackages,
-					retained,
-				)
-			: null;
+		const oldWorkspace = await expectedResourceWorkspace(
+			meta.projectPath,
+			agent,
+			oldSkills,
+			oldPackages,
+			retained,
+		);
 		const newPackages = await Promise.all(
 			selection.extensionSelections.map((p) =>
 				extensionsStore.getPackage(p.packageId, p.revision),
 			),
 		);
-		const newWorkspace = wasActive
-			? await expectedResourceWorkspace(
-					meta.projectPath,
-					agent,
-					selectedSkills,
-					newPackages,
-					selection.extensionSelections,
-					false,
-				)
-			: null;
-		if (oldWorkspace)
-			await verifyManagedResourceWorkspace(meta.projectPath, oldWorkspace);
+		const newWorkspace = await expectedResourceWorkspace(
+			meta.projectPath,
+			agent,
+			selectedSkills,
+			newPackages,
+			selection.extensionSelections,
+			false,
+		);
+		const plannedRoots = [...newWorkspace.keys()];
+		await verifyManagedResourceWorkspace(
+			meta.projectPath,
+			oldWorkspace,
+			plannedRoots,
+		);
 		if (wasActive) {
 			await deactivateClaude("resource configuration changed");
 			await deactivateCodex("resource configuration changed");
@@ -2262,24 +2278,23 @@ export function setSessionConfiguration(
 			| Awaited<ReturnType<typeof stageManagedResourceWorkspace>>
 			| undefined;
 		try {
-			if (oldWorkspace)
-				stage = await stageManagedResourceWorkspace(
-					meta.projectPath,
-					join(SESSIONS_DIR, sessionId, "workspace-backups"),
-					oldWorkspace,
-				);
+			stage = await stageManagedResourceWorkspace(
+				meta.projectPath,
+				join(SESSIONS_DIR, sessionId, "workspace-backups"),
+				oldWorkspace,
+				plannedRoots,
+			);
 			await publish(next);
-			if (wasActive && !(await resumeSessionImpl(sessionId)))
+			if (!(await resumeSessionImpl(sessionId)))
 				throw Error(
 					"Não foi possível preparar o agente com a nova configuração.",
 				);
-			if (wasActive)
-				await prepareSessionExtensions(
-					sessionId,
-					meta.projectPath,
-					selection.extensionSelections,
-					agent,
-				);
+			await prepareSessionExtensions(
+				sessionId,
+				meta.projectPath,
+				selection.extensionSelections,
+				agent,
+			);
 			await stage?.commit();
 			blockedResourceSessions.delete(sessionId);
 		} catch (error) {
@@ -2288,8 +2303,7 @@ export function setSessionConfiguration(
 					await deactivateClaude("configuration rollback");
 					await deactivateCodex("configuration rollback");
 				}
-				if (stage)
-					await stage.rollback(newWorkspace ? [...newWorkspace.keys()] : []);
+				if (stage) await stage.rollback(plannedRoots);
 				await publish(meta);
 				if (wasActive && !(await resumeSessionImpl(sessionId)))
 					throw Error("Falha ao restaurar a configuração anterior.");

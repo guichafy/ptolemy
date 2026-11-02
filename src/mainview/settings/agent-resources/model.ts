@@ -21,6 +21,11 @@ export interface ResourceLibrary {
 	servers: McpServerSummary[];
 	loading: boolean;
 	error: string | null;
+	archiveOnly?: {
+		skillIds: string[];
+		packageRevisions: string[];
+		serverIds: string[];
+	};
 }
 export const emptyChoices = (): ExtensionChoices => ({
 	skillIds: [],
@@ -62,6 +67,22 @@ export function withArchived(
 	];
 	return {
 		...library,
+		archiveOnly: {
+			skillIds: archived.skills
+				.filter((a) => !library.skills.some((s) => s.id === a.id))
+				.map((s) => s.id),
+			packageRevisions: archived.packages
+				.filter(
+					(a) =>
+						!library.inventory?.installed.some(
+							(p) => p.id === a.id && p.revision === a.revision,
+						),
+				)
+				.map((p) => `${p.id}:${p.revision}`),
+			serverIds: archived.servers
+				.filter((a) => !library.servers.some((s) => s.id === a.id))
+				.map((s) => s.id),
+		},
 		skills: [
 			...archived.skills,
 			...library.skills.filter(

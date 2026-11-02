@@ -198,7 +198,10 @@ export async function expectedResourceWorkspace(
 			if (e.code === "ENOENT") return null;
 			throw e;
 		});
-		if (!bytes) continue;
+		if (!bytes) {
+			roots.set(rel, new Map());
+			continue;
+		}
 		const owned = JSON.parse(bytes.toString());
 		if (
 			!Array.isArray(owned) ||
@@ -226,13 +229,32 @@ export async function stageManagedResourceWorkspace(
 	cwd: string,
 	backupRoot: string,
 	expected: ResourceFiles,
+	plannedRoots: string[] = [],
 ) {
-	const existing = await verifyManagedResourceWorkspace(cwd, expected);
+	const existing = await verifyManagedResourceWorkspace(
+		cwd,
+		expected,
+		plannedRoots,
+	);
+	const absent = new Set<string>();
+	for (const rel of new Set([...expected.keys(), ...plannedRoots])) {
+		if (
+			!(await lstat(await safe(cwd, rel)).catch((e) => {
+				if (e.code === "ENOENT") return null;
+				throw e;
+			}))
+		)
+			absent.add(rel);
+	}
 	await mkdir(backupRoot, { recursive: true });
 	const backup = await mkdtemp(join(backupRoot, "resources-"));
 	const moved: string[] = [];
 	const restore = async (newRoots: string[]) => {
-		for (const rel of new Set([...newRoots, ...moved]))
+		// Only paths owned before staging, or registered absent destinations, may be removed.
+		for (const rel of new Set([
+			...newRoots.filter((rel) => absent.has(rel)),
+			...moved,
+		]))
 			await rm(await safe(cwd, rel), { recursive: true, force: true });
 		for (let i = 0; i < moved.length; i++) {
 			const target = await safe(cwd, moved[i]);
@@ -259,7 +281,19 @@ export async function stageManagedResourceWorkspace(
 export async function verifyManagedResourceWorkspace(
 	cwd: string,
 	expected: ResourceFiles,
+	plannedRoots: string[] = [],
 ) {
+	for (const rel of plannedRoots) {
+		if (expected.has(rel)) continue;
+		const stat = await lstat(await safe(cwd, rel)).catch((e) => {
+			if (e.code === "ENOENT") return null;
+			throw e;
+		});
+		if (stat)
+			throw Error(
+				`Destino de recurso já existe no projeto: ${rel}. Preserve seus arquivos antes de aplicar.`,
+			);
+	}
 	const existing: string[] = [];
 	for (const [rel, files] of expected) {
 		const path = await safe(cwd, rel);

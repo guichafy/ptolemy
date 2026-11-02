@@ -95,7 +95,7 @@
 - [x] Run full tests, lint, typecheck, local integration, native and Vite builds; diagnose real failures before changes. Expected: all gates green.
 - [ ] Capture light/dark UI screenshots and inspect real native glass over the desktop, including hotkey show/hide and accessibility behavior; retain evidence paths.
 - [x] Update bilingual feature documentation and implementation decisions.
-- [ ] Commit docs/E2E, obtain a fresh whole-branch review, fix material findings with RED→GREEN verification and run affected gates.
+- [x] Commit docs/E2E, obtain a fresh whole-branch review, fix material findings with RED→GREEN verification and run affected gates.
 - [ ] Deliver branch and visual/test evidence; do not merge or publish without instruction.
 
 

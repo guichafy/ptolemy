@@ -66,6 +66,9 @@ export function PluginsResources({
 						.includes(query.toLocaleLowerCase()),
 				)
 				.map((pkg) => {
+					const archiveOnly = library.archiveOnly?.packageRevisions.includes(
+						`${pkg.id}:${pkg.revision}`,
+					);
 					const selected = choices.extensionSelections.find(
 						(s) => s.packageId === pkg.id && s.revision === pkg.revision,
 					);
@@ -78,6 +81,7 @@ export function PluginsResources({
 							<summary className="cursor-pointer text-sm font-medium">
 								{pkg.name}
 								<span className="ml-2 text-xs font-normal text-muted-foreground">
+									{archiveOnly && "Arquivado nesta conversa · "}
 									{selected?.componentIds.length ?? 0} componentes ·{" "}
 									{pkg.revision.slice(0, 8)}
 								</span>
@@ -141,22 +145,26 @@ export function PluginsResources({
 										/>
 									);
 								})}
-								<Button
-									size="sm"
-									variant="ghost"
-									disabled={busy}
-									onClick={() =>
-										void run(() =>
-											rpc.request.agentExtensionRemove({ id: pkg.id }),
-										)
-									}
-								>
-									Remover da biblioteca compartilhada
-								</Button>
-								<p className="text-xs text-muted-foreground">
-									A remoção afeta a biblioteca dos dois agentes. Conversas
-									existentes mantêm seus snapshots.
-								</p>
+								{!archiveOnly && (
+									<>
+										<Button
+											size="sm"
+											variant="ghost"
+											disabled={busy}
+											onClick={() =>
+												void run(() =>
+													rpc.request.agentExtensionRemove({ id: pkg.id }),
+												)
+											}
+										>
+											Remover da biblioteca compartilhada
+										</Button>
+										<p className="text-xs text-muted-foreground">
+											A remoção afeta a biblioteca dos dois agentes. Conversas
+											existentes mantêm seus snapshots.
+										</p>
+									</>
+								)}
 							</div>
 						</details>
 					);
