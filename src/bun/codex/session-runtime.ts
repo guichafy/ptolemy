@@ -11,7 +11,7 @@ import {
 } from "../extensions/runtime";
 import {
 	buildCodexMcpOverrides,
-	inheritedCodexMcpNames,
+	inheritedCodexMcpServers,
 	localMcpEnv,
 	type PreparedSessionMcp,
 } from "../mcp/runtime";
@@ -101,7 +101,11 @@ async function defaultCreateThread(
 		...(mcp && mcp.explicit !== false
 			? buildCodexMcpOverrides(
 					mcp.codexConfig,
-					await inheritedCodexMcpNames(cliPath, options.workingDirectory!, env),
+					await inheritedCodexMcpServers(
+						cliPath,
+						options.workingDirectory!,
+						env,
+					),
 				)
 			: []),
 		...(extensions

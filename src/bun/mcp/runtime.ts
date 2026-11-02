@@ -93,13 +93,24 @@ export async function disposeSessionMcp() {
 	await Promise.allSettled([...live].map((context) => context.dispose()));
 }
 
-/** Exact raw top-level TOML table; quoted names (including dots) must not be SDK flattened. */
+export interface InheritedCodexMcpServer {
+	name: string;
+	transport: "stdio" | "streamable_http";
+}
+/** Exact raw top-level TOML table; quoted names (including dots) must not be SDK flattened.
+ * Inventory includes derived servers absent from TOML. A disabled entry still
+ * needs a valid transport; preserve its kind to avoid merging command and URL. */
 export function buildCodexMcpOverrides(
 	selected: PreparedSessionMcp["codexConfig"],
-	inheritedNames: string[],
+	inheritedServers: InheritedCodexMcpServer[],
 ): string[] {
 	const entries = new Map<string, string>(
-		inheritedNames.map((name) => [name, "{enabled=false}"]),
+		inheritedServers.map((server) => [
+			server.name,
+			server.transport === "stdio"
+				? '{enabled=false,command="/usr/bin/false"}'
+				: '{enabled=false,url="http://127.0.0.1:0/disabled"}',
+		]),
 	);
 	for (const [name, server] of Object.entries(selected)) {
 		if (entries.has(name))
@@ -128,11 +139,11 @@ export function localMcpEnv<T extends Record<string, string | undefined>>(
 	return { ...env, NO_PROXY: add(env.NO_PROXY), no_proxy: add(env.no_proxy) };
 }
 /** Backend-only inventory: never print CLI JSON, stderr or config values. Fresh per execution. */
-export async function inheritedCodexMcpNames(
+export async function inheritedCodexMcpServers(
 	cli: string,
 	cwd: string,
 	env: Record<string, string>,
-): Promise<string[]> {
+): Promise<InheritedCodexMcpServer[]> {
 	try {
 		const { stdout } = await promisify(execFile)(
 			"/usr/bin/sandbox-exec",
@@ -149,13 +160,32 @@ export async function inheritedCodexMcpNames(
 		const entries: unknown = JSON.parse(stdout);
 		if (
 			!Array.isArray(entries) ||
-			entries.some((e) => !e || typeof e.name !== "string")
+			entries.some(
+				(e) =>
+					!e ||
+					typeof e.name !== "string" ||
+					!["stdio", "streamable_http"].includes(e.transport?.type),
+			)
 		)
 			throw Error();
-		return entries.map((e) => e.name as string);
+		return entries.map((e) => ({
+			name: e.name as string,
+			transport: e.transport.type as InheritedCodexMcpServer["transport"],
+		}));
 	} catch {
 		throw Error(
 			"Não foi possível verificar os servidores MCP herdados do Codex.",
 		);
 	}
+}
+
+/** Metadata-only convenience for callers that need names, not configuration. */
+export async function inheritedCodexMcpNames(
+	cli: string,
+	cwd: string,
+	env: Record<string, string>,
+): Promise<string[]> {
+	return (await inheritedCodexMcpServers(cli, cwd, env)).map(
+		(server) => server.name,
+	);
 }

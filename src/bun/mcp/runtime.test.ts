@@ -55,10 +55,12 @@ test("only selected registry snapshots reach SDK configuration and credentials s
 	expect(serialized).not.toContain(Object.values(context.env)[0]);
 	expect(Object.keys(context.env)).toHaveLength(1);
 	const overrides = buildCodexMcpOverrides(context.codexConfig, [
-		"inherited.with.dot",
-		"selected",
+		{ name: "inherited.with.dot", transport: "streamable_http" },
+		{ name: "selected", transport: "stdio" },
 	]);
-	expect(overrides[0]).toContain('"inherited.with.dot"={enabled=false}');
+	expect(overrides[0]).toContain(
+		'"inherited.with.dot"={enabled=false,url="http://127.0.0.1:0/disabled"}',
+	);
 	expect(overrides[0]).toContain(
 		`${JSON.stringify(mcpRuntimeName("selected", "selected"))}={enabled=true,`,
 	);
@@ -76,9 +78,12 @@ test("empty selection disables all inherited config and needs no server or secre
 	expect(context.servers).toEqual({});
 	expect(context.env).toEqual({});
 	expect(
-		buildCodexMcpOverrides(context.codexConfig, ["user", "project.with.dot"]),
+		buildCodexMcpOverrides(context.codexConfig, [
+			{ name: "user", transport: "stdio" },
+			{ name: "project.with.dot", transport: "streamable_http" },
+		]),
 	).toEqual([
-		'mcp_servers={"user"={enabled=false},"project.with.dot"={enabled=false}}',
+		'mcp_servers={"user"={enabled=false,command="/usr/bin/false"},"project.with.dot"={enabled=false,url="http://127.0.0.1:0/disabled"}}',
 	]);
 });
 test("local CLI transport bypasses proxy while preserving existing per-case exemptions", () => {
@@ -100,7 +105,7 @@ test("Codex uses stable reserved aliases and rejects inherited alias collisions 
 					bearer_token_env_var: "LOCAL",
 				},
 			},
-			[alias],
+			[{ name: alias, transport: "stdio" }],
 		),
 	).toThrow("Conflito");
 });
