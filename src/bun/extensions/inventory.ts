@@ -90,7 +90,11 @@ export async function extensionSelectionCapabilities(
 		agent === "codex" && prepared.hooks.length
 			? await codexHookSetupReason()
 			: undefined;
-	return prepared.capabilities.map((capability) => {
+	return prepared.capabilities.map((raw) => {
+		const capability = {
+			...raw,
+			revision: selections.find((s) => s.packageId === raw.packageId)?.revision,
+		};
 		if (
 			hookSetupReason &&
 			selectedHookIds.has(`${capability.packageId}:${capability.componentId}`)

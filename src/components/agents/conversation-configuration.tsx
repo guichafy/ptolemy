@@ -19,6 +19,7 @@ import {
 	type ResourcePage,
 	resourceCounts,
 	resourceLabels,
+	sessionCapabilities,
 	withArchived,
 } from "@/mainview/settings/agent-resources/model";
 import {
@@ -68,22 +69,12 @@ export function ConversationConfiguration(
 		!props.review,
 	);
 	const review = props.review ?? localReview;
-	const capabilities = review.capabilities.map((c) => {
-		const old = archived?.choices.extensionSelections.find(
-			(s) => s.packageId === c.packageId,
-		);
-		const current = choices.extensionSelections.find(
-			(s) => s.packageId === c.packageId,
-		);
-		return old &&
-			current &&
-			old.revision === current.revision &&
-			old.trustedHookDigest === current.trustedHookDigest
-			? (archived?.capabilities.find(
-					(a) => a.packageId === c.packageId && a.componentId === c.componentId,
-				) ?? c)
-			: c;
-	});
+	const capabilities = sessionCapabilities(
+		choices,
+		review.capabilities,
+		archived,
+	);
+
 	const counts = resourceCounts(library, choices, capabilities);
 	const triggerRef = useRef<HTMLButtonElement>(null);
 	const [summary, setSummary] = useState(false);
@@ -115,6 +106,33 @@ export function ConversationConfiguration(
 		setBusy(true);
 		setError(null);
 		try {
+			const missingSkill = draft.skillIds.find(
+				(id) =>
+					!library.skills.some((s) => s.id === id && !s.unavailableReason),
+			);
+			if (missingSkill)
+				throw Error("Remova a Skill indisponível antes de aplicar a seleção.");
+			const missingServer = draft.mcpServerIds.find(
+				(id) =>
+					!library.servers.some(
+						(s) =>
+							s.id === id && !s.packageId && s.authentication?.ready !== false,
+					),
+			);
+			if (missingServer)
+				throw Error(
+					"Conecte ou remova o servidor MCP indisponível antes de aplicar.",
+				);
+			const fresh = draft.extensionSelections.length
+				? await rpc.request.agentExtensionCapabilities({
+						agent,
+						selections: draft.extensionSelections,
+					})
+				: [];
+			const unavailable = sessionCapabilities(draft, fresh, archived).find(
+				(c) => ["incompatible", "requires-configuration"].includes(c.status),
+			);
+			if (unavailable) throw Error(unavailable.reason);
 			await onApply(structuredClone(draft));
 			setOpen(false);
 			onOpenChange?.(false);

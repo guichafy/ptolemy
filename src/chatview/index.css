@@ -35,8 +35,6 @@
 	--radius-xl: calc(var(--radius) + 4px);
 }
 
-
-
 /* AI Elements Shimmer (see components/ai-elements/shimmer.tsx). */
 @keyframes ai-shimmer {
 	from {

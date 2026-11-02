@@ -11,6 +11,7 @@ import type {
 	McpServerSummary,
 } from "./mcp";
 export interface ExtensionCapability {
+	revision?: string;
 	packageId?: string;
 	componentId: string;
 	status: "native" | "adapted" | "requires-configuration" | "incompatible";

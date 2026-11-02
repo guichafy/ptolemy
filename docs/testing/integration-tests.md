@@ -190,3 +190,21 @@ Na retomada a frio de uma sessão do Claude, o session manager confere o modelo 
 - **Novo passo no cenário:** acrescente o prompt em `scenario.ts`, ensine `nextMockStep` a responder e traduza a resposta em cada servidor falso (bloco da API da Anthropic e item da Responses API). Depois escreva a asserção em `agents.test.ts`, separando o que é exato no modo local do que é flexível no real.
 - **Nova ferramenta do Codex:** veja os nomes e assinaturas que o CLI anuncia rodando o `codex exec` contra um servidor que só registra as requisições. A lista fica no primeiro item `additional_tools` do campo `input`.
 - **Novo agente:** o cenário é parametrizado por agente (`scenario(agent, other)`). Basta um servidor falso para a API dele e as entradas em `OK_REASON` e `LOCAL_TOOLS`.
+
+
+## Reconfiguração de recursos e aparência
+
+`extension-snapshot.test.ts` também aplica revisões entre mensagens nos dois agentes, preserva o ID do harness, alterna componentes, rejeita revisão desatualizada e mantém MCP congelado após alteração/remoção da instalação. Alterações nas cópias geradas são preservadas quando uma aplicação é recusada. `session-resources.test.ts` e `resource-workspace.test.ts` cobrem seleção vazia, fila, snapshots e rollback.
+
+O chat E2E inclui 80 Skills de fixture e, nos dois agentes, cancela/aplica uma seleção, adiciona/remove uma Skill e confere a memória após novas mensagens. Verifica uma única região de scroll em viewport de 1024×600, ações visíveis e tema claro/escuro com o modal aberto. Screenshots aguardam as transições concluírem e não certificam o material nativo do desktop.
+
+Para executar o ensaio AppKit sem abrir uma conversa ou alterar preferências do sistema:
+
+```bash
+clang -mmacosx-version-min=14.0 -framework AppKit -framework Carbon -framework Security -fobjc-arc -arch arm64 test/native/material-smoke.m src/bun/native/window-material.m -o /tmp/ptolemy-material-smoke
+/tmp/ptolemy-material-smoke
+```
+
+Acrescente `-DPTOLEMY_FORCE_VIBRANCY` à compilação para exercitar o fallback no macOS 26+. O teste exige uma sessão macOS com AppKit disponível e verifica content view, resize, idempotência, janela transparente e alternância de aparência da janela, sem mudar o tema do sistema.
+
+O Appium pode receber `PTOLEMY_E2E_HOME` para iniciar o app com dados descartáveis e `PTOLEMY_E2E_SCREENSHOTS_DIR` para capturas fora do repositório; o app precisa estar fechado para o ambiente de lançamento ser aplicado. Não use uma execução que encerre uma instância pessoal com trabalho ativo. Nesta verificação local, Mac2 falhou ao iniciar o WebDriverAgent antes de abrir o aplicativo; o controle alternativo de UI retornou timeout/cgWindowNotFound. As capturas de vidro sobre o desktop e as transições nativas completas continuam exigindo uma sessão de automação funcional.

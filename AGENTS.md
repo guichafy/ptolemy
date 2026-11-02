@@ -93,10 +93,15 @@ Request handler families (renderer → bun):
 
 Webview-bound messages (bun → renderer): `openPreferences`, `claudeOpenSession`, `claudeSessionsUpdate`, `windowShown` (palette became visible) and `agentEvent`. `agentEvent` is the typed event channel for the AI Elements chat UI and the only chat stream; text completion and errors ride on it as `finish` / `error` events.
 
+### Agent resource configuration
+
+Skills, Plugins and MCP pages live inside each agent in Preferences. `mainview/settings/agent-resources/` supplies controlled shared views for Preferences and `components/agents/conversation-configuration.tsx`; each webview binds `resource-rpc.ts` to its own transport. Existing-session changes use `agentSessionConfiguration` / `agentSessionSetConfiguration` and the session manager's serialized revision application. Preserve archived snapshots, expected-revision checks, between-turn busy detection and workspace byte verification/rollback. A waiting Claude streaming iterator is not a running turn. Stop/switch/delete/shutdown must cancel shell preparation before waiting for the lifecycle queue.
+
 ### Native layer
 
 `src/bun/native/overlay.m` is an Objective-C dylib loaded via `bun:ffi`. Exported symbols:
 
+- `configureWindowMaterial(NSWindow*, int)`: one native glass/vibrancy host, preserving content and resize; live appearance and reduced-transparency fallback in `window-material.m`
 - `makeWindowOverlay(NSWindow*)`: fullscreen overlay with a custom `NSWindowDelegate` that hides instead of closing
 - `registerHotkey(NSWindow*)` / `unregisterHotkey()`: global `⌘+Shift+Space` via Carbon `RegisterEventHotKey`; registration failure is surfaced as a disabled tray menu item
 - `setWindowShowCallback(JSCallback)`: direct callback when the hotkey transitions the window from hidden to visible (bypasses the unreliable delegate chain so the bun side can refresh the Claude session list)
@@ -104,7 +109,7 @@ Webview-bound messages (bun → renderer): `openPreferences`, `claudeOpenSession
 - `setTrayLength(trayPtr, double)`: sets the menu bar slot width of the Electrobun tray (walks to its `NSStatusItem`)
 - `quitApp()`: clean shutdown
 
-Compiled with `clang -dynamiclib -framework AppKit -framework Carbon -fobjc-arc -arch arm64`. Recompile after `.m` changes (`bun run build:native`).
+The build compiles `overlay.m` and `window-material.m` together. Compiled with `clang -dynamiclib -framework AppKit -framework Carbon -fobjc-arc -arch arm64`. Recompile after `.m` changes (`bun run build:native`).
 
 ### HMR flow
 

@@ -183,7 +183,10 @@ export function McpResources({
 							s.componentIds.includes(c.id),
 					);
 					const cap = capabilities.find(
-						(cap) => cap.packageId === pkg.id && cap.componentId === c.id,
+						(cap) =>
+							cap.packageId === pkg.id &&
+							cap.componentId === c.id &&
+							(!cap.revision || cap.revision === pkg.revision),
 					);
 					return (
 						<ResourceRow

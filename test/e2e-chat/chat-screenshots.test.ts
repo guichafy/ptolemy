@@ -160,6 +160,33 @@ async function buildWebview(): Promise<void> {
 }
 
 beforeAll(async () => {
+	const { SkillsStore } = await import("../../src/bun/skills/store");
+	const fixtureSkills = new SkillsStore({
+		download: async (url) => {
+			const name = new URL(url).pathname.split("/").at(-1)!;
+			const description = "Skill de validação da configuração da conversa. "
+				.repeat(10)
+				.trim();
+			return {
+				name,
+				description,
+				source: { kind: "github", url, commit: "a".repeat(40) },
+				files: [
+					{
+						path: "SKILL.md",
+						content: Buffer.from(
+							`---\nname: ${name}\ndescription: ${description}\n---\nPreserve o contexto da conversa.`,
+						).toString("base64"),
+						executable: false,
+					},
+				],
+			};
+		},
+	});
+	for (let i = 0; i < 80; i++)
+		await fixtureSkills.importGithub(
+			`https://github.com/offline/ui/tree/main/ui-resource-${String(i).padStart(2, "0")}`,
+		);
 	const settings = await loadSettings();
 	await saveSettings({
 		...settings,
@@ -220,7 +247,7 @@ async function waitReplies(page: Page, count: number): Promise<void> {
 }
 
 async function shoot(page: Page, name: string): Promise<void> {
-	await page.screenshot({ path: join(OUT_DIR, name) });
+	await page.screenshot({ path: join(OUT_DIR, name), animations: "disabled" });
 	console.log(`[e2e-chat] ${join(OUT_DIR, name)}`);
 }
 
@@ -257,6 +284,131 @@ function chatScenario(agent: AgentKind) {
 				await shoot(page, `chat-${agent}.png`);
 			},
 			TURN_TIMEOUT * 2 + 30_000,
+		);
+
+		test(
+			"configuração compartilhada edita a sessão, preserva memória e cabe na janela",
+			async () => {
+				await page.setViewportSize({ width: 1024, height: 600 });
+				const opener = page.getByRole("button", {
+					name: "Configurar recursos da conversa",
+				});
+				await opener.click();
+				await page
+					.getByRole("button", { name: /Configurar Skills da conversa/ })
+					.click();
+				let dialog = page.getByRole("dialog");
+				const skill = dialog.getByRole("checkbox", {
+					name: "Usar ui-resource-00",
+					exact: true,
+				});
+				await skill.waitFor();
+				await page.waitForFunction(
+					() =>
+						!document
+							.querySelector('[role="dialog"] button:last-child')
+							?.hasAttribute("disabled"),
+				);
+				const scrollOwners = await dialog.evaluate(
+					(el) =>
+						Array.from(el.querySelectorAll<HTMLElement>("*")).filter(
+							(n) =>
+								["auto", "scroll"].includes(getComputedStyle(n).overflowY) &&
+								n.scrollHeight > n.clientHeight + 2,
+						).length,
+				);
+				expect(scrollOwners).toBe(1);
+				expect(
+					await dialog
+						.getByRole("button", { name: "Aplicar", exact: true })
+						.isVisible(),
+				).toBe(true);
+				await page.emulateMedia({ colorScheme: "light" });
+				await page.waitForFunction(
+					() => !document.documentElement.classList.contains("dark"),
+				);
+				await page.waitForFunction(() => {
+					const d = document.querySelector('[data-slot="dialog-content"]');
+					return (
+						d &&
+						getComputedStyle(d).opacity === "1" &&
+						getComputedStyle(d).backgroundColor.startsWith("rgba(249, 249, 251")
+					);
+				});
+				await shoot(page, `chat-${agent}-resources-light.png`);
+				await page.emulateMedia({ colorScheme: "dark" });
+				await page.waitForFunction(() =>
+					document.documentElement.classList.contains("dark"),
+				);
+				await page.waitForFunction(() => {
+					const d = document.querySelector('[data-slot="dialog-content"]');
+					return (
+						d &&
+						getComputedStyle(d).opacity === "1" &&
+						getComputedStyle(d).backgroundColor.startsWith("rgba(42, 43, 48")
+					);
+				});
+				await shoot(page, `chat-${agent}-resources-dark.png`);
+				await dialog
+					.getByRole("textbox", { name: "Buscar Skills", exact: true })
+					.fill("ui-resource-00");
+				await skill.check();
+				await dialog
+					.getByRole("button", { name: "Cancelar", exact: true })
+					.click();
+				await opener.click();
+				await page
+					.getByRole("button", { name: /Configurar Skills da conversa/ })
+					.click();
+				dialog = page.getByRole("dialog");
+				expect(
+					await dialog
+						.getByRole("checkbox", { name: "Usar ui-resource-00", exact: true })
+						.isChecked(),
+				).toBe(false);
+				await dialog
+					.getByRole("textbox", { name: "Buscar Skills", exact: true })
+					.fill("ui-resource-00");
+				await dialog
+					.getByRole("checkbox", { name: "Usar ui-resource-00", exact: true })
+					.check();
+				await dialog
+					.getByRole("button", { name: "Aplicar", exact: true })
+					.click();
+				await dialog.waitFor({ state: "detached", timeout: 30000 });
+				await page.locator("textarea").fill(ASK_FILE_NAME);
+				await page.keyboard.press("Enter");
+				await waitReplies(page, 3);
+				expect(
+					await page.getByText(scenarioFile(agent).name).last().isVisible(),
+				).toBe(true);
+				await opener.click();
+				await page
+					.getByRole("button", { name: /Configurar Skills da conversa/ })
+					.click();
+				dialog = page.getByRole("dialog");
+				await dialog
+					.getByRole("textbox", { name: "Buscar Skills", exact: true })
+					.fill("ui-resource-00");
+				const selected = dialog.getByRole("checkbox", {
+					name: "Usar ui-resource-00",
+					exact: true,
+				});
+				expect(await selected.isChecked()).toBe(true);
+				await selected.uncheck();
+				await dialog
+					.getByRole("button", { name: "Aplicar", exact: true })
+					.click();
+				await dialog.waitFor({ state: "detached", timeout: 30000 });
+				await page.locator("textarea").fill(ASK_FILE_NAME);
+				await page.keyboard.press("Enter");
+				await waitReplies(page, 4);
+				expect(
+					await page.getByText(scenarioFile(agent).name).last().isVisible(),
+				).toBe(true);
+				await page.setViewportSize(VIEWPORT);
+			},
+			TURN_TIMEOUT * 2,
 		);
 
 		test("painel de contexto", async () => {

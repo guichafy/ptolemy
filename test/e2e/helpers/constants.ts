@@ -5,7 +5,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export const PROJECT_ROOT = path.resolve(__dirname, "..", "..", "..");
 
-export const SCREENSHOTS_DIR = path.join(PROJECT_ROOT, "docs", "screenshots");
+export const SCREENSHOTS_DIR =
+	process.env.PTOLEMY_E2E_SCREENSHOTS_DIR ??
+	path.join(PROJECT_ROOT, "docs", "screenshots");
 
 export const APP_PATH = path.join(
 	PROJECT_ROOT,

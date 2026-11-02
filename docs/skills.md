@@ -6,21 +6,27 @@ Selecione **Claude** ou **Codex** na paleta. O composer prepara modelo e recurso
 
 ## Seleção da conversa
 
-**Skills** reúne Skills internas classificadas pelo CLI, locais, importadas manualmente e de pacotes. **Extensões** reúne comandos internos, demais componentes de pacotes e servidores MCP independentes. Origem, revisão e motivos de indisponibilidade permanecem visíveis. Selecionar uma Skill de pacote não seleciona comandos, hooks, agentes ou MCP irmãos. Componentes incompatíveis ou que precisam de configuração não são apresentados como ativos.
+O botão **Configurar** mantém o Composer compacto. Seu resumo informa quantas Skills, Plugins e MCP estão ativos, sem listar todos os nomes. Abra **Configurar conversa** ou uma categoria do resumo para editar em um modal com busca e uma única área de rolagem. **Cancelar** descarta o rascunho; **Aplicar** confirma a seleção. As listas, detalhes e editores são os mesmos das Preferências.
+
+**Skills** reúne Skills internas classificadas pelo CLI, locais, importadas e de pacotes. **Plugins** reúne comandos internos e componentes dos pacotes; **MCP** reúne servidores independentes e os componentes MCP de plugins. Origem, revisão e motivos de indisponibilidade permanecem visíveis. Selecionar uma Skill ou um MCP de pacote não seleciona os componentes irmãos. Componentes incompatíveis ou sem configuração não são apresentados como ativos.
 
 **Usar seleção como padrão** salva as escolhas para futuras conversas daquele agente; Claude e Codex são independentes. Os quatro conjuntos são independentes: Skills locais/importadas, componentes de pacotes, nomes de builtins e servidores MCP independentes. Esvaziar todos significa nenhum desses recursos gerenciados. Esvaziar apenas componentes de pacotes não desliga os outros conjuntos. A UI envia sempre os quatro arrays efetivos, inclusive vazios.
 
-Se o CLI estiver ausente ou o inventário falhar, Skills ainda permite abrir, importar e acessar o gerenciamento. O erro continua visível; a seleção, o salvamento de padrões e a criação da conversa aguardam validação completa. Use a ação de tentar novamente depois de corrigir o runtime.
+Se o CLI estiver ausente ou o inventário falhar, Configurar ainda permite abrir e importar Skills. O erro continua visível; a seleção, o salvamento de padrões e a criação da conversa aguardam validação completa. Use a ação de tentar novamente depois de corrigir o runtime.
 
-Uma conversa nova congela IDs, revisões e configurações MCP selecionadas. Mudar padrões ou editar uma instalação não reescreve a sessão. Remover uma instalação tira o pacote da biblioteca selecionável; seu arquivo histórico permanece para retomar conversas existentes. A janela de chat mostra recursos e comandos congelados; não altera a seleção de uma conversa já iniciada. Sessões antigas com campos ausentes preservam seu comportamento legado, inclusive herança nativa quando aplicável; ausência não é tratada como seleção vazia nem reconstruída a partir dos padrões atuais.
+Uma conversa nova congela IDs, revisões e configurações MCP selecionadas. Mudar padrões ou editar uma instalação não reescreve a sessão. Remover uma instalação tira o pacote da biblioteca selecionável; seu arquivo histórico permanece para retomar conversas existentes. O mesmo botão na janela de chat permite editar uma conversa existente entre mensagens. Aplicar reconstrói o runtime ocioso, preservando identidade, projeto e histórico. A seleção antiga permanece se a preparação falhar; alterações concorrentes ou durante geração são recusadas. Desligar uma Skill não apaga instruções já lidas do histórico. Arquivos materializados alterados no projeto bloqueiam a substituição, preservando o trabalho do usuário. Sessões antigas com campos ausentes preservam seu comportamento legado, inclusive herança nativa quando aplicável; ausência não é tratada como seleção vazia nem reconstruída a partir dos padrões atuais.
 
 ## Biblioteca e marketplace
 
-Abra **Preferências → Extensões**:
+Abra **Preferências → Plugins do aplicativo → Claude Code ou Codex**. Cada agente oferece **Geral**, **Skills**, **Plugins** e **MCP**. Skills e Plugins têm biblioteca e marketplace próprios; MCP tem servidores configurados e descoberta de componentes MCP nos catálogos GitHub existentes.
 
-- **Instaladas**: busca, origem/revisão, componentes, compatibilidade por agente, remoção, padrões e autorização de hooks para a revisão exata. Plugins nativos encontrados podem ser importados quando há arquivos exportáveis; importação cria um snapshot completo, sem instalação global.
-- **Marketplace**: fontes públicas `anthropics/skills`, `anthropics/claude-plugins-official` e `openai/plugins`, fontes GitHub adicionais por repositório/pasta, busca local nos resultados e inspeção antes da instalação. Remover uma fonte preserva instalações. Instalar não executa código; habilitação é separada. skills.sh é um link de descoberta externa, sem promessa de uma API desktop integrada: use a URL GitHub do item para importar/instalar.
-- **MCP**: cadastro compartilhado de servidores stdio/HTTP, credenciais, OAuth e padrões independentes por agente.
+- **Skills**: locais/integradas/importadas, Skills de pacotes, busca, padrões e importação do GitHub. O marketplace prioriza `anthropics/skills`.
+- **Plugins**: instalação, componentes, compatibilidade, padrões e autorização dos hooks da revisão exata. Plugins nativos exportáveis podem ser importados como snapshots, sem instalação global.
+- **MCP**: servidores stdio/HTTP, credenciais, OAuth e seleção por agente/conversa. Autenticar uma conta não ativa automaticamente o servidor.
+
+Os marketplaces reutilizam as fontes públicas `anthropics/skills`, `anthropics/claude-plugins-official`, `openai/plugins` e repositórios/pastas GitHub adicionais. Itens sem metadados completos são inspecionados antes de confirmar os componentes disponíveis naquela página. Um pacote misto pode ser descoberto em mais de uma categoria, mantendo uma instalação compartilhada. Remover uma fonte preserva instalações. Instalar não executa código nem ativa todos os componentes. skills.sh mantém descoberta externa, com importação/instalação por URL GitHub.
+
+Instalação, remoção e conexão OAuth são ações da biblioteca compartilhada. Cancelar o rascunho da conversa não desfaz essas ações. **Usar seleção como padrão** altera novas conversas apenas do agente escolhido; a aplicação na conversa não muda os padrões.
 
 Pacotes preservam manifests, scripts, assets e caminhos relativos. Declarações nativas de ambos os agentes são mantidas; o adaptador escolhe a variante efetiva e informa incompatibilidades por componente. Apps/conectores proprietários sem endpoint utilizável, LSP e output styles não viram suporte fictício: o detalhe mostra instalação parcial e os componentes portáveis continuam selecionáveis. Colisões de nomes ativos são rejeitadas antes da conversa. Atualizar exige instalar/revisar a nova revisão; confiança de hooks não é transferida.
 
@@ -34,7 +40,7 @@ Em **Skills**, cole uma URL pública GitHub e use **Importar Skill**:
 - Pasta: `https://github.com/autor/repo/tree/main/minha-skill`.
 - Arquivo: `https://github.com/autor/repo/blob/main/minha-skill/SKILL.md`.
 
-A nova Skill fica selecionada para a próxima conversa. O formato portátil segue Agent Skills: frontmatter YAML com `name` e `description`; nome igual à pasta, até 64 caracteres, minúsculas, números e hífens simples; descrição de 1 a 1024 caracteres.
+A nova Skill fica selecionada no rascunho atual; aplique a seleção à conversa ou salve como padrão explicitamente. O formato portátil segue Agent Skills: frontmatter YAML com `name` e `description`; nome igual à pasta, até 64 caracteres, minúsculas, números e hífens simples; descrição de 1 a 1024 caracteres.
 
 ```markdown
 ---
@@ -45,7 +51,7 @@ description: Revisar alterações quando uma revisão for solicitada.
 Leia references/guia.md antes de revisar.
 ```
 
-Campos opcionais: `license`, `compatibility` (até 500 caracteres), `metadata` de textos e `allowed-tools`. A importação portátil rejeita aliases YAML e extensões específicas de harness, como `hooks`; plugins completos usam o fluxo de Extensões. Grants de ferramenta não ampliam permissões do Ptolemy. Scripts, referências e assets são preservados. Limites deste importador: 128 arquivos, 1 MiB/arquivo, 5 MiB no total e `SKILL.md` de 256 KiB.
+Campos opcionais: `license`, `compatibility` (até 500 caracteres), `metadata` de textos e `allowed-tools`. A importação portátil rejeita aliases YAML e extensões específicas de harness, como `hooks`; plugins completos usam a página Plugins do agente. Grants de ferramenta não ampliam permissões do Ptolemy. Scripts, referências e assets são preservados. Limites deste importador: 128 arquivos, 1 MiB/arquivo, 5 MiB no total e `SKILL.md` de 256 KiB.
 
 ## MCP e OAuth
 
@@ -76,3 +82,7 @@ Skills/espelho de assets ficam no projeto. Código executável de hooks/comandos
 Skills/padrões portáteis ficam em `~/.ptolomeu/skills/index.json` e snapshots por sessão em `sessions/<id>/skills.json`. A biblioteca completa e revisões históricas ficam em `~/.ptolomeu/extensions/index.json`; snapshots executáveis em `extensions/execution/<sessão>/…`; MCP em `mcp-registry.json`; dados OAuth e segredos ficam no Keychain. Dados/projetos preservam o identificador histórico `ptolomeu`; testes isolam tudo por `PTOLEMY_HOME`.
 
 Os padrões são pré-validados em conjunto e persistidos em três stores existentes; não há transação atômica entre os três arquivos. Uma falha de IO posterior é informada e pode exigir nova tentativa. Nenhuma configuração global de CLI é reescrita. Veja [decisões de arquitetura](architecture/agent-extension-decisions.md) para inventário nativo e o custo das escolhas e [testes de integração](testing/integration-tests.md) para evidência offline e seus limites.
+
+## Aparência do sistema
+
+As duas janelas acompanham o tema claro/escuro do macOS, inclusive mudanças com o aplicativo aberto. A paleta usa material AppKit nativo: Liquid Glass no macOS 26+ e vibrancy em versões anteriores, com fallback opaco quando a redução de transparência estiver ativa. Tipografia de sistema, contraste e redução de movimento são respeitados. O chat mantém superfícies legíveis para texto e código. O material do desktop deve ser conferido numa janela macOS real; screenshots do Chromium validam somente a interface web.

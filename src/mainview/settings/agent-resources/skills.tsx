@@ -124,7 +124,10 @@ export function SkillsResources({
 					)
 					.map((c) => {
 						const cap = capabilities.find(
-							(cap) => cap.packageId === pkg.id && cap.componentId === c.id,
+							(cap) =>
+								cap.packageId === pkg.id &&
+								cap.componentId === c.id &&
+								(!cap.revision || cap.revision === pkg.revision),
 						);
 						const checked = choices.extensionSelections.some(
 							(s) =>
