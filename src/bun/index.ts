@@ -251,14 +251,15 @@ mainWindow.on("focus", () => {
 initAnalytics(bootSettings.analytics);
 trackEvent("app_launched", { version: "1.2.0" });
 
-// Create system tray with app icon
+// Native template tint follows the menu bar appearance. The source artwork
+// includes transparent padding: a 26 pt canvas gives an ~18 pt astrolabe.
 const trayIconPath = join(import.meta.dir, "..", "native", "tray-icon.png");
 const tray = new Tray({
 	title: "",
 	image: trayIconPath,
-	template: false,
-	width: 32,
-	height: 14,
+	template: true,
+	width: 26,
+	height: 26,
 });
 
 // Shrink the menu bar slot beyond what Electrobun's `width` allows — that
