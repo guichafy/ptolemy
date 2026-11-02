@@ -96,7 +96,9 @@
 - [ ] Capture light/dark UI screenshots and inspect real native glass over the desktop, including hotkey show/hide and accessibility behavior; retain evidence paths.
 - [x] Update bilingual feature documentation and implementation decisions.
 - [x] Commit docs/E2E, obtain a fresh whole-branch review, fix material findings with RED→GREEN verification and run affected gates.
-- [ ] Deliver branch and visual/test evidence; do not merge or publish without instruction.
+- [x] Deliver branch and visual/test evidence; do not merge or publish without instruction.
 
 
 Native validation note: the AppKit smoke passed for glass and forced vibrancy and the development bundle started successfully with a registered hotkey. Full native desktop visual inspection is pending: local Mac2 WebDriverAgent startup failed before app launch, and CUA timed out / returned cgWindowNotFound. Chat Chromium screenshots (light/dark, 80 Skills, one scroll region) were inspected and do not replace that desktop proof.
+
+Delivery: draft [PR #33](https://github.com/guichafy/ptolemy/pull/33), with a complete [validation report](../testing/resource-settings-glass-validation.md) and committed web screenshots. Automated implementation/review gates are complete; the native desktop visual acceptance item above remains pending explicitly.

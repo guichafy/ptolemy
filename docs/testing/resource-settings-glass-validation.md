@@ -1,6 +1,6 @@
 # Resource settings and native glass validation
 
-Branch: `codex/resource-settings-glass`, based on `4bb8fc5` (`origin/main`).
+Branch: `codex/resource-settings-glass`, based on `4bb8fc5` (`origin/main`). Draft review: [PR #33](https://github.com/guichafy/ptolemy/pull/33).
 
 ## Implemented behavior
 
@@ -14,7 +14,7 @@ Branch: `codex/resource-settings-glass`, based on `4bb8fc5` (`origin/main`).
 
 ## Final verification
 
-- Unit tests: **977 passed**, 92 files.
+- Unit tests: **977 passed**, 92 files. Coverage thresholds passed: statements 60.81%, branches 59.22%, functions 57.52%, lines 62.28%.
 - Integration: **26 passed**, one opt-in native Keychain test skipped; 246 assertions. Both real CLIs run against isolated local API mocks.
 - Chat E2E: **7 passed**, 21 assertions, both agents, 80 Skills, short viewport, Apply/Cancel, preserved memory and light/dark changes.
 - Lint, TypeScript, native compilation, Vite and the complete development app bundle passed.
@@ -22,6 +22,14 @@ Branch: `codex/resource-settings-glass`, based on `4bb8fc5` (`origin/main`).
 - Independent whole-branch review identified five material findings. All were fixed in one pass with observed failing regressions followed by passing tests. No second review was substituted for verification.
 
 Local logs: `/tmp/ptolemy-review-final-{unit,integration,chat-e2e,types,lint,bundle}.log` and `/tmp/ptolemy-review-material-{native,fallback}.log`. Inspected screenshots: `/tmp/ptolemy-glass-chat-screenshots/chat-codex-resources-{light,dark}.png`. Development application: `build/dev-macos-arm64/ptolemy-dev.app` in this worktree.
+
+## Web interface evidence
+
+These Chromium captures show the shared conversation modal at a short viewport with a long inventory. They are not native desktop glass captures.
+
+![Light appearance](../screenshots/chat-resources-light.png)
+
+![Dark appearance](../screenshots/chat-resources-dark.png)
 
 ## Acceptance still required
 
