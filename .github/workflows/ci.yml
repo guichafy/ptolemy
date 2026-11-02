@@ -28,6 +28,12 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - run: bun install
       - run: bun run build:native
+      - name: Verify native material contract
+        run: |
+          clang -mmacosx-version-min=14.0 -framework AppKit -framework Carbon -framework Security -fobjc-arc -arch arm64 test/native/material-smoke.m src/bun/native/window-material.m -o "$RUNNER_TEMP/ptolemy-material-smoke"
+          "$RUNNER_TEMP/ptolemy-material-smoke"
+          clang -DPTOLEMY_FORCE_VIBRANCY=1 -mmacosx-version-min=14.0 -framework AppKit -framework Carbon -framework Security -fobjc-arc -arch arm64 test/native/material-smoke.m src/bun/native/window-material.m -o "$RUNNER_TEMP/ptolemy-vibrancy-smoke"
+          "$RUNNER_TEMP/ptolemy-vibrancy-smoke"
       - run: bun run build:vite
       - run: bun run test:coverage
       # Agent integration tests (local mode): real SDKs and CLIs for Claude

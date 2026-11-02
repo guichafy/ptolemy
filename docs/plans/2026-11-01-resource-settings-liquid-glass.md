@@ -76,11 +76,11 @@
 
 **Files:** Create lib/system-appearance.ts and tests; modify both renderer HTML/entry/CSS files, bun/native/overlay.m and bun/index.ts; add native material test harness under test/native where useful.
 
-**Interfaces:** `subscribeSystemAppearance()` installs initial OS color scheme and live listeners on document root and returns cleanup. `configureWindowMaterial(void*, int)` configures a window once, retaining Electrobun content hierarchy and resize behavior; overlay show does not reinstall it.
+**Interfaces:** `subscribeSystemAppearance()` installs initial OS color scheme and live listeners on document root and returns cleanup. `configureWindowMaterial(void*, int)` configures a background sibling once, retaining the original Electrobun content-view identity and immediate webview parents and resize behavior; overlay show does not reinstall it.
 
 - [x] Write failing appearance tests for initial light/dark, live change and cleanup; cover repeated native material setup and accessibility fallback in native harness.
 - [x] Run focused tests. Expected: RED on missing appearance module/material.
-- [x] Implement native NSGlassEffectView with contentView on macOS 26 and NSVisualEffectView fallback, transparency, corner geometry, shadow, system appearance/accessibility and idempotent installation.
+- [x] Implement native NSGlassEffectView on macOS 26 and NSVisualEffectView fallback, transparency, corner geometry, shadow, system appearance/accessibility and idempotent installation.
 - [x] Make web surfaces transparent where material should show, use system font and readable system-adaptive tokens, remove hardcoded dark. Preserve code/transcript readability and reduced-motion rules.
 - [x] Run appearance tests, build:native, typecheck and build:vite. Expected: PASS.
 - [x] Commit `feat(ui): adopt native glass and follow system appearance`.
@@ -102,3 +102,5 @@
 Native validation note: the AppKit smoke passed for glass and forced vibrancy and the development bundle started successfully with a registered hotkey. Full native desktop visual inspection is pending: local Mac2 WebDriverAgent startup failed before app launch, and CUA timed out / returned cgWindowNotFound. Chat Chromium screenshots (light/dark, 80 Skills, one scroll region) were inspected and do not replace that desktop proof.
 
 Delivery: draft [PR #33](https://github.com/guichafy/ptolemy/pull/33), with a complete [validation report](../testing/resource-settings-glass-validation.md) and committed web screenshots. Automated implementation/review gates are complete; the native desktop visual acceptance item above remains pending explicitly.
+
+Native CI correction: replacing Electrobun’s content view crashed its resize callback. The regression now models `abstractViews` and direct-parent callbacks; glass/vibrancy are background siblings and the original framework hierarchy stays intact. This regression is enforced in CI.

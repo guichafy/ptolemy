@@ -18,7 +18,7 @@ Branch: `codex/resource-settings-glass`, based on `4bb8fc5` (`origin/main`). Dra
 - Integration: **26 passed**, one opt-in native Keychain test skipped; 246 assertions. Both real CLIs run against isolated local API mocks.
 - Chat E2E: **7 passed**, 21 assertions, both agents, 80 Skills, short viewport, Apply/Cancel, preserved memory and light/dark changes.
 - Lint, TypeScript, native compilation, Vite and the complete development app bundle passed.
-- AppKit material smoke passed for glass and forced vibrancy: one material host, content ownership, resize, idempotence and light/dark.
+- AppKit material smoke passed for glass and forced vibrancy: one material host, original Electrobun content-view identity and immediate webview parent, framework resize callbacks, idempotence and light/dark.
 - Independent whole-branch review identified five material findings. All were fixed in one pass with observed failing regressions followed by passing tests. No second review was substituted for verification.
 
 Local logs: `/tmp/ptolemy-review-final-{unit,integration,chat-e2e,types,lint,bundle}.log` and `/tmp/ptolemy-review-material-{native,fallback}.log`. Inspected screenshots: `/tmp/ptolemy-glass-chat-screenshots/chat-codex-resources-{light,dark}.png`. Development application: `build/dev-macos-arm64/ptolemy-dev.app` in this worktree.
@@ -45,4 +45,12 @@ Real-account OAuth interoperability was not repeated during this UI correction. 
 4. The final reviewer likewise declined to judge desktop rendering; that limitation remains explicit. Cost: the same native acceptance gap.
 5. Live external OAuth was not repeated because its protocol implementation is unchanged. Cost: provider-specific behavior may differ from local mocks.
 
+6. CI exposed Electrobun’s requirement to retain the original window content view and each webview’s immediate parent. Native material is now a background sibling, preserving that contract instead of wrapping the framework container. Cost: native visual acceptance must assess the material composition separately. The regression first failed with `PtolemyMaterialHost abstractViews: unrecognized selector`, then passed for glass and forced vibrancy.
+
 No minor review findings were deferred. The archived-origin finding was regraded Important and fixed.
+
+## Native CI follow-up
+
+The first PR run captured the initial native palette, then the application exited during GitHub mode navigation. Electrobun v1.16 sends framework selectors to `window.contentView` and to a webview’s immediate parent. The original material wrapper violated that contract. A fixture reproducing those callbacks failed before the fix and passed afterward; material is now inserted behind the unchanged native view hierarchy. Both native modes run as an explicit CI check, and failed desktop tests retain Appium and macOS crash diagnostics.
+
+Regression evidence: `/tmp/ptolemy-native-contract-{red,green,fallback}.log`. The first CI run is [41387565673](https://github.com/guichafy/ptolemy/actions/runs/41387565673); its failure is not being treated as an automation-only limitation.
