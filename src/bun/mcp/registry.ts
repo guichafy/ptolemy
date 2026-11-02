@@ -486,8 +486,12 @@ export class McpRegistry {
 		const definitions = await this.serial(async () =>
 			structuredClone((await this.load()).servers),
 		);
+		return this.summarize({ version: 1, servers: definitions });
+	}
+	/** RPC-safe summaries of frozen session definitions, without secret references. */
+	async summarize(snapshot: McpSnapshot): Promise<McpServerSummary[]> {
 		return Promise.all(
-			definitions.map(async (s) => ({
+			snapshot.servers.map(async (s) => ({
 				id: s.id,
 				authentication: await this.authentication(s),
 				name: s.name,

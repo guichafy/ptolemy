@@ -1,6 +1,6 @@
 /** Full catalog → session → package-owned MCP → removal → cold-resume contract. */
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { githubFixture } from "../../../src/bun/extensions/test-fixtures";
@@ -10,6 +10,9 @@ const root = await mkdtemp(join(tmpdir(), "ptolemy-package-snapshot-"));
 process.env.PTOLEMY_HOME = root;
 const mocks = await configureLocalAgents(root, process.cwd());
 const { ExtensionsStore } = await import("../../../src/bun/extensions/store");
+const { extensionNamespace } = await import(
+	"../../../src/bun/extensions/activation"
+);
 const { extensionMcpId } = await import("../../../src/bun/extensions/mcp");
 const { mcpRegistry } = await import("../../../src/bun/mcp/registry");
 const { mcpRuntimeName } = await import("../../../src/bun/mcp/runtime");
@@ -142,6 +145,58 @@ try {
 			selection,
 		);
 	}
+	// Editing keeps harness memory and identity, and removes active MCP/Skills before the next turn.
+	for (const { id } of sessions) {
+		await sm.resumeSession(id);
+		const original = await sm.getSessionConfiguration(id);
+		const meta = (await sm.listSessions()).find((s) => s.id === id)!;
+		const asset = join(
+			meta.projectPath,
+			".ptolemy",
+			"extensions",
+			`${extensionNamespace(pkg.id)}-${pkg.revision}`,
+			"assets/value.txt",
+		);
+		const bytes = await readFile(asset);
+		await writeFile(asset, "USER_EDIT_TO_PRESERVE");
+		await assert.rejects(
+			sm.setSessionConfiguration(id, original.revision, original.choices),
+			/alterado no projeto/,
+		);
+		assert.equal(await readFile(asset, "utf8"), "USER_EDIT_TO_PRESERVE");
+		assert.equal(
+			(await sm.getSessionConfiguration(id)).revision,
+			original.revision,
+		);
+		await writeFile(asset, bytes);
+
+		const sdkId = (await sm.listSessions()).find(
+			(s) => s.id === id,
+		)!.sdkSessionId;
+		const commandOnly = selection.map((s) => ({
+			...s,
+			componentIds: pkg.components
+				.filter((c) => c.kind === "command")
+				.map((c) => c.id),
+		}));
+		const changed = await sm.setSessionConfiguration(id, original.revision, {
+			...original.choices,
+			extensionSelections: commandOnly,
+		});
+		assert.equal(changed.revision, original.revision + 1);
+		assert.equal((await sm.getSessionResources(id)).mcpCount, 0);
+		assert.equal(
+			(await sm.listSessions()).find((s) => s.id === id)!.sdkSessionId,
+			sdkId,
+		);
+		await turn(id, () => sm.sendMessage("/snapshot:probe after edit"));
+		await assert.rejects(
+			sm.setSessionConfiguration(id, original.revision, original.choices),
+			/alterada/,
+		);
+		await sm.setSessionConfiguration(id, changed.revision, original.choices);
+		assert.equal((await sm.getSessionResources(id)).mcpCount, 1);
+	}
 	await store.remove(pkg.id);
 	await store.removeSource(source.id);
 	assert.equal((await store.installed()).length, 0);
@@ -198,6 +253,18 @@ try {
 			await readFile(join(root, ".ptolomeu/sessions/index.json"), "utf8"),
 		).sessions.find((s: { id: string }) => s.id === id);
 		assert.equal(persisted.mcpSelection.servers[0].name, "package_echo");
+		const configuration = await sm.getSessionConfiguration(id);
+		assert(!JSON.stringify(configuration).includes("secretRef"));
+		assert(configuration.packages.some((p) => p.id === pkg.id));
+		await sm.setSessionConfiguration(
+			id,
+			configuration.revision,
+			configuration.choices,
+		);
+		assert.equal(
+			(await sm.getSessionConfiguration(id)).servers[0].name,
+			"package_echo",
+		);
 	}
 	assert.equal(
 		catalogRequests,

@@ -37,10 +37,10 @@ export async function snapshotSkills(
 	return skills.map(({ id, name, source }) => ({ id, name, source }));
 }
 
-async function readSnapshot(
+export async function readSkillSnapshot(
 	root: string,
 	sessionId: string,
-): Promise<SkillBundle[]> {
+): Promise<Array<SkillBundle & { id: string }>> {
 	let text: string;
 	try {
 		text = await readFile(snapshotPath(root, sessionId), "utf8");
@@ -48,7 +48,7 @@ async function readSnapshot(
 		if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
 		throw error;
 	}
-	const bundles: SkillBundle[] = JSON.parse(text);
+	const bundles: Array<SkillBundle & { id: string }> = JSON.parse(text);
 	if (!Array.isArray(bundles) || bundles.length > 128)
 		throw new Error("Snapshot de Skills inválido.");
 	const names = new Set<string>();
@@ -172,7 +172,7 @@ export async function activateSkills(
 	cwd: string,
 	agent: AgentKind,
 ): Promise<void> {
-	const bundles = await readSnapshot(root, sessionId);
+	const bundles = await readSkillSnapshot(root, sessionId);
 	if (agent === "claude") return activateClaude(cwd, bundles);
 	const managedRoot = join(cwd, ".ptolemy");
 	const targetRoot = join(cwd, ".agents");

@@ -39,9 +39,11 @@ import {
 	getContextBreakdown,
 	getPermissionGate,
 	getSessionCommands,
+	getSessionConfiguration,
 	getSessionResources,
 	type SessionMeta,
 	type StoredMessageV2,
+	setSessionConfiguration,
 } from "./claude/session-manager";
 import {
 	type CodexAuthStatus,
@@ -89,6 +91,7 @@ export type SettingsSection =
 	| "general"
 	| "network"
 	| "extensions"
+	| `agent:${"claude" | "codex"}:${"general" | "skills" | "plugins" | "mcp"}`
 	| `plugin:${string}`;
 
 export interface PtolemyRPCSchema extends ElectrobunRPCSchema {
@@ -813,6 +816,18 @@ export const requestHandlers: BunRequestHandlers = {
 		return ok;
 	},
 	...extensionRequestHandlers,
+	agentSessionConfiguration: async ({ sessionId }) => {
+		extensionValidation.text(sessionId);
+		return getSessionConfiguration(sessionId);
+	},
+	agentSessionSetConfiguration: async ({
+		sessionId,
+		expectedRevision,
+		choices,
+	}) => {
+		extensionValidation.text(sessionId);
+		return setSessionConfiguration(sessionId, expectedRevision, choices);
+	},
 	agentSessionResources: async ({ sessionId }) => {
 		extensionValidation.text(sessionId);
 		return getSessionResources(sessionId);

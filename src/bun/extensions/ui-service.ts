@@ -23,7 +23,10 @@ import * as validate from "./ui-validation";
 type Handlers = {
 	[K in Exclude<
 		keyof ExtensionRequests,
-		"agentSessionCommands" | "agentSessionResources"
+		| "agentSessionCommands"
+		| "agentSessionResources"
+		| "agentSessionConfiguration"
+		| "agentSessionSetConfiguration"
 	>]: (
 		params: ExtensionRequests[K]["params"],
 	) => Promise<ExtensionRequests[K]["response"]>;
