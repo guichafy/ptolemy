@@ -22,7 +22,6 @@ import {
 	onAgentEvent,
 	rpc,
 } from "../providers/rpc";
-import { McpServersSection } from "./mcp-servers";
 import { useSettings } from "./settings-context";
 
 export function ClaudeSection() {
@@ -494,10 +493,6 @@ export function ClaudeSection() {
 					</SelectContent>
 				</Select>
 			</div>
-
-			<Separator className="opacity-40" />
-
-			<McpServersSection />
 
 			<Separator className="opacity-40" />
 

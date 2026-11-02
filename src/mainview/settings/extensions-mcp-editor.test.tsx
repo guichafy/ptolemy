@@ -11,7 +11,9 @@ const request = vi.hoisted(() => ({
 	agentMcpDisconnect: vi.fn(),
 	agentMcpRegistration: vi.fn(),
 }));
-vi.mock("../providers/rpc", () => ({ rpc: { request } }));
+vi.mock("@/components/agents/resource-rpc", () => ({
+	resourceRpc: { request },
+}));
 beforeEach(() => {
 	vi.resetAllMocks();
 	request.agentMcpStatus.mockResolvedValue({ state: "disconnected" });

@@ -1,15 +1,24 @@
-import { Blocks, Network, Settings2, SlidersHorizontal } from "lucide-react";
+import {
+	Blocks,
+	BookOpen,
+	Network,
+	Plug,
+	Settings2,
+	SlidersHorizontal,
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
+import type { AgentKind } from "@/shared/agent-protocol";
 import {
 	findPluginMeta,
 	hasPluginConfig,
 	PLUGIN_REGISTRY,
 } from "../providers/registry";
 import type { SettingsSection } from "../providers/rpc";
-import { ExtensionsSection } from "./extensions-section";
+import type { ResourcePage } from "./agent-resources/model";
+import { AgentResourcePreferences } from "./agent-resources/preferences";
 import { GeneralSection } from "./general-section";
 import { NetworkSection } from "./network-section";
 import { PluginsSection } from "./plugins-section";
@@ -24,8 +33,7 @@ interface PluginSubItem {
 }
 
 const NAV_ITEMS: { id: Section; label: string; icon: typeof Settings2 }[] = [
-	{ id: "plugins", label: "Plugins", icon: SlidersHorizontal },
-	{ id: "extensions", label: "Extensões", icon: Blocks },
+	{ id: "plugins", label: "Plugins do aplicativo", icon: SlidersHorizontal },
 	{ id: "network", label: "Rede", icon: Network },
 	{ id: "general", label: "Geral", icon: Settings2 },
 ];
@@ -44,17 +52,20 @@ function NavButton({
 	icon: Icon,
 	label,
 	indent,
+	ariaLabel,
 }: {
 	active: boolean;
 	onClick: () => void;
 	icon: typeof Settings2;
 	label: string;
 	indent?: boolean;
+	ariaLabel?: string;
 }) {
 	return (
 		<button
 			type="button"
 			onClick={onClick}
+			aria-label={ariaLabel}
 			className={cn(
 				"flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] transition-colors",
 				indent && "ml-5 w-[calc(100%-1.25rem)]",
@@ -92,11 +103,41 @@ export function SettingsDialog() {
 	);
 
 	const resolvedSection =
-		section.startsWith("plugin:") &&
-		!hasPluginConfig(section.replace("plugin:", ""))
-			? "plugins"
-			: section;
+		section === "extensions"
+			? "agent:claude:plugins"
+			: section.startsWith("plugin:") &&
+					!hasPluginConfig(section.replace("plugin:", ""))
+				? "plugins"
+				: section;
 
+	const agentResource = /^agent:(claude|codex):(skills|plugins|mcp)$/.exec(
+		resolvedSection,
+	);
+	const resourceAgent = agentResource?.[1] as AgentKind | undefined;
+	const resourcePage = agentResource?.[2] as ResourcePage | undefined;
+	const selectedAgent = /^(?:agent|plugin):(claude|codex)(?::|$)/.exec(
+		resolvedSection,
+	)?.[1];
+	const content =
+		agentResource && resourceAgent && resourcePage ? (
+			<AgentResourcePreferences
+				key={resourceAgent}
+				agent={resourceAgent}
+				page={resourcePage}
+			/>
+		) : resolvedSection === "plugins" ? (
+			<PluginsSection onNavigateToPlugin={(id) => setSection(`plugin:${id}`)} />
+		) : resolvedSection === "general" ? (
+			<GeneralSection />
+		) : resolvedSection === "network" ? (
+			<NetworkSection />
+		) : resolvedSection.startsWith("plugin:") ? (
+			<PluginConfigSection pluginId={resolvedSection.replace("plugin:", "")} />
+		) : resolvedSection.startsWith("agent:") ? (
+			<PluginConfigSection pluginId={selectedAgent ?? "claude"} />
+		) : (
+			<PluginsSection />
+		);
 	return (
 		<Dialog
 			open={isOpen}
@@ -104,67 +145,88 @@ export function SettingsDialog() {
 				if (!open) closeDialog();
 			}}
 		>
-			<DialogContent className="flex h-[min(720px,calc(100vh-32px))] sm:max-w-[1040px] flex-col gap-0 overflow-hidden p-0">
+			<DialogContent className="flex h-[min(720px,calc(100vh-32px))] flex-col gap-0 overflow-hidden p-0 sm:max-w-[1040px]">
 				<DialogTitle className="sr-only">Preferências</DialogTitle>
 				<div className="flex min-h-0 flex-1">
-					<aside className="flex w-[168px] flex-col border-r border-border/40 bg-muted/10 px-3 pb-3 pt-4">
-						<span className="mb-3 px-2.5 text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70">
+					<aside className="flex w-[196px] shrink-0 flex-col border-r border-border/40 bg-muted/10 px-3 pb-3 pt-4">
+						<span className="mb-3 px-2.5 text-xs font-medium text-muted-foreground">
 							Preferências
 						</span>
-						<nav className="flex flex-col gap-0.5">
-							{NAV_ITEMS.map((item) => {
-								const isPluginsGroup =
-									item.id === "plugins" &&
-									resolvedSection.startsWith("plugin:");
-								const active = resolvedSection === item.id || isPluginsGroup;
-								return (
-									<div key={item.id}>
-										<NavButton
-											active={active && !isPluginsGroup}
-											onClick={() => setSection(item.id)}
-											icon={item.icon}
-											label={item.label}
-										/>
-										{item.id === "plugins" &&
-											pluginSubItems.map((sub) => (
+						<nav
+							aria-label="Seções de Preferências"
+							className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto"
+						>
+							{NAV_ITEMS.map((item) => (
+								<div key={item.id}>
+									<NavButton
+										active={resolvedSection === item.id}
+										onClick={() => setSection(item.id)}
+										icon={item.icon}
+										label={item.label}
+									/>
+									{item.id === "plugins" &&
+										pluginSubItems.map((sub) => (
+											<div key={sub.id}>
 												<NavButton
-													key={sub.id}
 													active={resolvedSection === `plugin:${sub.id}`}
 													onClick={() => setSection(`plugin:${sub.id}`)}
 													icon={sub.icon}
 													label={sub.label}
 													indent
 												/>
-											))}
-									</div>
-								);
-							})}
+												{selectedAgent === sub.id &&
+													(
+														["general", "skills", "plugins", "mcp"] as const
+													).map((page) => {
+														const label =
+															page === "general"
+																? "Geral"
+																: page === "skills"
+																	? "Skills"
+																	: page === "plugins"
+																		? "Plugins"
+																		: "MCP";
+														const target = `agent:${sub.id}:${page}` as Section;
+														return (
+															<div key={page} className="pl-4">
+																<NavButton
+																	active={
+																		resolvedSection === target ||
+																		(page === "general" &&
+																			resolvedSection === `plugin:${sub.id}`)
+																	}
+																	onClick={() => setSection(target)}
+																	icon={
+																		page === "skills"
+																			? BookOpen
+																			: page === "plugins"
+																				? Blocks
+																				: page === "mcp"
+																					? Plug
+																					: Settings2
+																	}
+																	label={label}
+																	ariaLabel={`${label} do ${sub.id === "claude" ? "Claude" : "Codex"}`}
+																	indent
+																/>
+															</div>
+														);
+													})}
+											</div>
+										))}
+								</div>
+							))}
 						</nav>
-						<div className="mt-auto px-2.5 pt-3 text-[10px] text-muted-foreground/50">
-							Ptolemy v1.2.0
-						</div>
 					</aside>
-					<ScrollArea className="min-w-0 flex-1">
-						<main className="@container min-w-0 p-5">
-							{resolvedSection === "plugins" ? (
-								<PluginsSection
-									onNavigateToPlugin={(id) => setSection(`plugin:${id}`)}
-								/>
-							) : resolvedSection === "extensions" ? (
-								<ExtensionsSection />
-							) : resolvedSection === "general" ? (
-								<GeneralSection />
-							) : resolvedSection === "network" ? (
-								<NetworkSection />
-							) : resolvedSection.startsWith("plugin:") ? (
-								<PluginConfigSection
-									pluginId={resolvedSection.replace("plugin:", "")}
-								/>
-							) : (
-								<PluginsSection />
-							)}
+					{agentResource ? (
+						<main className="@container flex min-h-0 min-w-0 flex-1 flex-col p-5">
+							{content}
 						</main>
-					</ScrollArea>
+					) : (
+						<ScrollArea className="min-w-0 flex-1">
+							<main className="@container min-w-0 p-5">{content}</main>
+						</ScrollArea>
+					)}
 				</div>
 			</DialogContent>
 		</Dialog>

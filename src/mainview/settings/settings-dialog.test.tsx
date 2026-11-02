@@ -51,6 +51,23 @@ vi.mock("./github-section", () => ({
 	GitHubSection: () => <div data-testid="github-section" />,
 }));
 
+vi.mock("./agent-resources/preferences", () => ({
+	AgentResourcePreferences: ({
+		agent,
+		page,
+	}: {
+		agent: string;
+		page: string;
+	}) => (
+		<div data-testid="agent-resource-page">
+			{agent}:{page}
+		</div>
+	),
+}));
+vi.mock("./codex-section", () => ({
+	CodexSection: () => <div data-testid="codex-section" />,
+}));
+
 const { SettingsDialog } = await import("./settings-dialog");
 
 describe("<SettingsDialog />", () => {
@@ -61,6 +78,24 @@ describe("<SettingsDialog />", () => {
 		settingsState.closeDialog.mockReset();
 	});
 
+	it("organizes resource pages under the selected harness instead of central Extensions", async () => {
+		settingsState.enabledOrder = ["github", "claude", "codex"];
+		render(<SettingsDialog />);
+		expect(
+			screen.queryByRole("button", { name: "Extensões" }),
+		).not.toBeInTheDocument();
+		await userEvent.click(screen.getByRole("button", { name: "Codex" }));
+		await userEvent.click(
+			screen.getByRole("button", { name: "Skills do Codex" }),
+		);
+		expect(screen.getByTestId("agent-resource-page")).toHaveTextContent(
+			"codex:skills",
+		);
+		await userEvent.click(screen.getByRole("button", { name: "MCP do Codex" }));
+		expect(screen.getByTestId("agent-resource-page")).toHaveTextContent(
+			"codex:mcp",
+		);
+	});
 	it("renders nothing when isOpen is false", () => {
 		settingsState.isOpen = false;
 		render(<SettingsDialog />);
