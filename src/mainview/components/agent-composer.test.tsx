@@ -188,7 +188,7 @@ describe("Compact agent composer", () => {
 		await configure();
 		const check = await screen.findByRole("checkbox", { name: "Usar review" });
 		await waitFor(() => expect(check).toBeChecked());
-		expect(screen.getByText("Integrada ao sistema")).toBeVisible();
+		expect(screen.getByText("Integrada ao Codex")).toBeVisible();
 		await userEvent.click(check);
 		await apply();
 		await start();

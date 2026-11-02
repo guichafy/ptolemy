@@ -57,7 +57,7 @@ it("lets both hosts edit system Skills through the same controlled workspace", a
 	const choice = screen.getByRole("checkbox", { name: "Usar review" });
 	await userEvent.click(choice);
 	expect(choice).toBeChecked();
-	expect(screen.getByText("Integrada ao sistema")).toBeVisible();
+	expect(screen.getByText("Integrada ao Codex")).toBeVisible();
 	expect(request.agentImportSkill).not.toHaveBeenCalled();
 });
 it("opens a dedicated Skills marketplace", async () => {
@@ -69,4 +69,55 @@ it("opens a dedicated Skills marketplace", async () => {
 		screen.getByRole("heading", { name: "Marketplace de Skills" }),
 	).toBeVisible();
 	expect(screen.queryByText("Marketplace de Plugins")).not.toBeInTheDocument();
+});
+
+it("never renders another harness's native Skill even when a mixed library arrives", () => {
+	render(
+		<ResourceWorkspace
+			agent="codex"
+			page="skills"
+			library={{
+				...library,
+				skills: [
+					...library.skills,
+					{
+						...library.skills[0],
+						id: "claude",
+						name: "Claude private",
+						source: { kind: "harness", agent: "claude" },
+					},
+				],
+			}}
+			choices={{
+				skillIds: [],
+				extensionSelections: [],
+				builtinCommandNames: [],
+				mcpServerIds: [],
+			}}
+			onChange={() => {}}
+			onRefresh={() => {}}
+		/>,
+	);
+	expect(
+		screen.queryByRole("checkbox", { name: "Usar Claude private" }),
+	).not.toBeInTheDocument();
+	expect(screen.getByRole("checkbox", { name: "Usar review" })).toBeVisible();
+});
+it("shows harness ownership and a clear return from native Skill details", async () => {
+	render(<Workspace />);
+	expect(screen.getByText("Integrada ao Codex")).toBeVisible();
+	await userEvent.click(
+		screen.getByRole("button", { name: "Detalhes de review" }),
+	);
+	expect(
+		screen.getByRole("button", { name: "Voltar à lista de Skills" }),
+	).toBeVisible();
+	expect(screen.getByText(/Instalação gerenciada pelo Codex/)).toBeVisible();
+	await userEvent.click(
+		screen.getByRole("button", { name: "Voltar à lista de Skills" }),
+	);
+	expect(screen.getByRole("checkbox", { name: "Usar review" })).toBeVisible();
+	expect(
+		screen.getByRole("button", { name: "Detalhes de review" }),
+	).toHaveFocus();
 });

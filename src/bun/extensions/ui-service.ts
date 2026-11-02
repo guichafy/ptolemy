@@ -119,6 +119,11 @@ export async function validateStandaloneMcp(ids: string[]) {
 	}
 }
 export const extensionRequestHandlers: Handlers = {
+	agentRemoveSkill: async ({ id }) => {
+		validate.text(id);
+		await skillsStore.remove(id);
+		return true;
+	},
 	agentExtensionSources: async () => extensionsStore.sources(),
 	agentExtensionAddSource: async ({ url }) => {
 		validate.text(url);

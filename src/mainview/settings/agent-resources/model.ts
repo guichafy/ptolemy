@@ -27,6 +27,28 @@ export interface ResourceLibrary {
 		serverIds: string[];
 	};
 }
+/** Native Skills belong to one harness; portable imports belong to the library. */
+export function libraryForAgent(
+	agent: AgentKind,
+	library: ResourceLibrary,
+): ResourceLibrary {
+	if (library.agent && library.agent !== agent)
+		return {
+			agent,
+			skills: [],
+			inventory: null,
+			servers: [],
+			loading: true,
+			error: null,
+		};
+	return {
+		...library,
+		agent,
+		skills: library.skills.filter(
+			(s) => s.source.kind !== "harness" || s.source.agent === agent,
+		),
+	};
+}
 export const emptyChoices = (): ExtensionChoices => ({
 	skillIds: [],
 	extensionSelections: [],
@@ -55,7 +77,8 @@ export function withArchived(
 	library: ResourceLibrary,
 	archived?: SessionResourceConfiguration,
 ): ResourceLibrary {
-	if (!archived) return library;
+	if (!archived || (library.agent && library.agent !== archived.agent))
+		return library;
 	const packages = [
 		...archived.packages,
 		...(library.inventory?.installed ?? []).filter(

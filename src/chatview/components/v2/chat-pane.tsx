@@ -138,14 +138,20 @@ export function ChatPaneV2() {
 	const [attachments, setAttachments] = useState<Attachment[]>([]);
 	const [models, setModels] = useState<ProtocolModelInfo[]>([]);
 	const fileInputRef = useRef<HTMLInputElement>(null);
-	// Until the session meta loads, assume Claude (the historical default).
-	const agent = state.sessionAgent ?? "claude";
-	const { library: resourceLibrary, refresh: refreshResources } =
-		useResourceLibrary(agent);
 	const [resourceConfiguration, setResourceConfiguration] = useState<{
 		sessionId: string;
 		value: SessionResourceConfiguration;
 	} | null>(null);
+	const currentResourceConfiguration =
+		resourceConfiguration?.sessionId === sessionId
+			? resourceConfiguration.value
+			: undefined;
+	// Configuration and transcript load independently; the session's resource
+	// snapshot is authoritative about its harness as soon as it arrives.
+	const agent =
+		currentResourceConfiguration?.agent ?? state.sessionAgent ?? "claude";
+	const { library: resourceLibrary, refresh: refreshResources } =
+		useResourceLibrary(agent);
 	const [resourceError, setResourceError] = useState<string | null>(null);
 	const [resourceAttempt, setResourceAttempt] = useState(0);
 	const [resourceDialogSessionId, setResourceDialogSessionId] = useState<
@@ -161,10 +167,7 @@ export function ChatPaneV2() {
 		},
 		[sessionId],
 	);
-	const currentResourceConfiguration =
-		resourceConfiguration?.sessionId === sessionId
-			? resourceConfiguration.value
-			: undefined;
+
 	useEffect(() => {
 		void resourceAttempt;
 		let cancelled = false;

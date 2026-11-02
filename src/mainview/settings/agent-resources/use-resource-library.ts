@@ -44,7 +44,16 @@ export function useResourceLibrary(agent: AgentKind) {
 	return {
 		library: {
 			...library,
-			loading: library.loading || library.agent !== agent,
+			...(library.agent !== agent
+				? {
+						agent,
+						skills: [],
+						inventory: null,
+						servers: [],
+						loading: true,
+						error: null,
+					}
+				: {}),
 		},
 		refresh,
 	};

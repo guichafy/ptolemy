@@ -5,22 +5,30 @@ import { Input } from "@/components/ui/input";
 import type { AgentKind } from "@/shared/agent-protocol";
 import type { ExtensionSource, ExtensionSummary } from "@/shared/extensions";
 import { componentKindLabel, errorText } from "../extensions-common";
+import { ResourceDetail, UninstallResource, useResourceDetail } from "./detail";
 import { type ResourcePage, resourceLabels } from "./model";
 export function ResourceMarketplace({
 	agent,
 	page,
 	onRefresh,
 	onBusyChange,
+	installed = [],
+	onRemoved,
+	onShowInstalled,
 }: {
 	agent: AgentKind;
 	page: ResourcePage;
 	onRefresh: () => void;
 	onBusyChange?: (busy: boolean) => void;
+	installed?: ExtensionSummary[];
+	onRemoved?: (id: string) => void;
+	onShowInstalled?: () => void;
 }) {
 	const [sources, setSources] = useState<ExtensionSource[]>([]);
 	const [source, setSource] = useState("");
 	const [items, setItems] = useState<ExtensionSummary[]>([]);
-	const [detail, setDetail] = useState<ExtensionSummary | null>(null);
+	const navigation = useResourceDetail<ExtensionSummary>();
+	const { detail } = navigation;
 	const [url, setUrl] = useState("");
 	const [query, setQuery] = useState("");
 	const [loading, setLoading] = useState(true);
@@ -29,6 +37,17 @@ export function ResourceMarketplace({
 	const [message, setMessage] = useState("");
 	const [attempt, setAttempt] = useState(0);
 	const sequence = useRef(0);
+	const fingerprint = JSON.stringify(installed.map((p) => [p.id, p.revision]));
+	const [change, setChange] = useState<{
+		id: string;
+		revision: string | null;
+		baseline: string;
+	} | null>(null);
+	const installedRevision =
+		change?.id === detail?.id && change?.baseline === fingerprint
+			? change.revision
+			: installed.find((p) => p.id === detail?.id)?.revision;
+	const backLabel = `Voltar à lista de ${resourceLabels[page]}`;
 	useEffect(() => {
 		void attempt;
 		let cancelled = false;
@@ -39,16 +58,16 @@ export function ResourceMarketplace({
 			.then((r) => {
 				if (cancelled) return;
 				setSources(r);
+				const preferred =
+					page === "skills"
+						? "anthropics/skills"
+						: agent === "codex"
+							? "openai/plugins"
+							: "anthropics/claude-plugins-official";
 				setSource((old) =>
 					r.some((s) => s.id === old)
 						? old
-						: (r.find((s) =>
-								page === "skills"
-									? s.name === "anthropics/skills"
-									: s.name === "anthropics/claude-plugins-official",
-							)?.id ??
-							r[0]?.id ??
-							""),
+						: (r.find((s) => s.name === preferred)?.id ?? r[0]?.id ?? ""),
 				);
 				if (!r.length) setLoading(false);
 			})
@@ -61,7 +80,8 @@ export function ResourceMarketplace({
 		return () => {
 			cancelled = true;
 		};
-	}, [page, attempt]);
+	}, [agent, page, attempt]);
+	// biome-ignore lint/correctness/useExhaustiveDependencies: reset uses only refs and a stable setter; catalog resets on source/retry, not detail changes.
 	useEffect(() => {
 		void attempt;
 		if (!source) return;
@@ -70,7 +90,8 @@ export function ResourceMarketplace({
 		setLoading(true);
 		setError(null);
 		setItems([]);
-		setDetail(null);
+		// Source changes discard details; component is scoped by harness and page.
+		navigation.reset();
 		rpc.request
 			.agentExtensionBrowse({ sourceId: source })
 			.then((r) => {
@@ -100,8 +121,7 @@ export function ResourceMarketplace({
 		}
 	}
 	async function inspect(pkg: ExtensionSummary) {
-		const request = ++sequence.current;
-		setDetail(null);
+		const current = ++sequence.current;
 		setMessage("");
 		await run(async () => {
 			const r = await rpc.request.agentExtensionInspect({
@@ -109,7 +129,7 @@ export function ResourceMarketplace({
 				itemId: pkg.id,
 				agent,
 			});
-			if (sequence.current === request) setDetail(r.summary);
+			if (sequence.current === current) navigation.open(r.summary);
 		});
 	}
 	const matches = (pkg: ExtensionSummary) =>
@@ -118,230 +138,295 @@ export function ResourceMarketplace({
 			: pkg.components.some(
 					(c) => c.kind === (page === "skills" ? "skill" : "mcp"),
 				);
+	const installLabel = `${installedRevision ? "Atualizar" : "Instalar"} ${page === "skills" ? "Skill" : "pacote"}`;
+	async function install() {
+		if (!detail) return;
+		await run(async () => {
+			const result = await rpc.request.agentExtensionInstall({
+				sourceId: source,
+				itemId: detail.id,
+			});
+			setChange({
+				id: result.id,
+				revision: result.revision,
+				baseline: fingerprint,
+			});
+			setMessage(
+				`${result.name} instalado. Habilite os componentes na aba de instalados para usá-los no ${agent === "codex" ? "Codex" : "Claude"}.`,
+			);
+			onRefresh();
+		});
+	}
+	async function uninstall() {
+		if (!detail) return;
+		await run(async () => {
+			await rpc.request.agentExtensionRemove({ id: detail.id });
+			setChange({ id: detail.id, revision: null, baseline: fingerprint });
+			setMessage(`${detail.name} desinstalado da biblioteca compartilhada.`);
+			onRemoved?.(detail.id);
+			onRefresh();
+		});
+	}
 	return (
-		<div>
-			<h3 className="mb-3 text-sm font-medium">
-				Marketplace de {resourceLabels[page]}
-			</h3>
-			<div className="space-y-3">
-				<label className="block text-xs text-muted-foreground">
-					Repositório
-					<select
-						aria-label={`Fonte de ${resourceLabels[page]}`}
-						className="mt-1 w-full rounded-lg border bg-background px-3 py-2 text-sm"
-						value={source}
-						disabled={busy}
-						onChange={(e) => {
-							sequence.current++;
-							setSource(e.target.value);
-						}}
-					>
-						{sources.map((s) => (
-							<option key={s.id} value={s.id}>
-								{s.name}
-							</option>
-						))}
-					</select>
-				</label>
-				<Input
-					aria-label={`Buscar no marketplace de ${resourceLabels[page]}`}
-					value={query}
-					onChange={(e) => setQuery(e.target.value)}
-					placeholder={`Buscar ${resourceLabels[page]}`}
-				/>
-				{page === "skills" && (
-					<Button
-						size="sm"
-						variant="ghost"
-						onClick={() =>
-							void rpc.request.openUrl({ url: "https://skills.sh" })
-						}
-					>
-						Descobrir no skills.sh
-					</Button>
-				)}
-				{loading && (
-					<p role="status" className="text-sm text-muted-foreground">
-						Carregando catálogo…
-					</p>
-				)}
-				{detail ? (
-					<div className="space-y-3">
-						<Button
-							variant="ghost"
-							size="sm"
-							disabled={busy}
-							onClick={() => setDetail(null)}
-						>
-							Voltar ao catálogo
-						</Button>
-						<h4 className="break-words text-base font-medium">{detail.name}</h4>
-						<p className="break-words text-sm text-muted-foreground">
-							{detail.description}
-						</p>
-						<p className="break-all text-xs text-muted-foreground">
-							{detail.url}
-						</p>
-						{detail.components
-							.filter(
-								(c) =>
-									page === "plugins" ||
-									c.kind === (page === "skills" ? "skill" : "mcp"),
-							)
-							.map((c) => (
-								<div key={c.id} className="border-b py-2 text-sm">
-									{c.name}
-									<span className="ml-2 text-xs text-muted-foreground">
-										{componentKindLabel[c.kind]}
-									</span>
+		<div ref={navigation.ref}>
+			{detail ? (
+				<ResourceDetail
+					name={detail.name}
+					backLabel={backLabel}
+					onBack={navigation.back}
+					busy={busy}
+					actions={
+						<>
+							{installedRevision === detail.revision ? (
+								<div className="flex flex-wrap items-center gap-2">
+									<p className="text-xs font-medium">
+										Instalada na biblioteca compartilhada
+									</p>
+									{onShowInstalled && (
+										<Button
+											type="button"
+											variant="outline"
+											size="sm"
+											disabled={busy}
+											onClick={onShowInstalled}
+										>
+											Ver {resourceLabels[page]} instalados
+										</Button>
+									)}
 								</div>
-							))}
-						{!matches(detail) && (
-							<p className="text-sm text-muted-foreground">
-								Este pacote não contém {resourceLabels[page]} para esta página.
-							</p>
-						)}
-						{detail.diagnostics.map((d) => (
-							<p
-								className="text-xs text-muted-foreground"
-								key={`${d.code}:${d.message}`}
-							>
-								{d.message}
-							</p>
-						))}
-						<Button
-							size="sm"
-							disabled={busy || !matches(detail)}
-							onClick={() =>
-								void run(async () => {
-									const result = await rpc.request.agentExtensionInstall({
-										sourceId: source,
-										itemId: detail.id,
-									});
-									setMessage(
-										`${result.name} instalado na biblioteca. Ative os componentes na aba de instalados.`,
-									);
-									onRefresh();
-								})
-							}
-						>
-							Instalar na biblioteca
-						</Button>
-						<p className="text-xs text-muted-foreground">
-							A instalação é compartilhada pelos agentes. A ativação é
-							configurada separadamente.
-						</p>
-					</div>
-				) : (
-					<div className="divide-y">
-						{items
-							.filter(
-								(p) =>
-									`${p.name} ${p.description}`
-										.toLocaleLowerCase()
-										.includes(query.toLocaleLowerCase()) &&
-									(!p.components.length || matches(p)),
-							)
-							.map((p) => (
-								<button
+							) : (
+								<Button
 									type="button"
-									key={p.id}
-									disabled={busy}
-									onClick={() => void inspect(p)}
-									className="block w-full py-3 text-left"
+									size="sm"
+									disabled={busy || !matches(detail)}
+									onClick={() => void install()}
 								>
-									<span className="block break-words text-sm font-medium">
-										{p.name}
-									</span>
-									<span className="mt-1 line-clamp-2 block text-xs text-muted-foreground">
-										{p.description ||
-											"Verificar os componentes disponíveis neste pacote"}
-									</span>
-								</button>
-							))}
-						{!loading && !items.length && !error && (
-							<p className="py-4 text-sm text-muted-foreground">
-								Nenhum pacote nesta fonte.
+									{installLabel}
+								</Button>
+							)}
+							{!!installedRevision && (
+								<UninstallResource
+									key={detail.id}
+									name={detail.name}
+									busy={busy}
+									onConfirm={() => void uninstall()}
+								/>
+							)}
+							<p className="text-xs text-muted-foreground">
+								A biblioteca é compartilhada. A ativação e os padrões são
+								independentes para Claude e Codex.
 							</p>
-						)}
-					</div>
-				)}
-				<form
-					className="mt-4 space-y-2 border-t pt-4"
-					onSubmit={(e) => {
-						e.preventDefault();
-						void run(async () => {
-							const added = await rpc.request.agentExtensionAddSource({
-								url: url.trim(),
-							});
-							setSources((old) => [
-								...old.filter((s) => s.id !== added.id),
-								added,
-							]);
-							setSource(added.id);
-							setUrl("");
-						});
-					}}
+						</>
+					}
 				>
-					<label
-						htmlFor={`marketplace-url-${page}`}
-						className="text-sm font-medium"
-					>
-						Adicionar repositório GitHub
-					</label>
-					<div className="flex gap-2">
+					<p className="whitespace-pre-wrap break-words">
+						{detail.description}
+					</p>
+					<p className="break-all text-xs text-muted-foreground">
+						{detail.url}
+					</p>
+					{detail.components
+						.filter(
+							(c) =>
+								page === "plugins" ||
+								c.kind === (page === "skills" ? "skill" : "mcp"),
+						)
+						.map((c) => (
+							<div key={c.id} className="border-b py-2 text-sm">
+								{c.name}
+								<span className="ml-2 text-xs text-muted-foreground">
+									{componentKindLabel[c.kind]}
+								</span>
+							</div>
+						))}
+					{!matches(detail) && (
+						<p className="text-sm text-muted-foreground">
+							Este pacote não contém {resourceLabels[page]} para esta página.
+						</p>
+					)}
+					{detail.diagnostics.map((d) => (
+						<p
+							key={`${d.code}:${d.message}`}
+							className="text-xs text-muted-foreground"
+						>
+							{d.message}
+						</p>
+					))}
+					{message && (
+						<p role="status" className="text-sm text-muted-foreground">
+							{message}
+						</p>
+					)}
+					{error && (
+						<p role="alert" className="text-sm text-destructive">
+							{error}
+						</p>
+					)}
+				</ResourceDetail>
+			) : (
+				<>
+					<h3 className="mb-3 text-sm font-medium">
+						Marketplace de {resourceLabels[page]}
+					</h3>
+					<div className="space-y-3">
+						<label className="block text-xs text-muted-foreground">
+							Repositório
+							<select
+								aria-label={`Fonte de ${resourceLabels[page]}`}
+								className="mt-1 w-full rounded-lg border bg-background px-3 py-2 text-sm"
+								value={source}
+								disabled={busy}
+								onChange={(e) => {
+									sequence.current++;
+									setSource(e.target.value);
+								}}
+							>
+								{sources.map((s) => (
+									<option key={s.id} value={s.id}>
+										{s.name}
+									</option>
+								))}
+							</select>
+						</label>
 						<Input
-							id={`marketplace-url-${page}`}
-							type="url"
-							value={url}
-							onChange={(e) => setUrl(e.target.value)}
-							placeholder="https://github.com/autor/repositorio"
+							aria-label={`Buscar no marketplace de ${resourceLabels[page]}`}
+							value={query}
+							onChange={(e) => setQuery(e.target.value)}
+							placeholder={`Buscar ${resourceLabels[page]}`}
 							disabled={busy}
 						/>
-						<Button
-							type="submit"
-							variant="outline"
-							size="sm"
-							disabled={busy || !url.trim()}
+						{page === "skills" && (
+							<Button
+								type="button"
+								size="sm"
+								variant="ghost"
+								onClick={() =>
+									void rpc.request.openUrl({ url: "https://skills.sh" })
+								}
+							>
+								Descobrir no skills.sh
+							</Button>
+						)}
+						{loading && (
+							<p role="status" className="text-sm text-muted-foreground">
+								Carregando catálogo…
+							</p>
+						)}
+						<div className="divide-y">
+							{items
+								.filter(
+									(p) =>
+										`${p.name} ${p.description}`
+											.toLocaleLowerCase()
+											.includes(query.toLocaleLowerCase()) &&
+										(!p.components.length || matches(p)),
+								)
+								.map((p) => (
+									<button
+										type="button"
+										key={p.id}
+										data-resource-id={p.id}
+										disabled={busy}
+										onClick={() => void inspect(p)}
+										className="block w-full py-3 text-left"
+									>
+										<span className="block break-words text-sm font-medium">
+											{p.name}
+										</span>
+										{installed.some((i) => i.id === p.id) && (
+											<span className="text-xs text-muted-foreground">
+												Instalado na biblioteca
+											</span>
+										)}
+										<span className="mt-1 line-clamp-2 block text-xs text-muted-foreground">
+											{p.description ||
+												"Verificar os componentes disponíveis neste pacote"}
+										</span>
+									</button>
+								))}
+							{!loading && !items.length && !error && (
+								<p className="py-4 text-sm text-muted-foreground">
+									Nenhum pacote nesta fonte.
+								</p>
+							)}
+						</div>
+						<form
+							className="mt-4 space-y-2 border-t pt-4"
+							onSubmit={(e) => {
+								e.preventDefault();
+								void run(async () => {
+									const added = await rpc.request.agentExtensionAddSource({
+										url: url.trim(),
+									});
+									setSources((old) => [
+										...old.filter((s) => s.id !== added.id),
+										added,
+									]);
+									setSource(added.id);
+									setUrl("");
+								});
+							}}
 						>
-							Adicionar fonte
-						</Button>
+							<label
+								htmlFor={`marketplace-url-${page}`}
+								className="text-sm font-medium"
+							>
+								Adicionar repositório GitHub
+							</label>
+							<div className="flex gap-2">
+								<Input
+									id={`marketplace-url-${page}`}
+									type="url"
+									value={url}
+									onChange={(e) => setUrl(e.target.value)}
+									placeholder="https://github.com/autor/repositorio"
+									disabled={busy}
+								/>
+								<Button
+									type="submit"
+									variant="outline"
+									size="sm"
+									disabled={busy || !url.trim()}
+								>
+									Adicionar fonte
+								</Button>
+							</div>
+						</form>
+						{source && !sources.find((s) => s.id === source)?.builtin && (
+							<Button
+								type="button"
+								size="sm"
+								variant="ghost"
+								disabled={busy}
+								onClick={() =>
+									void run(async () => {
+										await rpc.request.agentExtensionRemoveSource({
+											id: source,
+										});
+										setSource("");
+										setAttempt((a) => a + 1);
+									})
+								}
+							>
+								Remover fonte compartilhada
+							</Button>
+						)}
+						{error && (
+							<div role="alert" className="text-sm text-destructive">
+								{error}
+								<Button
+									type="button"
+									variant="ghost"
+									size="sm"
+									onClick={() => setAttempt((a) => a + 1)}
+								>
+									Tentar novamente
+								</Button>
+							</div>
+						)}
 					</div>
-				</form>
-				{source && !sources.find((s) => s.id === source)?.builtin && (
-					<Button
-						size="sm"
-						variant="ghost"
-						disabled={busy}
-						onClick={() =>
-							void run(async () => {
-								await rpc.request.agentExtensionRemoveSource({ id: source });
-								setSource("");
-								setAttempt((a) => a + 1);
-							})
-						}
-					>
-						Remover fonte compartilhada
-					</Button>
-				)}
-				{message && (
-					<p role="status" className="text-sm text-muted-foreground">
-						{message}
-					</p>
-				)}
-				{error && (
-					<div role="alert" className="text-sm text-destructive">
-						{error}
-						<Button
-							variant="ghost"
-							size="sm"
-							onClick={() => setAttempt((a) => a + 1)}
-						>
-							Tentar novamente
-						</Button>
-					</div>
-				)}
-			</div>
+				</>
+			)}
 		</div>
 	);
 }

@@ -18,7 +18,7 @@ export interface SkillSummary {
 	source: SkillSource;
 	defaultFor: AgentKind[];
 	/** Local CLI discovery origin, shown without conflating built-ins and user Skills. */
-	origin?: "system" | "local";
+	origin?: "system" | "local" | "shared";
 	localPath?: string;
 	/** A native package the isolated SDK cannot load; never blocks creation. */
 	unavailableReason?: string;

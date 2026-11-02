@@ -97,7 +97,9 @@ export class SkillsStore {
 						origin:
 							root.endsWith("/.system") || root === "/etc/codex/skills"
 								? "system"
-								: "local",
+								: root.endsWith("/.agents/skills")
+									? "shared"
+									: "local",
 						localPath: path,
 						...(unavailableReason ? { unavailableReason } : {}),
 					});
@@ -111,7 +113,9 @@ export class SkillsStore {
 						origin:
 							root.endsWith("/.system") || root === "/etc/codex/skills"
 								? "system"
-								: "local",
+								: root.endsWith("/.agents/skills")
+									? "shared"
+									: "local",
 						localPath: path,
 						unavailableReason:
 							error instanceof Error
@@ -155,6 +159,19 @@ export class SkillsStore {
 			index.skills.push(skill);
 		});
 		return summary(skill);
+	}
+
+	/** Removing a library entry never removes CLI files or rewrites harness choices. */
+	async remove(id: string): Promise<void> {
+		if (typeof id !== "string" || !/^[a-f0-9-]{36}$/.test(id))
+			throw Error(
+				"Instalação nativa gerenciada pelo CLI; desative a Skill na seleção.",
+			);
+		await this.mutate((index) => {
+			if (!index.skills.some((skill) => skill.id === id))
+				throw Error("Skill não encontrada na biblioteca.");
+			index.skills = index.skills.filter((skill) => skill.id !== id);
+		});
 	}
 
 	async setDefaults(agent: AgentKind, ids: string[]): Promise<void> {

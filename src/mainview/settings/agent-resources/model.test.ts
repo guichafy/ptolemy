@@ -133,3 +133,26 @@ it("retains archived summaries rather than silently replacing their metadata", (
 		"new",
 	]);
 });
+it("never merges archived resources from a different harness", () => {
+	const current = { ...library, agent: "codex" as const };
+	const archived = {
+		agent: "claude" as const,
+		revision: 1,
+		legacy: false,
+		busy: false,
+		capabilities: [],
+		choices,
+		skills: [
+			{
+				...library.skills[0],
+				id: "private-claude",
+				source: { kind: "harness" as const, agent: "claude" as const },
+			},
+		],
+		packages: [{ ...pkg, id: "claude-package" }],
+		servers: [],
+	};
+	const merged = withArchived(current, archived);
+	expect(merged.skills.map((s) => s.id)).toEqual(["file"]);
+	expect(merged.inventory?.installed.map((p) => p.id)).toEqual(["package"]);
+});

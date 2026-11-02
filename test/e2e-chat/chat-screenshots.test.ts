@@ -165,7 +165,7 @@ beforeAll(async () => {
 		download: async (url) => {
 			const name = new URL(url).pathname.split("/").at(-1)!;
 			const description = "Skill de validação da configuração da conversa. "
-				.repeat(10)
+				.repeat(20)
 				.trim();
 			return {
 				name,
@@ -349,6 +349,54 @@ function chatScenario(agent: AgentKind) {
 					);
 				});
 				await shoot(page, `chat-${agent}-resources-dark.png`);
+				// Open a detail deep in a long list, then scroll the detail.
+				// Back and uninstall must remain inside the sole scroll owner.
+				const detailButton = dialog.getByRole("button", {
+					name: "Detalhes de ui-resource-70",
+					exact: true,
+				});
+				await detailButton.scrollIntoViewIfNeeded();
+				const listScroll = await dialog
+					.locator("[data-resource-scroll]")
+					.evaluate((el) => el.scrollTop);
+				await detailButton.click();
+				const back = dialog.getByRole("button", {
+					name: "Voltar à lista de Skills",
+					exact: true,
+				});
+				await back.waitFor();
+				await dialog.locator("[data-resource-scroll]").evaluate((el) => {
+					el.scrollTop = el.scrollHeight;
+				});
+				for (const control of [
+					back,
+					dialog.getByRole("button", {
+						name: "Desinstalar da biblioteca",
+						exact: true,
+					}),
+				]) {
+					expect(
+						await control.evaluate((el) => {
+							const r = el.getBoundingClientRect();
+							const owner = el
+								.closest("[data-resource-scroll]")!
+								.getBoundingClientRect();
+							return r.top >= owner.top - 1 && r.bottom <= owner.bottom + 1;
+						}),
+					).toBe(true);
+				}
+				await shoot(page, `chat-${agent}-skill-details.png`);
+				await back.click();
+				expect(
+					await detailButton.evaluate((el) => el === document.activeElement),
+				).toBe(true);
+				expect(
+					Math.abs(
+						(await dialog
+							.locator("[data-resource-scroll]")
+							.evaluate((el) => el.scrollTop)) - listScroll,
+					) < 2,
+				).toBe(true);
 				await dialog
 					.getByRole("textbox", { name: "Buscar Skills", exact: true })
 					.fill("ui-resource-00");
