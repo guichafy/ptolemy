@@ -5,6 +5,8 @@
 
 import { Bot, Paperclip, Sparkles, SquareTerminal } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { ConversationConfiguration } from "@/components/agents/conversation-configuration";
+import { configureResourceRpc } from "@/components/agents/resource-rpc";
 import {
 	type Attachment,
 	Attachments,
@@ -30,8 +32,13 @@ import {
 	commandKeyDown,
 } from "@/components/claude/command-suggestions";
 import { ModelPicker } from "@/components/claude/model-picker";
+import { emptyChoices } from "@/mainview/settings/agent-resources/model";
+import { useResourceLibrary } from "@/mainview/settings/agent-resources/use-resource-library";
 import type { ProtocolModelInfo } from "@/shared/agent-protocol";
-import type { ExtensionCommandSummary } from "@/shared/extension-rpc";
+import type {
+	ExtensionCommandSummary,
+	SessionResourceConfiguration,
+} from "@/shared/extension-rpc";
 import { computeTurnStatus, type SessionState } from "../../hooks/agent-state";
 import { useAgentChat } from "../../hooks/use-agent-chat";
 import { describeModel } from "../../lib/model-label";
@@ -79,6 +86,7 @@ async function fileToAttachment(file: File): Promise<Attachment | null> {
 }
 
 export function ChatPaneV2() {
+	configureResourceRpc(rpc);
 	const [sessionId, setSessionId] = useState<string | null>(null);
 	const { state, sendMessage, cancel, approveTool, rejectTool } =
 		useAgentChat(sessionId);
@@ -132,6 +140,41 @@ export function ChatPaneV2() {
 	const fileInputRef = useRef<HTMLInputElement>(null);
 	// Until the session meta loads, assume Claude (the historical default).
 	const agent = state.sessionAgent ?? "claude";
+	const { library: resourceLibrary, refresh: refreshResources } =
+		useResourceLibrary(agent);
+	const [resourceConfiguration, setResourceConfiguration] = useState<{
+		sessionId: string;
+		value: SessionResourceConfiguration;
+	} | null>(null);
+	const [resourceError, setResourceError] = useState<string | null>(null);
+	const [resourceAttempt, setResourceAttempt] = useState(0);
+	const [resourceDialogOpen, setResourceDialogOpen] = useState(false);
+	const currentResourceConfiguration =
+		resourceConfiguration?.sessionId === sessionId
+			? resourceConfiguration.value
+			: undefined;
+	useEffect(() => {
+		void resourceAttempt;
+		let cancelled = false;
+		setResourceError(null);
+		if (!sessionId) return;
+		rpc.request
+			.agentSessionConfiguration({ sessionId })
+			.then((value) => {
+				if (!cancelled) setResourceConfiguration({ sessionId, value });
+			})
+			.catch((e) => {
+				if (!cancelled)
+					setResourceError(
+						e instanceof Error
+							? e.message
+							: "Não foi possível carregar a configuração da conversa.",
+					);
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, [sessionId, resourceAttempt]);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -168,6 +211,7 @@ export function ChatPaneV2() {
 
 	const handleSubmit = async () => {
 		const text = draft.trim();
+		if (resourceDialogOpen) return;
 		if (state.sessionState === "running") {
 			await cancel();
 			return;
@@ -337,8 +381,8 @@ export function ChatPaneV2() {
 								</p>
 							)}
 							{selectionLabel && (
-								<p className="px-2 text-[10px] text-muted-foreground">
-									Seleção fixa desta conversa: {selectionLabel}
+								<p className="sr-only">
+									Recursos desta conversa: {selectionLabel}
 								</p>
 							)}
 							<PromptInputTextarea
@@ -390,6 +434,42 @@ export function ChatPaneV2() {
 									disabled={state.sessionState !== "idle" || !sessionId}
 									placeholder="Selecionar modelo"
 									resolvedLabel={sessionModelLabel}
+								/>
+								<ConversationConfiguration
+									agent={agent}
+									library={{
+										...resourceLibrary,
+										error: resourceError ?? resourceLibrary.error,
+										loading:
+											resourceLibrary.loading || !currentResourceConfiguration,
+									}}
+									choices={
+										currentResourceConfiguration?.choices ?? emptyChoices()
+									}
+									archived={currentResourceConfiguration}
+									disabled={!sessionId}
+									blocked={
+										state.sessionState !== "idle"
+											? "Aguarde a resposta terminar para aplicar a configuração."
+											: null
+									}
+									onOpenChange={setResourceDialogOpen}
+									onRefresh={() => {
+										refreshResources();
+										setResourceAttempt((a) => a + 1);
+									}}
+									onApply={async (choices) => {
+										if (!sessionId || !currentResourceConfiguration)
+											throw Error("Configuração ainda não carregada.");
+										const value =
+											await rpc.request.agentSessionSetConfiguration({
+												sessionId,
+												expectedRevision: currentResourceConfiguration.revision,
+												choices,
+											});
+										setResourceConfiguration({ sessionId, value });
+										setCommandAttempt((a) => a + 1);
+									}}
 								/>
 							</PromptInputTools>
 							<PromptInputSubmit

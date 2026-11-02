@@ -1,5 +1,6 @@
-import { X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ConversationConfiguration } from "@/components/agents/conversation-configuration";
+import { configureResourceRpc } from "@/components/agents/resource-rpc";
 import {
 	PromptInput,
 	PromptInputFooter,
@@ -14,7 +15,6 @@ import {
 import { ModelPicker } from "@/components/claude/model-picker";
 import type { AgentKind, ProtocolModelInfo } from "@/shared/agent-protocol";
 import type {
-	ExtensionCapability,
 	ExtensionChoices,
 	ExtensionCommandSummary,
 	ExtensionInventory,
@@ -23,15 +23,15 @@ import type { McpServerSummary } from "@/shared/mcp";
 import type { SkillSummary } from "@/shared/skills";
 import { useWindowShown } from "../hooks/use-window-shown";
 import { rpc } from "../providers/rpc";
+import { usePackageReview } from "../settings/agent-resources/use-resource-library";
 import { useSettings } from "../settings/settings-context";
-import { ExtensionPicker, type ExtensionReviewState } from "./extension-picker";
-import { type SkillOption, SkillPicker } from "./skill-picker";
 
 interface AgentComposerProps {
 	agent: AgentKind;
 	value: string;
 	onChange: (value: string) => void;
 	onCreated: () => void;
+	onConfigurationOpenChange?: (open: boolean) => void;
 }
 
 export function AgentComposer({
@@ -39,8 +39,10 @@ export function AgentComposer({
 	value,
 	onChange,
 	onCreated,
+	onConfigurationOpenChange,
 }: AgentComposerProps) {
-	const { settings, codexSettings, isOpen, openDialog } = useSettings();
+	configureResourceRpc(rpc);
+	const { settings, codexSettings, isOpen } = useSettings();
 	const wasSettingsOpen = useRef(isOpen);
 	const defaultSignature = useRef("");
 	const [modelOverride, setModelOverride] = useState<string | null>(null);
@@ -52,11 +54,6 @@ export function AgentComposer({
 	const [modelAttempt, setModelAttempt] = useState(0);
 	const [skills, setSkills] = useState<SkillSummary[]>([]);
 	const [selected, setSelected] = useState<string[]>([]);
-	const [libraryReview, setLibraryReview] = useState<ExtensionReviewState>({
-		capabilities: [],
-		loading: true,
-		error: null,
-	});
 	const [inventory, setInventory] = useState<ExtensionInventory | null>(null);
 	const [servers, setServers] = useState<McpServerSummary[]>([]);
 	const [extra, setExtra] = useState<Omit<ExtensionChoices, "skillIds">>({
@@ -65,9 +62,7 @@ export function AgentComposer({
 		mcpServerIds: [],
 	});
 	const [selectionError, setSelectionError] = useState<string | null>(null);
-	const [selectionCapabilities, setSelectionCapabilities] = useState<
-		ExtensionCapability[]
-	>([]);
+
 	const [checking, setChecking] = useState(false);
 	const [commands, setCommands] = useState<ExtensionCommandSummary[]>([]);
 	const [commandIndex, setCommandIndex] = useState(0);
@@ -76,78 +71,11 @@ export function AgentComposer({
 		dismissCommands || !/^\/[^\s]*$/.test(value)
 			? []
 			: commands.filter((c) => `/${c.name}`.startsWith(value));
-	const extraSkills: SkillOption[] = [
-		...(inventory?.builtins
-			.filter((b) => b.kind === "skill")
-			.map((b) => ({
-				id: `builtin:${b.name}`,
-				name: `Skill interna ${b.name}`,
-				description: `${b.description} ${b.limitation ?? ""}`,
-				origin: "Integrada ao Claude",
-				checked: extra.builtinCommandNames.includes(b.name),
-				onToggle: (checked: boolean) =>
-					setExtra((previous) => ({
-						...previous,
-						builtinCommandNames: checked
-							? [...new Set([...previous.builtinCommandNames, b.name])]
-							: previous.builtinCommandNames.filter((n) => n !== b.name),
-					})),
-			})) ?? []),
-		...(inventory?.installed.flatMap((pkg) =>
-			pkg.components
-				.filter(
-					(c) =>
-						c.kind === "skill" &&
-						libraryReview.capabilities.some(
-							(cap) => cap.packageId === pkg.id && cap.componentId === c.id,
-						),
-				)
-				.map((c) => {
-					const cap = libraryReview.capabilities.find(
-						(cap) => cap.packageId === pkg.id && cap.componentId === c.id,
-					)!;
-					return {
-						id: `${pkg.id}:${pkg.revision}:${c.id}`,
-						name: `${pkg.name}: ${c.name}`,
-						description: c.description ?? cap.reason,
-						origin: `Pacote ${pkg.name} · revisão ${pkg.revision.slice(0, 12)}`,
-						checked: extra.extensionSelections.some(
-							(s) =>
-								s.packageId === pkg.id &&
-								s.revision === pkg.revision &&
-								s.componentIds.includes(c.id),
-						),
-						unavailableReason: ["native", "adapted"].includes(cap.status)
-							? undefined
-							: cap.reason,
-						onToggle: (checked: boolean) =>
-							setExtra((previous) => {
-								const current = previous.extensionSelections.find(
-									(s) => s.packageId === pkg.id && s.revision === pkg.revision,
-								) ?? {
-									packageId: pkg.id,
-									revision: pkg.revision,
-									componentIds: [],
-								};
-								return {
-									...previous,
-									extensionSelections: [
-										...previous.extensionSelections.filter(
-											(s) => s.packageId !== pkg.id,
-										),
-										{
-											...current,
-											componentIds: checked
-												? [...new Set([...current.componentIds, c.id])]
-												: current.componentIds.filter((id) => id !== c.id),
-										},
-									],
-								};
-							}),
-					};
-				}),
-		) ?? []),
-	];
+	const libraryReview = usePackageReview(
+		agent,
+		inventory?.installed ?? [],
+		extra.extensionSelections,
+	);
 
 	const [loading, setLoading] = useState(true);
 	const [submitting, setSubmitting] = useState(false);
@@ -287,7 +215,6 @@ export function AgentComposer({
 					"Servidor MCP indisponível. Revise em Extensões → MCP.",
 			);
 			setChecking(false);
-			setSelectionCapabilities([]);
 			return;
 		}
 		if (stale) {
@@ -295,11 +222,9 @@ export function AgentComposer({
 				"Extensão removida ou atualizada. Remova a seleção antiga e selecione a revisão instalada; autorize seus hooks novamente.",
 			);
 			setChecking(false);
-			setSelectionCapabilities([]);
 			return;
 		}
 		setChecking(true);
-		setSelectionCapabilities([]);
 		setSelectionError(null);
 		Promise.all([
 			rpc.request.agentExtensionCapabilities({
@@ -313,7 +238,6 @@ export function AgentComposer({
 		])
 			.then(([caps, cmds]) => {
 				if (cancelled) return;
-				setSelectionCapabilities(caps);
 				const unavailable = caps.find((c) =>
 					["incompatible", "requires-configuration"].includes(c.status),
 				);
@@ -377,6 +301,13 @@ export function AgentComposer({
 			if (mounted.current) setSubmitting(false);
 		}
 	}
+	const configurationOpenChanged = useCallback(
+		(open: boolean) => {
+			setConfiguring(open);
+			onConfigurationOpenChange?.(open);
+		},
+		[onConfigurationOpenChange],
+	);
 	return (
 		<fieldset
 			aria-label={`Nova conversa com ${label}`}
@@ -437,43 +368,6 @@ export function AgentComposer({
 						textarea.current?.focus();
 					}}
 				/>
-				{(selected.length > 0 || extraSkills.some((s) => s.checked)) && (
-					<div className="flex max-h-16 flex-wrap gap-1 overflow-y-auto px-2">
-						{extraSkills
-							.filter((s) => s.checked)
-							.map((option) => (
-								<button
-									key={option.id}
-									type="button"
-									disabled={submitting}
-									aria-label={`Remover ${option.name}`}
-									onClick={() => option.onToggle(false)}
-									className="flex max-w-full min-w-0 items-center gap-1 break-words rounded-md bg-primary/10 px-2 py-1 text-left text-[11px] text-primary"
-								>
-									{option.name}
-									<X className="h-3 w-3 shrink-0" />
-								</button>
-							))}
-						{selected.map((id) => {
-							const skill = skills.find((item) => item.id === id);
-							return (
-								<button
-									key={id}
-									type="button"
-									disabled={submitting}
-									aria-label={`Remover ${skill?.name ?? id}`}
-									onClick={() =>
-										setSelected((ids) => ids.filter((value) => value !== id))
-									}
-									className="flex max-w-full min-w-0 items-center gap-1 break-words rounded-md bg-primary/10 px-2 py-1 text-left text-[11px] text-primary"
-								>
-									{skill?.name}
-									<X className="h-3 w-3 shrink-0" />
-								</button>
-							);
-						})}
-					</div>
-				)}
 				<PromptInputFooter className="justify-between p-0">
 					<PromptInputTools>
 						<ModelPicker
@@ -485,43 +379,24 @@ export function AgentComposer({
 							resolvedLabel={resolvedLabel}
 							emptyLabel={modelError ? (model ?? "Modelo padrão") : undefined}
 						/>
-						<SkillPicker
-							extraSkills={extraSkills}
-							extraLoading={!catalogError && (loading || libraryReview.loading)}
-							extraError={catalogError ?? libraryReview.error}
-							onSaveDefaults={async () => {
-								await rpc.request.agentExtensionSetDefaults({
-									agent,
-									skillIds: selected,
-									...extra,
-								});
-							}}
-							onManage={() => openDialog("extensions")}
+						<ConversationConfiguration
 							agent={agent}
-							skills={skills}
-							selected={selected}
-							onSelect={setSelected}
-							onBusyChange={setConfiguring}
-							onImported={(skill) => {
-								setSkills((items) => [...items, skill]);
-								setSelected((ids) => [...ids, skill.id]);
+							library={{
+								skills,
+								inventory,
+								servers,
+								loading,
+								error: catalogError,
 							}}
-							disabled={submitting}
-							selectionDisabled={loading || !!catalogError}
-						/>
-						<ExtensionPicker
-							onReviewChange={setLibraryReview}
-							agent={agent}
-							inventory={inventory}
-							effectiveCapabilities={selectionCapabilities}
-							servers={servers}
 							choices={{ skillIds: selected, ...extra }}
-							onChange={({ skillIds, ...rest }) => {
+							review={libraryReview}
+							disabled={submitting}
+							onOpenChange={configurationOpenChanged}
+							onRefresh={() => void loadCatalog(true)}
+							onApply={({ skillIds, ...rest }) => {
 								setSelected(skillIds);
 								setExtra(rest);
 							}}
-							disabled={loading || submitting || !!catalogError}
-							onBusyChange={setConfiguring}
 						/>
 					</PromptInputTools>
 					<div className="flex items-center gap-3">

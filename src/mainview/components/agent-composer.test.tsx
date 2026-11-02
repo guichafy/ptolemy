@@ -90,93 +90,84 @@ beforeEach(() => {
 	});
 });
 
-describe("Agent composer", () => {
-	test("missing CLI inventory keeps Skill import and management reachable without allowing unvalidated creation/defaults", async () => {
-		const reason =
-			"Claude Code CLI não encontrado. Instale o CLI para validar os recursos.";
-		request.agentExtensionInventory.mockRejectedValue(new Error(reason));
-		request.agentImportSkill.mockResolvedValue({
-			...skill,
-			id: "imported",
-			name: "imported",
-		});
-		render(<Composer agent="claude" />);
-		await screen.findByText(reason);
-		const opener = screen.getByRole("button", { name: /Configurar Skills/ });
-		expect(opener).toBeEnabled();
-		await userEvent.click(opener);
-		expect(screen.getByText("Skills da conversa")).toBeVisible();
-		expect(screen.getAllByText(reason)).toHaveLength(2);
+async function configure(page: "Skills" | "Plugins" | "MCP" = "Skills") {
+	await userEvent.click(
+		screen.getByRole("button", { name: "Configurar recursos da conversa" }),
+	);
+	await userEvent.click(
+		screen.getByRole("button", {
+			name: new RegExp(`Configurar ${page} da conversa`),
+		}),
+	);
+}
+async function apply() {
+	await userEvent.click(screen.getByRole("button", { name: "Aplicar" }));
+	await waitFor(() =>
+		expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+	);
+}
+async function start() {
+	await waitFor(() =>
 		expect(
-			screen.queryByText("Consultando Skills de pacotes…"),
+			screen.getByRole("button", { name: "Iniciar conversa" }),
+		).toBeEnabled(),
+	);
+	await userEvent.click(
+		screen.getByRole("button", { name: "Iniciar conversa" }),
+	);
+}
+
+describe("Compact agent composer", () => {
+	test("has one configuration control and no selected Skill chips", async () => {
+		render(<Composer />);
+		await waitFor(() =>
+			expect(
+				screen.getByRole("button", { name: "Iniciar conversa" }),
+			).toBeEnabled(),
+		);
+		expect(
+			screen.queryByRole("button", { name: "Remover review" }),
 		).not.toBeInTheDocument();
 		expect(
-			screen.getByRole("button", { name: "Gerenciar biblioteca" }),
+			screen.queryByRole("button", { name: /Configurar Skills/ }),
+		).not.toBeInTheDocument();
+		expect(screen.queryByText("review")).not.toBeInTheDocument();
+		expect(
+			screen.getByRole("button", { name: "Configurar recursos da conversa" }),
 		).toBeEnabled();
-		expect(
-			screen.getByRole("button", { name: "Usar seleção como padrão" }),
-		).toBeDisabled();
-		await userEvent.type(
-			screen.getByLabelText("URL da Skill no GitHub"),
-			"https://github.com/offline/skill",
-		);
-		await userEvent.click(
-			screen.getByRole("button", { name: "Importar Skill" }),
-		);
-		await waitFor(() =>
-			expect(request.agentImportSkill).toHaveBeenCalledWith({
-				url: "https://github.com/offline/skill",
-			}),
-		);
-		expect(
-			await screen.findByRole("checkbox", { name: "Usar imported" }),
-		).toBeDisabled();
-		await userEvent.keyboard("{Escape}");
-		expect(
-			screen.getByRole("button", { name: "Iniciar conversa" }),
-		).toBeDisabled();
-		expect(request.claudeCreateSession).not.toHaveBeenCalled();
-		expect(request.agentExtensionSetDefaults).not.toHaveBeenCalled();
 	});
-	test("pending inventory allows opening Skills while selection and defaults wait for validation", async () => {
-		request.agentExtensionInventory.mockReturnValue(new Promise(() => {}));
-		render(<Composer agent="claude" />);
-		await userEvent.click(
-			screen.getByRole("button", { name: /Configurar Skills/ }),
-		);
-		expect(screen.getByText("Skills da conversa")).toBeVisible();
-		expect(screen.getByText("Consultando Skills de pacotes…")).toBeVisible();
-		expect(
-			screen.getByRole("button", { name: "Usar seleção como padrão" }),
-		).toBeDisabled();
-		expect(
-			screen.getByRole("button", { name: "Iniciar conversa" }),
-		).toBeDisabled();
+	test("freezes all four selections and the default model on create", async () => {
+		render(<Composer />);
+		await start();
+		expect(request.claudeCreateSession).toHaveBeenCalledWith({
+			agent: "codex",
+			prompt: "Revisar alteração",
+			skillIds: ["review"],
+			extensionSelections: [],
+			builtinCommandNames: [],
+			mcpServerIds: [],
+			model: "default",
+		});
 	});
-
 	test.each([
 		"claude",
 		"codex",
-	] as const)("selects the %s model before creating the first turn", async (agent) => {
+	] as const)("selects the %s model before the first turn", async (agent) => {
 		render(<Composer agent={agent} />);
 		await waitFor(() =>
 			expect(
 				screen.getByRole("button", { name: "Selecionar modelo" }),
 			).toBeEnabled(),
 		);
-		const picker = screen.getByRole("button", { name: "Selecionar modelo" });
-		expect(picker).toHaveTextContent(
-			agent === "claude" ? "Sonnet" : "GPT-6 Astra",
+		await userEvent.click(
+			screen.getByRole("button", { name: "Selecionar modelo" }),
 		);
-		await userEvent.click(picker);
 		await userEvent.click(
 			await screen.findByRole("option", {
 				name: agent === "claude" ? /Opus/ : /GPT-6.1 Sol/,
 			}),
 		);
-		await userEvent.click(
-			screen.getByRole("button", { name: "Iniciar conversa" }),
-		);
+		await start();
 		expect(request.claudeCreateSession).toHaveBeenCalledWith(
 			expect.objectContaining({
 				agent,
@@ -184,7 +175,7 @@ describe("Agent composer", () => {
 			}),
 		);
 	});
-	test("native defaults have removable chips and selectable checkboxes", async () => {
+	test("system Skills are edited in the modal and explicit none survives apply", async () => {
 		request.agentListSkills.mockResolvedValue([
 			{
 				...skill,
@@ -194,34 +185,144 @@ describe("Agent composer", () => {
 			},
 		]);
 		render(<Composer />);
-		await userEvent.click(
-			await screen.findByRole("button", { name: "Remover review" }),
-		);
-		await userEvent.click(
-			screen.getByRole("button", { name: /Configurar Skills/ }),
-		);
-		expect(
-			screen.getByRole("checkbox", { name: "Usar review" }),
-		).not.toBeChecked();
-		await userEvent.click(
-			screen.getByRole("checkbox", { name: "Usar review" }),
-		);
-		expect(screen.getByText("Integrada ao sistema")).toBeInTheDocument();
-		await userEvent.keyboard("{Escape}");
-		await userEvent.click(
-			screen.getByRole("button", { name: "Iniciar conversa" }),
-		);
+		await configure();
+		const check = await screen.findByRole("checkbox", { name: "Usar review" });
+		await waitFor(() => expect(check).toBeChecked());
+		expect(screen.getByText("Integrada ao sistema")).toBeVisible();
+		await userEvent.click(check);
+		await apply();
+		await start();
 		expect(request.claudeCreateSession).toHaveBeenCalledWith(
-			expect.objectContaining({ skillIds: ["native"] }),
+			expect.objectContaining({ skillIds: [] }),
 		);
 	});
-
-	test("agent switching ignores a stale catalog and applies the new agent defaults", async () => {
+	test("cancel discards a changed selection", async () => {
+		render(<Composer />);
+		await configure();
+		const check = await screen.findByRole("checkbox", { name: "Usar review" });
+		await userEvent.click(check);
+		await userEvent.click(screen.getByRole("button", { name: "Cancelar" }));
+		await start();
+		expect(request.claudeCreateSession).toHaveBeenCalledWith(
+			expect.objectContaining({ skillIds: ["review"] }),
+		);
+	});
+	test("unavailable Skills show their reason and cannot be enabled", async () => {
+		request.agentListSkills.mockResolvedValue([
+			{ ...skill, unavailableReason: "Skill contém link simbólico." },
+		]);
+		render(<Composer />);
+		await configure();
+		const check = await screen.findByRole("checkbox", { name: "Usar review" });
+		expect(check).not.toBeChecked();
+		expect(check).toBeDisabled();
+		expect(screen.getByText("Skill contém link simbólico.")).toBeVisible();
+	});
+	test("imports a Skill into the draft and saves defaults only through the explicit action", async () => {
+		request.agentImportSkill.mockResolvedValue({
+			...skill,
+			id: "debug",
+			name: "debug",
+			defaultFor: [],
+		});
+		request.agentListSkills.mockResolvedValue([
+			{ ...skill, id: "debug", name: "debug", defaultFor: [] },
+		]);
+		render(<Composer agent="claude" />);
+		await configure();
+		await userEvent.type(
+			screen.getByLabelText("URL da Skill no GitHub"),
+			"https://github.com/a/b/tree/main/debug",
+		);
+		await userEvent.click(
+			screen.getByRole("button", { name: "Importar Skill" }),
+		);
+		expect(
+			await screen.findByRole("checkbox", { name: "Usar debug" }),
+		).toBeChecked();
+		expect(request.agentExtensionSetDefaults).not.toHaveBeenCalled();
+		await userEvent.click(
+			screen.getByRole("button", { name: "Usar seleção como padrão" }),
+		);
+		await waitFor(() =>
+			expect(request.agentExtensionSetDefaults).toHaveBeenCalledWith({
+				agent: "claude",
+				skillIds: ["debug"],
+				extensionSelections: [],
+				builtinCommandNames: [],
+				mcpServerIds: [],
+			}),
+		);
+	});
+	test("failed import retains its URL and never commits a selection", async () => {
+		request.agentImportSkill.mockRejectedValue(Error("SKILL.md inválido"));
+		render(<Composer />);
+		await configure();
+		await userEvent.type(
+			screen.getByLabelText("URL da Skill no GitHub"),
+			"https://github.com/a/b",
+		);
+		await userEvent.click(
+			screen.getByRole("button", { name: "Importar Skill" }),
+		);
+		expect(await screen.findByRole("alert")).toHaveTextContent(
+			"SKILL.md inválido",
+		);
+		expect(screen.getByLabelText("URL da Skill no GitHub")).toHaveValue(
+			"https://github.com/a/b",
+		);
+		expect(request.claudeCreateSession).not.toHaveBeenCalled();
+	});
+	test("pending import keeps the modal open and blocks background submission", async () => {
+		let finish!: (value: typeof skill) => void;
+		request.agentImportSkill.mockReturnValue(
+			new Promise((r) => {
+				finish = r;
+			}),
+		);
+		render(<Composer />);
+		await configure();
+		await userEvent.type(
+			screen.getByLabelText("URL da Skill no GitHub"),
+			"https://github.com/a/b",
+		);
+		await userEvent.click(
+			screen.getByRole("button", { name: "Importar Skill" }),
+		);
+		await userEvent.keyboard("{Escape}");
+		expect(screen.getByRole("dialog")).toBeVisible();
+		expect(screen.getByRole("button", { name: "Aplicar" })).toBeDisabled();
+		finish({ ...skill, id: "imported" });
+		await waitFor(() =>
+			expect(screen.getByRole("button", { name: "Cancelar" })).toBeEnabled(),
+		);
+	});
+	test("missing CLI keeps import reachable while validated creation and apply are blocked", async () => {
+		request.agentExtensionInventory.mockRejectedValue(
+			Error("CLI não encontrado"),
+		);
+		render(<Composer agent="claude" />);
+		await screen.findByText("CLI não encontrado");
+		await configure();
+		expect(screen.getByLabelText("URL da Skill no GitHub")).toBeEnabled();
+		expect(screen.getByRole("button", { name: "Aplicar" })).toBeDisabled();
+		expect(
+			screen.getByRole("button", { name: "Usar seleção como padrão" }),
+		).toBeDisabled();
+	});
+	test("pending inventory can be inspected without enabling apply", async () => {
+		request.agentExtensionInventory.mockReturnValue(new Promise(() => {}));
+		render(<Composer />);
+		await configure();
+		expect(screen.getByRole("dialog")).toBeVisible();
+		expect(screen.getByRole("button", { name: "Aplicar" })).toBeDisabled();
+	});
+	test("agent switch ignores a stale catalog and uses the new defaults", async () => {
 		let finish!: (value: unknown) => void;
 		request.agentListSkills.mockImplementationOnce(
 			() =>
-				new Promise((resolve) => {
-					finish = resolve;
+				new Promise((r) => {
+					finish = r;
 				}),
 		);
 		request.agentListSkills.mockResolvedValueOnce([
@@ -234,56 +335,28 @@ describe("Agent composer", () => {
 		]);
 		const { rerender } = render(<Composer agent="codex" />);
 		rerender(<Composer agent="claude" />);
-		expect(
-			await screen.findByRole("button", { name: "Remover claude-skill" }),
-		).toBeInTheDocument();
-		finish([skill]);
 		await waitFor(() =>
 			expect(
-				screen.queryByRole("button", { name: "Remover review" }),
-			).not.toBeInTheDocument(),
+				screen.getByRole("button", { name: "Iniciar conversa" }),
+			).toBeEnabled(),
 		);
-		await userEvent.click(
-			screen.getByRole("button", { name: "Iniciar conversa" }),
-		);
+		finish([skill]);
+		await start();
 		expect(request.claudeCreateSession).toHaveBeenCalledWith(
 			expect.objectContaining({ agent: "claude", skillIds: ["claude-skill"] }),
 		);
 	});
-	test("unavailable native Skills show a reason and cannot be enabled", async () => {
-		request.agentListSkills.mockResolvedValue([
-			{
-				...skill,
-				source: { kind: "harness", agent: "codex" },
-				unavailableReason: "Skill contém link simbólico.",
-			},
-		]);
-		render(<Composer />);
-		await userEvent.click(
-			screen.getByRole("button", { name: /Configurar Skills/ }),
-		);
-		expect(
-			screen.getByRole("checkbox", { name: "Usar review" }),
-		).toBeDisabled();
-		expect(
-			screen.getByRole("checkbox", { name: "Usar review" }),
-		).not.toBeChecked();
-		expect(
-			screen.getByText("Skill contém link simbólico."),
-		).toBeInTheDocument();
-	});
-
-	test("can start with the configured model and retry after model discovery fails", async () => {
+	test("can retry model discovery without blocking the configured model", async () => {
 		request.codexListModels.mockRejectedValueOnce(
-			new Error("Falha ao carregar modelos"),
+			Error("Falha ao carregar modelos"),
 		);
 		render(<Composer />);
-		expect(await screen.findByRole("alert")).toHaveTextContent(
-			"Falha ao carregar modelos",
+		await screen.findByText("Falha ao carregar modelos");
+		await waitFor(() =>
+			expect(
+				screen.getByRole("button", { name: "Iniciar conversa" }),
+			).toBeEnabled(),
 		);
-		expect(
-			screen.getByRole("button", { name: "Iniciar conversa" }),
-		).toBeEnabled();
 		await userEvent.click(
 			screen.getByRole("button", { name: "Tentar carregar modelos novamente" }),
 		);
@@ -293,68 +366,10 @@ describe("Agent composer", () => {
 			).toBeEnabled(),
 		);
 	});
-	test("cannot start a conversation while a Skill import is pending", async () => {
-		let finish!: (value: typeof skill) => void;
-		request.agentImportSkill.mockReturnValue(
-			new Promise((resolve) => {
-				finish = resolve;
-			}),
-		);
+	test("retains text and selection when creation fails", async () => {
+		request.claudeCreateSession.mockRejectedValue(Error("CLI indisponível"));
 		render(<Composer />);
-		await userEvent.click(
-			screen.getByRole("button", { name: /Configurar Skills/ }),
-		);
-		await userEvent.type(
-			screen.getByRole("textbox", { name: "URL da Skill no GitHub" }),
-			"https://github.com/a/b",
-		);
-		await userEvent.click(
-			screen.getByRole("button", { name: "Importar Skill" }),
-		);
-		await userEvent.keyboard("{Escape}");
-		expect(
-			screen.getByRole("button", { name: "Iniciar conversa" }),
-		).toBeDisabled();
-		finish({ ...skill, id: "new-skill" });
-		await waitFor(() =>
-			expect(
-				screen.getByRole("button", { name: "Iniciar conversa" }),
-			).toBeEnabled(),
-		);
-	});
-	test("creates a conversation with the agent's default Skills", async () => {
-		render(<Composer />);
-		await waitFor(() =>
-			expect(
-				screen.getByRole("button", { name: "Iniciar conversa" }),
-			).toBeEnabled(),
-		);
-		await userEvent.click(
-			screen.getByRole("button", { name: "Iniciar conversa" }),
-		);
-		expect(request.claudeCreateSession).toHaveBeenCalledWith({
-			agent: "codex",
-			prompt: "Revisar alteração",
-			skillIds: ["review"],
-			extensionSelections: [],
-			builtinCommandNames: [],
-			mcpServerIds: [],
-			model: "default",
-		});
-		await waitFor(() =>
-			expect(
-				screen.getByRole("textbox", { name: "Mensagem para Codex" }),
-			).toHaveValue(""),
-		);
-	});
-	test("preserves text and selection when session creation fails", async () => {
-		request.claudeCreateSession.mockRejectedValue(
-			new Error("CLI indisponível"),
-		);
-		render(<Composer />);
-		await userEvent.click(
-			await screen.findByRole("button", { name: "Iniciar conversa" }),
-		);
+		await start();
 		expect(await screen.findByRole("alert")).toHaveTextContent(
 			"CLI indisponível",
 		);
@@ -362,66 +377,14 @@ describe("Agent composer", () => {
 			screen.getByRole("textbox", { name: "Mensagem para Codex" }),
 		).toHaveValue("Revisar alteração");
 	});
-	test("imports a GitHub Skill, selects it, and saves defaults for this agent", async () => {
-		request.agentImportSkill.mockResolvedValue({
-			...skill,
-			id: "debug",
-			name: "debug",
-			defaultFor: [],
-		});
-		render(<Composer agent="claude" />);
-		await userEvent.click(
-			screen.getByRole("button", { name: /Configurar Skills/ }),
-		);
-		await userEvent.type(
-			screen.getByRole("textbox", { name: "URL da Skill no GitHub" }),
-			"https://github.com/a/b/tree/main/debug",
-		);
-		await userEvent.click(
-			screen.getByRole("button", { name: "Importar Skill" }),
-		);
-		expect(
-			await screen.findByRole("checkbox", { name: /Usar debug/ }),
-		).toBeChecked();
-		await userEvent.click(
-			screen.getByRole("button", { name: "Usar seleção como padrão" }),
-		);
-		expect(request.agentExtensionSetDefaults).toHaveBeenCalledWith({
-			agent: "claude",
-			skillIds: ["debug"],
-			extensionSelections: [],
-			builtinCommandNames: [],
-			mcpServerIds: [],
-		});
-	});
-	test("keeps a validation error visible and never selects an invalid import", async () => {
-		request.agentImportSkill.mockRejectedValue(new Error("SKILL.md inválido"));
+	test("Shift Enter and IME never submit; Enter submits exactly once", async () => {
 		render(<Composer />);
-		await userEvent.click(
-			screen.getByRole("button", { name: /Configurar Skills/ }),
-		);
-		await userEvent.type(
-			screen.getByRole("textbox", { name: "URL da Skill no GitHub" }),
-			"https://github.com/a/b",
-		);
-		await userEvent.click(
-			screen.getByRole("button", { name: "Importar Skill" }),
-		);
-		expect(await screen.findByRole("alert")).toHaveTextContent(
-			"SKILL.md inválido",
-		);
-		expect(
-			screen.getByRole("textbox", { name: "URL da Skill no GitHub" }),
-		).toHaveValue("https://github.com/a/b");
-	});
-	test("Shift+Enter and IME do not create a session; Enter creates only once", async () => {
-		render(<Composer />);
-		const input = screen.getByRole("textbox", { name: "Mensagem para Codex" });
 		await waitFor(() =>
 			expect(
 				screen.getByRole("button", { name: "Iniciar conversa" }),
 			).toBeEnabled(),
 		);
+		const input = screen.getByRole("textbox", { name: "Mensagem para Codex" });
 		fireEvent.keyDown(input, { key: "Enter", shiftKey: true });
 		fireEvent.keyDown(input, { key: "Enter", isComposing: true });
 		expect(request.claudeCreateSession).not.toHaveBeenCalled();
@@ -431,435 +394,93 @@ describe("Agent composer", () => {
 			expect(request.claudeCreateSession).toHaveBeenCalledTimes(1),
 		);
 	});
-});
-
-test("explicit builtin and MCP defaults are frozen alongside package components", async () => {
-	request.agentExtensionInventory.mockResolvedValue({
-		installed: [],
-		nativePlugins: [],
-		builtins: [
-			{
-				name: "review",
-				kind: "command",
-				description: "Revisar",
-				limitation: "Descrições podem continuar visíveis.",
-			},
-		],
-		defaults: { selections: [], builtinCommandNames: ["review"] },
-		verifiedRuntime: "test",
-	});
-	request.agentMcpList.mockResolvedValue([
-		{
-			id: "server",
-			name: "Servidor",
-			transport: "http",
-			defaults: { codex: true, claude: false },
-			connection: { state: "disconnected" },
-		},
-	]);
-	render(<Composer />);
-	await waitFor(() =>
-		expect(
-			screen.getByRole("button", { name: "Iniciar conversa" }),
-		).toBeEnabled(),
-	);
-	await userEvent.click(
-		screen.getByRole("button", { name: /Configurar extensões/ }),
-	);
-	expect(
-		screen.getByRole("checkbox", { name: "Usar comando interno review" }),
-	).toBeChecked();
-	expect(
-		screen.getByText(/sem confirmação a cada chamada/),
-	).toBeInTheDocument();
-	await userEvent.keyboard("{Escape}");
-	await userEvent.click(
-		screen.getByRole("button", { name: "Iniciar conversa" }),
-	);
-	expect(request.claudeCreateSession).toHaveBeenCalledWith(
-		expect.objectContaining({
-			builtinCommandNames: ["review"],
-			mcpServerIds: ["server"],
-			extensionSelections: [],
-		}),
-	);
-});
-
-test("Skills picker combines builtin Skills and package Skills without selecting sibling commands", async () => {
-	const packageId = `extension:${"a".repeat(64)}`,
-		revision = "b".repeat(64);
-	request.agentExtensionInventory.mockResolvedValue({
-		installed: [
-			{
-				id: packageId,
-				revision,
-				name: "Pacote",
-				components: [
-					{
-						id: "skill",
-						kind: "skill",
-						name: "Revisão do pacote",
-						description: "Inspecionar alterações",
-						sources: [],
-						diagnostics: [],
-					},
-					{
-						id: "command",
-						kind: "command",
-						name: "tool",
-						sources: [],
-						diagnostics: [],
-					},
+	test("a stale plugin default blocks creation and can be removed in the modal", async () => {
+		request.agentExtensionInventory.mockResolvedValue({
+			installed: [],
+			nativePlugins: [],
+			builtins: [],
+			defaults: {
+				selections: [
+					{ packageId: "old", revision: "old", componentIds: ["missing"] },
 				],
+				builtinCommandNames: [],
 			},
-		],
-		nativePlugins: [],
-		builtins: [
+		});
+		render(<Composer />);
+		await screen.findByRole("alert");
+		expect(
+			screen.getByRole("button", { name: "Iniciar conversa" }),
+		).toBeDisabled();
+		await configure("Plugins");
+		await userEvent.click(
+			screen.getByRole("button", { name: "Remover seleção indisponível" }),
+		);
+		await apply();
+		await start();
+		expect(request.claudeCreateSession).toHaveBeenCalledWith(
+			expect.objectContaining({ extensionSelections: [] }),
+		);
+	});
+	test("OAuth unavailable defaults remain removable while unchecked OAuth is disabled", async () => {
+		request.agentMcpList.mockResolvedValue([
 			{
-				name: "debug",
-				kind: "skill",
-				description: "Investigar",
-				limitation: "Descrições podem continuar visíveis.",
-			},
-			{ name: "clear", kind: "command", description: "Limpar" },
-		],
-		defaults: { selections: [], builtinCommandNames: ["debug"] },
-		verifiedRuntime: "test",
-	});
-	request.agentExtensionReview.mockResolvedValue([
-		{
-			packageId,
-			componentId: "skill",
-			status: "adapted",
-			reason: "Compatível",
-		},
-		{
-			packageId,
-			componentId: "command",
-			status: "adapted",
-			reason: "Compatível",
-		},
-	]);
-	request.agentExtensionCapabilities.mockImplementation(
-		async ({ selections }) =>
-			selections.flatMap((s: { componentIds: string[] }) =>
-				s.componentIds.map((componentId) => ({
-					packageId,
-					componentId,
-					status: "adapted",
-					reason: "Compatível",
-				})),
-			),
-	);
-	render(<Composer agent="claude" />);
-	await waitFor(() =>
-		expect(
-			screen.getByRole("button", { name: "Iniciar conversa" }),
-		).toBeEnabled(),
-	);
-	await userEvent.click(
-		screen.getByRole("button", { name: /Configurar Skills/ }),
-	);
-	expect(
-		screen.getByRole("checkbox", { name: "Usar Skill interna debug" }),
-	).toBeChecked();
-	expect(
-		screen.queryByRole("checkbox", { name: /clear/ }),
-	).not.toBeInTheDocument();
-	await userEvent.click(
-		await screen.findByRole("checkbox", {
-			name: "Usar Pacote: Revisão do pacote",
-		}),
-	);
-	await userEvent.keyboard("{Escape}");
-	expect(
-		screen.getByRole("button", { name: "Remover Skill interna debug" }),
-	).toBeInTheDocument();
-	expect(
-		screen.getByRole("button", { name: "Remover Pacote: Revisão do pacote" }),
-	).toBeInTheDocument();
-	await waitFor(() =>
-		expect(
-			screen.getByRole("button", { name: "Iniciar conversa" }),
-		).toBeEnabled(),
-	);
-	await userEvent.click(
-		screen.getByRole("button", { name: "Iniciar conversa" }),
-	);
-	expect(request.claudeCreateSession).toHaveBeenCalledWith(
-		expect.objectContaining({
-			skillIds: [],
-			builtinCommandNames: ["debug"],
-			extensionSelections: [{ packageId, revision, componentIds: ["skill"] }],
-			mcpServerIds: [],
-		}),
-	);
-});
-
-test("closing the library refreshes newly saved defaults for the next conversation", async () => {
-	const builtin = {
-		name: "debug",
-		kind: "skill",
-		description: "Investigar",
-		limitation: "",
-	};
-	request.agentExtensionInventory.mockResolvedValue({
-		installed: [],
-		nativePlugins: [],
-		builtins: [builtin],
-		defaults: { selections: [], builtinCommandNames: [] },
-	});
-	const { rerender } = render(<Composer agent="claude" />);
-	await waitFor(() =>
-		expect(
-			screen.getByRole("button", { name: "Iniciar conversa" }),
-		).toBeEnabled(),
-	);
-	settingsState.isOpen = true;
-	rerender(<Composer agent="claude" />);
-	request.agentExtensionInventory.mockResolvedValue({
-		installed: [],
-		nativePlugins: [],
-		builtins: [builtin],
-		defaults: { selections: [], builtinCommandNames: ["debug"] },
-	});
-	settingsState.isOpen = false;
-	rerender(<Composer agent="claude" />);
-	expect(
-		await screen.findByRole("button", { name: "Remover Skill interna debug" }),
-	).toBeInTheDocument();
-});
-
-test("stale package defaults block creation until the old selection is removed", async () => {
-	const packageId = `extension:${"a".repeat(64)}`,
-		revision = "b".repeat(64);
-	request.agentExtensionInventory.mockResolvedValue({
-		installed: [{ id: packageId, name: "Pacote", revision, components: [] }],
-		nativePlugins: [],
-		builtins: [],
-		defaults: {
-			selections: [
-				{
-					packageId,
-					revision: "c".repeat(64),
-					componentIds: ["old"],
-					trustedHookDigest: "c".repeat(64),
+				id: "oauth",
+				name: "Precisa login",
+				transport: "http",
+				defaults: { claude: false, codex: true },
+				connection: { state: "disconnected" },
+				authentication: {
+					required: true,
+					ready: false,
+					reason: "Conecte OAuth",
 				},
-			],
-			builtinCommandNames: [],
-		},
-	});
-	request.agentExtensionCapabilities.mockResolvedValue([
-		{
-			packageId,
-			componentId: "old",
-			status: "adapted",
-			reason: "Old archive still valid",
-		},
-	]);
-	render(<Composer />);
-	await screen.findByRole("alert");
-	expect(
-		screen.getByRole("button", { name: "Iniciar conversa" }),
-	).toBeDisabled();
-});
-
-test.each([
-	"addition",
-	"removal",
-] as const)("absent saved defaults preserve all four user selections after builtin %s", async (change) => {
-	const packageId = `extension:${"e".repeat(64)}`,
-		revision = "f".repeat(64);
-	const debug = {
-		name: "debug",
-		kind: "skill",
-		description: "Investigar",
-		limitation: "",
-	};
-	const clear = { name: "clear", kind: "command", description: "Limpar" };
-	const library = {
-		installed: [
-			{
-				id: packageId,
-				revision,
-				name: "Pacote",
-				components: [
-					{
-						id: "skill",
-						kind: "skill",
-						name: "Skill do pacote",
-						sources: [],
-						diagnostics: [],
-					},
-				],
 			},
-		],
-		nativePlugins: [],
-		builtins: [debug, clear],
-		verifiedRuntime: "test",
-	};
-	request.agentExtensionInventory.mockResolvedValue(library);
-	request.agentListSkills.mockResolvedValue([{ ...skill, defaultFor: [] }]);
-	request.agentMcpList.mockResolvedValue([
-		{
-			id: "server",
-			name: "Servidor",
-			transport: "http",
-			defaults: { claude: false, codex: false },
-			connection: { state: "disconnected" },
-		},
-	]);
-	request.agentExtensionReview.mockResolvedValue([
-		{
-			packageId,
-			componentId: "skill",
-			status: "adapted",
-			reason: "Compatível",
-		},
-	]);
-	const { rerender } = render(<Composer agent="claude" />);
-	await waitFor(() =>
-		expect(
-			screen.getByRole("button", { name: "Iniciar conversa" }),
-		).toBeEnabled(),
-	);
-	await userEvent.click(
-		screen.getByRole("button", { name: /Configurar Skills/ }),
-	);
-	await userEvent.click(
-		screen.getByRole("checkbox", { name: "Usar Skill interna debug" }),
-	);
-	await userEvent.click(screen.getByRole("checkbox", { name: "Usar review" }));
-	await userEvent.click(
-		await screen.findByRole("checkbox", {
-			name: "Usar Pacote: Skill do pacote",
-		}),
-	);
-	await userEvent.keyboard("{Escape}");
-	await userEvent.click(
-		screen.getByRole("button", { name: /Configurar extensões/ }),
-	);
-	await userEvent.click(
-		screen.getByRole("checkbox", { name: "Usar comando interno clear" }),
-	);
-	await userEvent.click(screen.getByRole("checkbox", { name: /^Servidor/ }));
-	await userEvent.keyboard("{Escape}");
-	settingsState.isOpen = true;
-	rerender(<Composer agent="claude" />);
-	request.agentExtensionInventory.mockResolvedValue({
-		...library,
-		builtins:
-			change === "addition"
-				? [debug, clear, { ...clear, name: "new-command" }]
-				: [clear],
+		]);
+		render(<Composer />);
+		await screen.findByRole("alert");
+		await configure("MCP");
+		const check = screen.getByRole("checkbox", { name: "Usar Precisa login" });
+		expect(check).toBeChecked();
+		expect(check).toBeEnabled();
+		await userEvent.click(check);
+		expect(check).toBeDisabled();
+		await apply();
+		await start();
+		expect(request.claudeCreateSession).toHaveBeenCalledWith(
+			expect.objectContaining({ mcpServerIds: [] }),
+		);
 	});
-	settingsState.isOpen = false;
-	rerender(<Composer agent="claude" />);
-	await waitFor(() =>
-		expect(
-			screen.getByRole("button", { name: "Iniciar conversa" }),
-		).toBeEnabled(),
-	);
-	await userEvent.click(
-		screen.getByRole("button", { name: "Iniciar conversa" }),
-	);
-	expect(request.claudeCreateSession).toHaveBeenCalledWith(
-		expect.objectContaining({
-			skillIds: ["review"],
-			builtinCommandNames: [],
-			extensionSelections: [{ packageId, revision, componentIds: ["skill"] }],
-			mcpServerIds: ["server"],
-		}),
-	);
-});
-
-test("management refresh initializes builtin defaults when it supersedes the first load", async () => {
-	request.agentExtensionInventory.mockReturnValueOnce(new Promise(() => {}));
-	const { rerender } = render(<Composer agent="claude" />);
-	settingsState.isOpen = true;
-	rerender(<Composer agent="claude" />);
-	request.agentExtensionInventory.mockResolvedValue({
-		installed: [],
-		nativePlugins: [],
-		builtins: [{ name: "debug", kind: "skill", description: "Investigar" }],
+	test("preference refresh applies newly saved defaults", async () => {
+		request.agentExtensionInventory.mockResolvedValue({
+			installed: [],
+			nativePlugins: [],
+			builtins: [],
+			defaults: { selections: [], builtinCommandNames: [] },
+		});
+		const { rerender } = render(<Composer agent="claude" />);
+		await waitFor(() =>
+			expect(
+				screen.getByRole("button", { name: "Iniciar conversa" }),
+			).toBeEnabled(),
+		);
+		settingsState.isOpen = true;
+		rerender(<Composer agent="claude" />);
+		request.agentExtensionInventory.mockResolvedValue({
+			installed: [],
+			nativePlugins: [],
+			builtins: [{ name: "debug", kind: "skill", description: "Debug" }],
+			defaults: { selections: [], builtinCommandNames: ["debug"] },
+		});
+		settingsState.isOpen = false;
+		rerender(<Composer agent="claude" />);
+		await waitFor(() =>
+			expect(
+				screen.getByRole("button", { name: "Configurar recursos da conversa" }),
+			).toHaveTextContent("1"),
+		);
+		await start();
+		expect(request.claudeCreateSession).toHaveBeenCalledWith(
+			expect.objectContaining({ builtinCommandNames: ["debug"] }),
+		);
 	});
-	settingsState.isOpen = false;
-	rerender(<Composer agent="claude" />);
-	expect(
-		await screen.findByRole("button", { name: "Remover Skill interna debug" }),
-	).toBeInTheDocument();
-});
-test("unavailable standalone Skills remain removable but leave the usable count after refresh", async () => {
-	const { rerender } = render(<Composer />);
-	await screen.findByRole("button", { name: "Configurar Skills (1)" });
-	settingsState.isOpen = true;
-	rerender(<Composer />);
-	request.agentListSkills.mockResolvedValue([
-		{ ...skill, unavailableReason: "Arquivo removido" },
-	]);
-	settingsState.isOpen = false;
-	rerender(<Composer />);
-	await waitFor(() =>
-		expect(
-			screen.getByRole("button", { name: "Configurar Skills" }),
-		).toBeEnabled(),
-	);
-	await userEvent.click(
-		screen.getByRole("button", { name: "Configurar Skills" }),
-	);
-	const choice = screen.getByRole("checkbox", { name: "Usar review" });
-	expect(choice).toBeChecked();
-	expect(choice).toBeEnabled();
-	await userEvent.click(choice);
-	expect(choice).not.toBeChecked();
-});
-
-test("OAuth missing login is excluded from the count and new choices, but stale defaults can be removed", async () => {
-	request.agentMcpList.mockResolvedValue([
-		{
-			id: "login",
-			name: "Precisa login",
-			transport: "http",
-			defaults: { claude: false, codex: true },
-			connection: { state: "disconnected" },
-			authentication: {
-				required: true,
-				ready: false,
-				reason: "Conecte o OAuth em Extensões → MCP.",
-			},
-		},
-		{
-			id: "plain",
-			name: "Sem OAuth",
-			transport: "http",
-			defaults: { claude: false, codex: false },
-			connection: { state: "disconnected" },
-			authentication: { required: false, ready: true },
-		},
-	]);
-	render(<Composer />);
-	await waitFor(() =>
-		expect(
-			screen.getByRole("button", { name: "Configurar extensões (0)" }),
-		).toBeEnabled(),
-	);
-	expect(
-		screen.getByRole("button", { name: "Iniciar conversa" }),
-	).toBeDisabled();
-	await userEvent.click(
-		screen.getByRole("button", { name: "Configurar extensões (0)" }),
-	);
-	const choice = screen.getByRole("checkbox", { name: /Precisa login/ });
-	expect(choice).toBeChecked();
-	expect(choice).toBeEnabled();
-	await userEvent.click(choice);
-	expect(choice).not.toBeChecked();
-	expect(choice).toBeDisabled();
-	expect(screen.getByRole("checkbox", { name: /Sem OAuth/ })).toBeEnabled();
-	await userEvent.keyboard("{Escape}");
-	await waitFor(() =>
-		expect(
-			screen.getByRole("button", { name: "Iniciar conversa" }),
-		).toBeEnabled(),
-	);
 });
