@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { Loader2 } from "lucide-react";
+import { useEffect, useId, useRef, useState } from "react";
 import { resourceRpc as rpc } from "@/components/agents/resource-rpc";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,6 +34,12 @@ export function ResourceMarketplace({
 	const [query, setQuery] = useState("");
 	const [loading, setLoading] = useState(true);
 	const [busy, setBusy] = useState(false);
+	const [inspecting, setInspecting] = useState<string | null>(null);
+	const [inspectionFailure, setInspectionFailure] = useState<{
+		id: string;
+		message: string;
+	} | null>(null);
+	const inspectionFeedbackId = useId();
 	const [error, setError] = useState<string | null>(null);
 	const [message, setMessage] = useState("");
 	const [attempt, setAttempt] = useState(0);
@@ -90,6 +97,8 @@ export function ResourceMarketplace({
 		setLoading(true);
 		setError(null);
 		setItems([]);
+		setInspecting(null);
+		setInspectionFailure(null);
 		// Source changes discard details; component is scoped by harness and page.
 		navigation.reset();
 		rpc.request
@@ -121,15 +130,25 @@ export function ResourceMarketplace({
 		}
 	}
 	async function inspect(pkg: ExtensionSummary) {
+		if (busy) return;
 		const current = ++sequence.current;
 		setMessage("");
+		setInspecting(pkg.id);
+		setInspectionFailure(null);
 		await run(async () => {
-			const r = await rpc.request.agentExtensionInspect({
-				sourceId: source,
-				itemId: pkg.id,
-				agent,
-			});
-			if (sequence.current === current) navigation.open(r.summary);
+			try {
+				const r = await rpc.request.agentExtensionInspect({
+					sourceId: source,
+					itemId: pkg.id,
+					agent,
+				});
+				if (sequence.current === current) navigation.open(r.summary);
+			} catch (e) {
+				if (sequence.current === current)
+					setInspectionFailure({ id: pkg.id, message: errorText(e) });
+			} finally {
+				if (sequence.current === current) setInspecting(null);
+			}
 		});
 	}
 	const matches = (pkg: ExtensionSummary) =>
@@ -322,27 +341,72 @@ export function ResourceMarketplace({
 										(!p.components.length || matches(p)),
 								)
 								.map((p) => (
-									<button
-										type="button"
-										key={p.id}
-										data-resource-id={p.id}
-										disabled={busy}
-										onClick={() => void inspect(p)}
-										className="block w-full py-3 text-left"
-									>
-										<span className="block break-words text-sm font-medium">
-											{p.name}
-										</span>
-										{installed.some((i) => i.id === p.id) && (
-											<span className="text-xs text-muted-foreground">
-												Instalado na biblioteca
+									<div key={p.id}>
+										<button
+											type="button"
+											data-resource-id={p.id}
+											aria-busy={inspecting === p.id}
+											aria-describedby={
+												inspecting === p.id || inspectionFailure?.id === p.id
+													? inspectionFeedbackId
+													: undefined
+											}
+											disabled={busy}
+											onClick={() => void inspect(p)}
+											className="block w-full py-3 text-left disabled:cursor-wait"
+										>
+											<span className="flex items-center gap-2 break-words text-sm font-medium">
+												{inspecting === p.id && (
+													<Loader2
+														aria-hidden="true"
+														className="h-4 w-4 shrink-0 animate-spin text-primary motion-reduce:animate-none"
+													/>
+												)}
+												{p.name}
 											</span>
+											{installed.some((i) => i.id === p.id) && (
+												<span className="text-xs text-muted-foreground">
+													Instalado na biblioteca
+												</span>
+											)}
+											<span className="mt-1 line-clamp-2 block text-xs text-muted-foreground">
+												{p.description ||
+													"Verificar os componentes disponíveis neste pacote"}
+											</span>
+										</button>
+										{inspecting === p.id && (
+											<p
+												id={inspectionFeedbackId}
+												role="status"
+												className="space-y-1 pb-3 text-xs text-muted-foreground"
+											>
+												<span className="block font-medium text-foreground">
+													Carregando detalhes de {p.name}…
+												</span>
+												<span className="block">
+													A primeira consulta pode demorar um pouco mais.
+												</span>
+											</p>
 										)}
-										<span className="mt-1 line-clamp-2 block text-xs text-muted-foreground">
-											{p.description ||
-												"Verificar os componentes disponíveis neste pacote"}
-										</span>
-									</button>
+										{inspectionFailure?.id === p.id && (
+											<div
+												id={inspectionFeedbackId}
+												role="alert"
+												className="space-y-2 pb-3 text-sm text-destructive"
+											>
+												<p>{inspectionFailure.message}</p>
+												<Button
+													type="button"
+													variant="outline"
+													size="sm"
+													disabled={busy}
+													onClick={() => void inspect(p)}
+												>
+													Tentar novamente
+												</Button>
+											</div>
+										)}
+									</div>
 								))}
 							{!loading && !items.length && !error && (
 								<p className="py-4 text-sm text-muted-foreground">
