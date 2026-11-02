@@ -367,7 +367,7 @@ function PaletteContent() {
 	return (
 		<div
 			role="application"
-			className="flex flex-col h-screen overflow-hidden"
+			className="palette-surface flex flex-col h-screen overflow-hidden"
 			onKeyDown={handleKeyDown}
 		>
 			<ModeBar />
