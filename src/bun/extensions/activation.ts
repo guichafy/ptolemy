@@ -75,7 +75,7 @@ async function safeDirectory(cwd: string, path: string) {
 	}
 	await mkdir(path, { recursive: true });
 }
-function effectiveComponents(
+export function effectiveComponents(
 	pkg: ExtensionPackage,
 	ids: string[],
 	agent: AgentKind,

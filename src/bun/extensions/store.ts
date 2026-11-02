@@ -13,6 +13,7 @@ import { writeJsonAtomic } from "../atomic-json";
 import { fetchWithProxy } from "../net/proxy";
 import { ptolemyDataDir } from "../paths";
 import type { GithubFetcher } from "../skills/github";
+import { componentCapability } from "./capabilities";
 import {
 	catalogSummary,
 	inspectCatalogItem,
@@ -177,6 +178,17 @@ export class ExtensionsStore {
 		const pkg = await this.inspectItem(await this.read(), sourceId, itemId);
 		return packageSummary(pkg);
 	}
+	async inspectReview(sourceId: string, itemId: string, agent: AgentKind) {
+		await this.queue;
+		const pkg = await this.inspectItem(await this.read(), sourceId, itemId);
+		return {
+			summary: packageSummary(pkg),
+			capabilities: pkg.components.map((c) =>
+				componentCapability(c, agent, false),
+			),
+		};
+	}
+
 	async install(sourceId: string, itemId: string): Promise<ExtensionSummary> {
 		return this.mutate(async (index) => {
 			const pkg = await this.inspectItem(index, sourceId, itemId);

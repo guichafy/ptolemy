@@ -25,8 +25,13 @@ import {
 	PromptInputTools,
 } from "@/components/ai-elements/prompt-input";
 import { Suggestion, Suggestions } from "@/components/ai-elements/suggestion";
+import {
+	CommandSuggestions,
+	commandKeyDown,
+} from "@/components/claude/command-suggestions";
 import { ModelPicker } from "@/components/claude/model-picker";
 import type { ProtocolModelInfo } from "@/shared/agent-protocol";
+import type { ExtensionCommandSummary } from "@/shared/extension-rpc";
 import { computeTurnStatus, type SessionState } from "../../hooks/agent-state";
 import { useAgentChat } from "../../hooks/use-agent-chat";
 import { describeModel } from "../../lib/model-label";
@@ -78,6 +83,50 @@ export function ChatPaneV2() {
 	const { state, sendMessage, cancel, approveTool, rejectTool } =
 		useAgentChat(sessionId);
 	const [draft, setDraft] = useState("");
+	const [commands, setCommands] = useState<ExtensionCommandSummary[]>([]);
+	const [commandError, setCommandError] = useState<string | null>(null);
+	const [commandAttempt, setCommandAttempt] = useState(0);
+	const [commandIndex, setCommandIndex] = useState(0);
+	const [commandDismissed, setCommandDismissed] = useState(false);
+	const [selectionLabel, setSelectionLabel] = useState("");
+	const commandMatches =
+		commandDismissed || !/^\/[^\s]*$/.test(draft)
+			? []
+			: commands.filter((c) => `/${c.name}`.startsWith(draft));
+	useEffect(() => {
+		void commandAttempt; // explicit retry
+		let cancelled = false;
+		setCommands([]);
+		setCommandError(null);
+		setSelectionLabel("");
+		if (!sessionId) return;
+		Promise.all([
+			rpc.request.agentSessionCommands({ sessionId }),
+			rpc.request.agentSessionResources({ sessionId }),
+		])
+			.then(([items, resources]) => {
+				if (cancelled) return;
+				setCommands(items);
+				setSelectionLabel(
+					resources.legacy
+						? "Conversa anterior à seleção explícita de extensões."
+						: `${resources.skillCount} Skills · ${resources.componentCount} componentes · ${resources.mcpCount} MCP · ${resources.builtinCount} internos`,
+				);
+				if (resources.unavailableReasons.length)
+					setCommandError(resources.unavailableReasons.join(" "));
+			})
+			.catch((err) => {
+				if (!cancelled)
+					setCommandError(
+						err instanceof Error
+							? err.message
+							: "Não foi possível carregar comandos.",
+					);
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, [sessionId, commandAttempt]);
 	const [attachments, setAttachments] = useState<Attachment[]>([]);
 	const [models, setModels] = useState<ProtocolModelInfo[]>([]);
 	const fileInputRef = useRef<HTMLInputElement>(null);
@@ -270,9 +319,45 @@ export function ChatPaneV2() {
 					<Attachments items={attachments} onRemove={removeAttachment} />
 					<PromptInput onSubmit={handleSubmit}>
 						<PromptInputBody>
+							<CommandSuggestions
+								commands={commandMatches}
+								index={commandIndex}
+								onSelect={(name) => setDraft(`/${name} `)}
+							/>
+							{commandError && (
+								<p role="alert" className="text-xs text-destructive">
+									{commandError}
+									<button
+										type="button"
+										className="ml-2 underline"
+										onClick={() => setCommandAttempt((a) => a + 1)}
+									>
+										Tentar carregar comandos novamente
+									</button>
+								</p>
+							)}
+							{selectionLabel && (
+								<p className="px-2 text-[10px] text-muted-foreground">
+									Seleção fixa desta conversa: {selectionLabel}
+								</p>
+							)}
 							<PromptInputTextarea
 								value={draft}
-								onChange={(e) => setDraft(e.target.value)}
+								onChange={(e) => {
+									setDraft(e.target.value);
+									setCommandIndex(0);
+									setCommandDismissed(false);
+								}}
+								onKeyDown={(e) => {
+									commandKeyDown(
+										e,
+										commandMatches,
+										commandIndex,
+										setCommandIndex,
+										(name) => setDraft(`/${name} `),
+										() => setCommandDismissed(true),
+									);
+								}}
 								placeholder={`Pergunte algo ao ${agentName}...`}
 								disabled={state.sessionState === "error"}
 								autoFocus

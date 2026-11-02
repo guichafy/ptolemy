@@ -26,3 +26,21 @@ test("public metadata redacts private snapshot references while preserving expli
 	expect(data).toEqual({ ...base, mcpServerIds: ["one"] });
 	expect(JSON.stringify(data)).not.toContain("vault-secret");
 });
+
+test("public session metadata exposes selected builtin names without internal native paths or denial universe", () => {
+	const safe = publicSessionMcp({
+		id: "s",
+		skillSelection: { nativePaths: ["/private/native/skill"] },
+		builtinCommands: { all: ["selected", "other"], selected: ["selected"] },
+		extensionSelections: [
+			{ packageId: "package", revision: "revision", componentIds: ["command"] },
+		],
+	});
+	expect(safe).toEqual({
+		id: "s",
+		builtinCommandNames: ["selected"],
+		extensionSelections: [
+			{ packageId: "package", revision: "revision", componentIds: ["command"] },
+		],
+	});
+});

@@ -1,4 +1,4 @@
-import { Network, Settings2, SlidersHorizontal } from "lucide-react";
+import { Blocks, Network, Settings2, SlidersHorizontal } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -9,6 +9,7 @@ import {
 	PLUGIN_REGISTRY,
 } from "../providers/registry";
 import type { SettingsSection } from "../providers/rpc";
+import { ExtensionsSection } from "./extensions-section";
 import { GeneralSection } from "./general-section";
 import { NetworkSection } from "./network-section";
 import { PluginsSection } from "./plugins-section";
@@ -24,6 +25,7 @@ interface PluginSubItem {
 
 const NAV_ITEMS: { id: Section; label: string; icon: typeof Settings2 }[] = [
 	{ id: "plugins", label: "Plugins", icon: SlidersHorizontal },
+	{ id: "extensions", label: "Extensões", icon: Blocks },
 	{ id: "network", label: "Rede", icon: Network },
 	{ id: "general", label: "Geral", icon: Settings2 },
 ];
@@ -102,7 +104,7 @@ export function SettingsDialog() {
 				if (!open) closeDialog();
 			}}
 		>
-			<DialogContent className="flex h-[720px] sm:max-w-[1040px] flex-col gap-0 overflow-hidden p-0">
+			<DialogContent className="flex h-[min(720px,calc(100vh-32px))] sm:max-w-[1040px] flex-col gap-0 overflow-hidden p-0">
 				<DialogTitle className="sr-only">Preferências</DialogTitle>
 				<div className="flex min-h-0 flex-1">
 					<aside className="flex w-[168px] flex-col border-r border-border/40 bg-muted/10 px-3 pb-3 pt-4">
@@ -142,12 +144,14 @@ export function SettingsDialog() {
 							Ptolemy v1.2.0
 						</div>
 					</aside>
-					<ScrollArea className="flex-1">
-						<main className="p-5">
+					<ScrollArea className="min-w-0 flex-1">
+						<main className="@container min-w-0 p-5">
 							{resolvedSection === "plugins" ? (
 								<PluginsSection
 									onNavigateToPlugin={(id) => setSection(`plugin:${id}`)}
 								/>
+							) : resolvedSection === "extensions" ? (
+								<ExtensionsSection />
 							) : resolvedSection === "general" ? (
 								<GeneralSection />
 							) : resolvedSection === "network" ? (

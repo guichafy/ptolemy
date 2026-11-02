@@ -2,6 +2,7 @@ import { readdir, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { defineElectrobunRPC, type ElectrobunRPCSchema } from "electrobun/bun";
+import type { ExtensionRequests } from "@/shared/extension-rpc";
 import type { ExtensionSelection } from "@/shared/extensions";
 import type { SkillSummary } from "@/shared/skills";
 import type {
@@ -26,7 +27,6 @@ import {
 	openClaudeLogin,
 	setBedrockConfig,
 } from "./claude/auth";
-import { mcpLoader, type StoredMcpServer } from "./claude/mcp-loader";
 import {
 	createSession as claudeCreateSession,
 	deleteSession as claudeDeleteSession,
@@ -38,6 +38,8 @@ import {
 	stopGeneration as claudeStopGeneration,
 	getContextBreakdown,
 	getPermissionGate,
+	getSessionCommands,
+	getSessionResources,
 	type SessionMeta,
 	type StoredMessageV2,
 } from "./claude/session-manager";
@@ -49,6 +51,8 @@ import {
 } from "./codex/auth";
 import { listCodexModels } from "./codex/models";
 import { readConfiguredCodexModel } from "./codex/rollout-info";
+import { extensionRequestHandlers } from "./extensions/ui-service";
+import * as extensionValidation from "./extensions/ui-validation";
 import {
 	type GitHubItem,
 	type GitHubSubType,
@@ -84,11 +88,12 @@ export type SettingsSection =
 	| "plugins"
 	| "general"
 	| "network"
+	| "extensions"
 	| `plugin:${string}`;
 
 export interface PtolemyRPCSchema extends ElectrobunRPCSchema {
 	bun: {
-		requests: {
+		requests: ExtensionRequests & {
 			listApps: { params: void; response: { name: string; path: string }[] };
 			openApp: { params: { path: string }; response: boolean };
 			openUrl: { params: { url: string }; response: boolean };
@@ -224,11 +229,6 @@ export interface PtolemyRPCSchema extends ElectrobunRPCSchema {
 			};
 			agentRejectTool: {
 				params: { permissionId: string; reason?: string };
-				response: boolean;
-			};
-			agentListMcpServers: { params: void; response: StoredMcpServer[] };
-			agentSaveMcpServers: {
-				params: { servers: StoredMcpServer[] };
 				response: boolean;
 			};
 			getProxyStatus: { params: void; response: ProxyStatus };
@@ -812,19 +812,14 @@ export const requestHandlers: BunRequestHandlers = {
 		);
 		return ok;
 	},
-	agentListMcpServers: async () => {
-		const file = await mcpLoader.load();
-		return file.servers;
+	...extensionRequestHandlers,
+	agentSessionResources: async ({ sessionId }) => {
+		extensionValidation.text(sessionId);
+		return getSessionResources(sessionId);
 	},
-	agentSaveMcpServers: async ({ servers }) => {
-		try {
-			await mcpLoader.save({ version: 1, servers });
-			console.log(`[claude:rpc] agentSaveMcpServers: count=${servers.length}`);
-			return true;
-		} catch (err) {
-			console.error("[claude:rpc] agentSaveMcpServers failed:", err);
-			return false;
-		}
+	agentSessionCommands: async ({ sessionId }) => {
+		extensionValidation.text(sessionId);
+		return getSessionCommands(sessionId);
 	},
 };
 
