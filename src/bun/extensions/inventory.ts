@@ -6,6 +6,7 @@ import { findClaudeCli } from "../claude/claude-cli";
 import { buildCodexEnv, findCodexCli } from "../codex/codex-cli";
 import { mcpRegistry } from "../mcp/registry";
 import { ptolemyDataDir } from "../paths";
+import { skillsStore } from "../skills/store";
 import { prepareSessionExtensions } from "./activation";
 import { extensionMcpId } from "./mcp";
 import {
@@ -32,7 +33,9 @@ export async function extensionInventory(agent: AgentKind, cwd: string) {
 		agent === "claude"
 			? await inventoryClaudeBuiltins(await findClaudeCli())
 			: [];
+	const skillDefaults = await skillsStore.savedDefaults(agent);
 	return {
+		...(skillDefaults !== undefined ? { skillDefaults } : {}),
 		installed,
 		nativePlugins: nativePlugins.map((plugin) => ({
 			...plugin,

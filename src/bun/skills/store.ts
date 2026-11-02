@@ -213,6 +213,21 @@ export class SkillsStore {
 		return selected;
 	}
 
+	/** Persisted selection only; native discovery and current availability are not defaults writes. */
+	async savedDefaults(agent: AgentKind): Promise<string[] | undefined> {
+		if (agent !== "claude" && agent !== "codex")
+			throw Error("Agente inválido.");
+		await this.queue;
+		const index = await this.read();
+		const explicit = index.defaults?.[agent];
+		if (explicit !== undefined) return [...explicit];
+		// Older indexes stored registered Skill defaults directly, before the explicit native selection field.
+		const legacy = index.skills
+			.filter((skill) => skill.defaultFor.includes(agent))
+			.map((skill) => skill.id);
+		return legacy.length ? legacy : undefined;
+	}
+
 	async defaults(agent: AgentKind): Promise<string[]> {
 		return (await this.list(agent))
 			.filter(
