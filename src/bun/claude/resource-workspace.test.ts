@@ -61,3 +61,59 @@ it("does not follow a workspace symlink", async () => {
 		stageManagedResourceWorkspace(f.cwd, f.archive, f.expected),
 	).rejects.toThrow(/link/i);
 });
+
+it("rollback never deletes a pre-existing user-owned destination that rejected activation", async () => {
+	const f = await fixture();
+	const userPath = join(f.cwd, ".agents/skills/user-owned");
+	await mkdir(userPath, { recursive: true });
+	await writeFile(join(userPath, "SKILL.md"), "USER CONTENT");
+	const stage = await stageManagedResourceWorkspace(
+		f.cwd,
+		f.archive,
+		f.expected,
+	);
+	await stage.rollback([...f.expected.keys(), ".agents/skills/user-owned"]);
+	expect(await readFile(join(userPath, "SKILL.md"), "utf8")).toBe(
+		"USER CONTENT",
+	);
+	expect(
+		await readFile(join(f.cwd, ".agents/skills/example/SKILL.md"), "utf8"),
+	).toBe("original");
+});
+
+it("checks new destinations before moving any managed files", async () => {
+	const f = await fixture();
+	const userPath = join(f.cwd, ".agents/skills/collision");
+	await mkdir(userPath, { recursive: true });
+	await writeFile(join(userPath, "notes.txt"), "user notes");
+	await expect(
+		stageManagedResourceWorkspace(f.cwd, f.archive, f.expected, [
+			".agents/skills/collision",
+		]),
+	).rejects.toThrow(/destino.*existe/i);
+	expect(await readFile(join(userPath, "notes.txt"), "utf8")).toBe(
+		"user notes",
+	);
+	expect(
+		await readFile(join(f.cwd, ".agents/skills/example/SKILL.md"), "utf8"),
+	).toBe("original");
+});
+it("removes only registered absent destinations when rolling back new resources", async () => {
+	const f = await fixture();
+	const created = ".agents/skills/created";
+	const stage = await stageManagedResourceWorkspace(
+		f.cwd,
+		f.archive,
+		f.expected,
+		[created],
+	);
+	await mkdir(join(f.cwd, created), { recursive: true });
+	await writeFile(join(f.cwd, created, "SKILL.md"), "new skill");
+	await stage.rollback([created]);
+	await expect(
+		readFile(join(f.cwd, created, "SKILL.md")),
+	).rejects.toMatchObject({ code: "ENOENT" });
+	expect(
+		await readFile(join(f.cwd, ".agents/skills/example/SKILL.md"), "utf8"),
+	).toBe("original");
+});

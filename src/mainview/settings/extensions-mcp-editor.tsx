@@ -141,6 +141,8 @@ export function McpEditor({
 	);
 	const [dirty, setDirty] = useState(!isSaved);
 	const [busy, setBusy] = useState(false);
+	const busyCallback = useRef(onBusyChange);
+	busyCallback.current = onBusyChange;
 	useEffect(() => {
 		onBusyChange?.(busy);
 	}, [busy, onBusyChange]);
@@ -164,6 +166,7 @@ export function McpEditor({
 		mounted.current = true;
 		return () => {
 			mounted.current = false;
+			busyCallback.current?.(false);
 			generation.current++;
 		};
 	}, []);

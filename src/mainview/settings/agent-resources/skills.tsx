@@ -72,11 +72,13 @@ export function SkillsResources({
 						description={s.description}
 						unavailableReason={s.unavailableReason}
 						origin={
-							s.source.kind === "github"
-								? "Importada do GitHub"
-								: s.origin === "system"
-									? "Integrada ao sistema"
-									: "Instalada localmente"
+							library.archiveOnly?.skillIds.includes(s.id)
+								? "Arquivada nesta conversa · fora da biblioteca"
+								: s.source.kind === "github"
+									? "Importada do GitHub"
+									: s.origin === "system"
+										? "Integrada ao sistema"
+										: "Instalada localmente"
 						}
 						checked={choices.skillIds.includes(s.id)}
 						disabled={
@@ -139,7 +141,7 @@ export function SkillsResources({
 							<ResourceRow
 								key={`${pkg.id}:${pkg.revision}:${c.id}`}
 								name={`${pkg.name}: ${c.name}`}
-								origin={`Plugin ${pkg.name} · ${pkg.revision.slice(0, 8)}`}
+								origin={`${library.archiveOnly?.packageRevisions.includes(`${pkg.id}:${pkg.revision}`) ? "Arquivada nesta conversa · " : ""}Plugin ${pkg.name} · ${pkg.revision.slice(0, 8)}`}
 								description={c.description ?? cap?.reason}
 								checked={checked}
 								disabled={

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, it, vi } from "vitest";
 import type { ExtensionCapability } from "@/shared/extension-rpc";
@@ -6,6 +6,9 @@ import { ConversationConfiguration } from "./conversation-configuration";
 
 const request = vi.hoisted(() => ({
 	agentExtensionReview: vi.fn(async () => []),
+	agentMcpSave: vi.fn(),
+	agentMcpGetEditable: vi.fn(),
+	agentMcpStatus: vi.fn(async () => ({ state: "disconnected" })),
 	agentExtensionCapabilities: vi.fn(
 		async (): Promise<ExtensionCapability[]> => [],
 	),
@@ -176,4 +179,194 @@ it("keeps the draft open if a package lost readiness before applying", async () 
 	);
 	expect(apply).not.toHaveBeenCalled();
 	expect(screen.getByRole("dialog")).toBeVisible();
+});
+
+it("resets an open draft when conversation ownership changes", async () => {
+	const first = vi.fn(),
+		second = vi.fn();
+	const props = {
+		agent: "codex" as const,
+		library,
+		choices: { ...choices, skillIds: ["skill-0"] },
+		onApply: first,
+		onRefresh: () => {},
+	};
+	const view = render(
+		<ConversationConfiguration {...props} scopeKey="first" />,
+	);
+	await userEvent.click(
+		screen.getByRole("button", { name: "Configurar recursos da conversa" }),
+	);
+	await userEvent.click(
+		screen.getByRole("button", { name: /Configurar Skills da conversa/ }),
+	);
+	view.rerender(
+		<ConversationConfiguration
+			{...props}
+			scopeKey="second"
+			choices={{ ...choices, skillIds: ["skill-1"] }}
+			onApply={second}
+		/>,
+	);
+	await waitFor(() =>
+		expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+	);
+	await userEvent.click(
+		screen.getByRole("button", { name: "Configurar recursos da conversa" }),
+	);
+	await userEvent.click(
+		screen.getByRole("button", { name: /Configurar Skills da conversa/ }),
+	);
+	expect(screen.getByRole("checkbox", { name: "Usar skill-1" })).toBeChecked();
+	expect(
+		screen.getByRole("checkbox", { name: "Usar skill-0" }),
+	).not.toBeChecked();
+	await userEvent.click(screen.getByRole("button", { name: "Aplicar" }));
+	expect(second).toHaveBeenCalledWith({ ...choices, skillIds: ["skill-1"] });
+	expect(first).not.toHaveBeenCalled();
+});
+it("initializes a draft opened before the actual selection loads", async () => {
+	const apply = vi.fn();
+	const props = {
+		agent: "codex" as const,
+		library,
+		choices: { ...choices, skillIds: ["skill-0"] },
+		onApply: apply,
+		onRefresh: () => {},
+	};
+	const view = render(
+		<ConversationConfiguration
+			{...props}
+			library={{ ...library, loading: true }}
+			choices={{ ...choices, skillIds: [] }}
+		/>,
+	);
+	await userEvent.click(
+		screen.getByRole("button", { name: "Configurar recursos da conversa" }),
+	);
+	await userEvent.click(
+		screen.getByRole("button", { name: /Configurar Skills da conversa/ }),
+	);
+	expect(screen.getByRole("button", { name: "Aplicar" })).toBeDisabled();
+	view.rerender(<ConversationConfiguration {...props} />);
+	await waitFor(() =>
+		expect(
+			screen.getByRole("checkbox", { name: "Usar skill-0" }),
+		).toBeChecked(),
+	);
+	await userEvent.click(screen.getByRole("button", { name: "Aplicar" }));
+	expect(apply).toHaveBeenCalledWith({ ...choices, skillIds: ["skill-0"] });
+});
+it("cannot leave a busy MCP editor and releases modal actions after saving", async () => {
+	let finish!: () => void;
+	request.agentMcpSave.mockReturnValue(
+		new Promise<void>((resolve) => {
+			finish = resolve;
+		}),
+	);
+	request.agentMcpGetEditable.mockResolvedValue({
+		id: "server",
+		name: "Server",
+		transport: "stdio",
+		command: "test",
+		defaults: { claude: false, codex: false },
+	});
+	const server = {
+		id: "server",
+		name: "Server",
+		transport: "stdio" as const,
+		defaults: { claude: false, codex: false },
+		credentials: { env: [], headers: [], oauthClientSecret: false },
+		authentication: { required: false, ready: true },
+		connection: { state: "disconnected" as const },
+	};
+	render(
+		<ConversationConfiguration
+			agent="codex"
+			library={{ ...library, servers: [server] }}
+			choices={{ ...choices, skillIds: [] }}
+			onApply={() => {}}
+			onRefresh={() => {}}
+		/>,
+	);
+	await userEvent.click(
+		screen.getByRole("button", { name: "Configurar recursos da conversa" }),
+	);
+	await userEvent.click(
+		screen.getByRole("button", { name: /Configurar MCP da conversa/ }),
+	);
+	await userEvent.click(
+		screen.getByRole("button", { name: "Configurar Server" }),
+	);
+	await userEvent.click(
+		await screen.findByRole("button", { name: "Salvar servidor" }),
+	);
+	expect(
+		screen.getByRole("button", { name: "Voltar aos servidores" }),
+	).toBeDisabled();
+	await act(async () => {
+		finish();
+	});
+	await waitFor(() =>
+		expect(
+			screen.getByRole("button", { name: "Voltar aos servidores" }),
+		).toBeEnabled(),
+	);
+	await userEvent.click(
+		screen.getByRole("button", { name: "Voltar aos servidores" }),
+	);
+	expect(screen.getByRole("button", { name: "Cancelar" })).toBeEnabled();
+	expect(screen.getByRole("button", { name: "Aplicar" })).toBeEnabled();
+});
+it("identifies snapshots removed from the library and hides unavailable registry actions", async () => {
+	const server = {
+		id: "frozen-server",
+		name: "Frozen",
+		transport: "stdio" as const,
+		defaults: { claude: false, codex: false },
+		credentials: { env: [], headers: [], oauthClientSecret: false },
+		authentication: { required: false, ready: true },
+		connection: { state: "disconnected" as const },
+	};
+	const savedChoices = {
+		...choices,
+		skillIds: ["skill-0"],
+		mcpServerIds: [server.id],
+	};
+	const archived = {
+		agent: "codex" as const,
+		revision: 1,
+		legacy: false,
+		busy: false,
+		choices: savedChoices,
+		skills: [library.skills[0]],
+		packages: [],
+		servers: [server],
+		capabilities: [],
+	};
+	render(
+		<ConversationConfiguration
+			agent="codex"
+			library={{ ...library, skills: [], servers: [] }}
+			archived={archived}
+			choices={savedChoices}
+			onApply={() => {}}
+			onRefresh={() => {}}
+		/>,
+	);
+	await userEvent.click(
+		screen.getByRole("button", { name: "Configurar recursos da conversa" }),
+	);
+	await userEvent.click(
+		screen.getByRole("button", { name: /Configurar Skills da conversa/ }),
+	);
+	expect(screen.getByText(/Arquivada nesta conversa/)).toBeVisible();
+	await userEvent.click(screen.getByRole("button", { name: "MCP" }));
+	expect(screen.getByText(/Arquivado nesta conversa/)).toBeVisible();
+	expect(
+		screen.queryByRole("button", { name: "Configurar Frozen" }),
+	).not.toBeInTheDocument();
+	expect(
+		screen.queryByRole("button", { name: "Remover da biblioteca" }),
+	).not.toBeInTheDocument();
 });

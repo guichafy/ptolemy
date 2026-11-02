@@ -47,6 +47,7 @@ export function McpResources({
 					variant="ghost"
 					size="sm"
 					className="mb-3"
+					disabled={busy}
 					onClick={() => {
 						setEditor(null);
 						onRefresh();
@@ -117,7 +118,7 @@ export function McpResources({
 					<ResourceRow
 						key={s.id}
 						name={s.name}
-						origin={`${s.transport} · ${s.connection.state}`}
+						origin={`${library.archiveOnly?.serverIds.includes(s.id) ? "Arquivado nesta conversa · " : ""}${s.transport} · ${s.connection.state}`}
 						description={s.authentication?.reason}
 						checked={choices.mcpServerIds.includes(s.id)}
 						disabled={
@@ -135,38 +136,40 @@ export function McpResources({
 							})
 						}
 					>
-						<div className="mt-2 flex gap-2 pl-7">
-							<Button
-								size="sm"
-								variant="ghost"
-								disabled={busy}
-								onClick={() =>
-									void run(async () =>
-										setEditor({
-											saved: true,
-											draft: await rpc.request.agentMcpGetEditable({
-												id: s.id,
+						{!library.archiveOnly?.serverIds.includes(s.id) && (
+							<div className="mt-2 flex gap-2 pl-7">
+								<Button
+									size="sm"
+									variant="ghost"
+									disabled={busy}
+									onClick={() =>
+										void run(async () =>
+											setEditor({
+												saved: true,
+												draft: await rpc.request.agentMcpGetEditable({
+													id: s.id,
+												}),
 											}),
-										}),
-									)
-								}
-							>
-								Configurar {s.name}
-							</Button>
-							<Button
-								size="sm"
-								variant="ghost"
-								disabled={busy}
-								onClick={() =>
-									void run(async () => {
-										await rpc.request.agentMcpRemove({ id: s.id });
-										onRefresh();
-									})
-								}
-							>
-								Remover da biblioteca
-							</Button>
-						</div>
+										)
+									}
+								>
+									Configurar {s.name}
+								</Button>
+								<Button
+									size="sm"
+									variant="ghost"
+									disabled={busy}
+									onClick={() =>
+										void run(async () => {
+											await rpc.request.agentMcpRemove({ id: s.id });
+											onRefresh();
+										})
+									}
+								>
+									Remover da biblioteca
+								</Button>
+							</div>
+						)}
 					</ResourceRow>
 				))}
 			{packageMcp
@@ -192,7 +195,7 @@ export function McpResources({
 						<ResourceRow
 							key={`${pkg.id}:${pkg.revision}:${c.id}`}
 							name={`${pkg.name}: ${c.name}`}
-							origin={`Plugin ${pkg.name}`}
+							origin={`${library.archiveOnly?.packageRevisions.includes(`${pkg.id}:${pkg.revision}`) ? "Arquivado nesta conversa · " : ""}Plugin ${pkg.name}`}
 							description={cap?.reason}
 							checked={checked}
 							disabled={
@@ -205,30 +208,34 @@ export function McpResources({
 								onChange(toggleComponent(choices, pkg, c.id, value))
 							}
 						>
-							<Button
-								className="mt-2 ml-7"
-								variant="outline"
-								size="sm"
-								disabled={busy}
-								onClick={() =>
-									void run(async () => {
-										const binding = {
-											packageId: pkg.id,
-											revision: pkg.revision,
-											componentId: c.id,
-										};
-										const draft =
-											await rpc.request.agentMcpBindingDraft(binding);
-										setEditor({
-											saved: library.servers.some((s) => s.id === draft.id),
-											draft,
-											binding,
-										});
-									})
-								}
-							>
-								Configurar MCP do plugin
-							</Button>
+							{!library.archiveOnly?.packageRevisions.includes(
+								`${pkg.id}:${pkg.revision}`,
+							) && (
+								<Button
+									className="mt-2 ml-7"
+									variant="outline"
+									size="sm"
+									disabled={busy}
+									onClick={() =>
+										void run(async () => {
+											const binding = {
+												packageId: pkg.id,
+												revision: pkg.revision,
+												componentId: c.id,
+											};
+											const draft =
+												await rpc.request.agentMcpBindingDraft(binding);
+											setEditor({
+												saved: library.servers.some((s) => s.id === draft.id),
+												draft,
+												binding,
+											});
+										})
+									}
+								>
+									Configurar MCP do plugin
+								</Button>
+							)}
 						</ResourceRow>
 					);
 				})}

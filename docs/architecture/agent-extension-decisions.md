@@ -93,3 +93,9 @@ Custo assumido: aparência exata depende do compositor, desktop e opções de ac
 ## Evidência e manutenção
 
 [Testes de integração](../testing/integration-tests.md) distingue unitários com HTTP real, CLIs contra mocks locais, UI com RPC fake, chat com backend real e launchers no bundle. O teste `extension-snapshot.test.ts` liga catálogo HTTP local, instalação completa, seleção parcial, comando dinâmico, MCP de pacote e retomada após remoção da instalação/alteração do binding/troca de agente. O histórico arquivado permanece; não há novo download na retomada. Não se deve substituir esses limites por alegações de validação com provedores reais ou atualizar a semântica de inventário só com documentação de um CLI mais novo.
+
+### Final review hardening
+
+Resource configuration drafts belong to one conversation. Opening another conversation discards the prior draft; a dialog opened during loading initializes only after the persisted selection arrives. Refreshing the library preserves edits already made. MCP navigation stays locked during an operation and releases its busy state on unmount.
+
+Applying changes verifies both existing managed bytes and every new destination before stopping the runtime. Rollback can remove only paths staged by that transaction or destinations registered as absent beforehand. User-owned collisions are rejected without deleting files. If no runtime is active, Apply still prepares the target transactionally; if another conversation became active, the stale request is rejected. Archived resources outside the shared library are explicitly labeled and do not offer registry edit/removal actions.

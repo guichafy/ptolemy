@@ -1,6 +1,6 @@
 /** Full catalog → session → package-owned MCP → removal → cold-resume contract. */
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { githubFixture } from "../../../src/bun/extensions/test-fixtures";
@@ -145,6 +145,82 @@ try {
 			selection,
 		);
 	}
+
+	// Inactive application must still reject unmanaged destinations and must not
+	// target the previous conversation after a switch wins the lifecycle queue.
+	const { SkillsStore } = await import("../../../src/bun/skills/store");
+	const collisionStore = new SkillsStore({
+		download: async () => ({
+			name: "resource-collision",
+			description: "Collision fixture",
+			source: {
+				kind: "github",
+				url: "https://github.com/offline/collision",
+				commit: "a".repeat(40),
+			},
+			files: [
+				{
+					path: "SKILL.md",
+					content: Buffer.from(
+						"---\nname: resource-collision\ndescription: Collision fixture\n---\nFixture",
+					).toString("base64"),
+					executable: false,
+				},
+			],
+		}),
+	});
+	const collisionSkill = await collisionStore.importGithub(
+		"https://github.com/offline/collision/tree/main/resource-collision",
+	);
+	const codexSession = sessions.find((s) => s.agent === "codex")!;
+	const collision = join(codexSession.cwd, ".agents/skills/resource-collision");
+	await mkdir(collision, { recursive: true });
+	await writeFile(join(collision, "SKILL.md"), "USER CONTENT TO PRESERVE");
+	await writeFile(join(collision, "notes.txt"), "USER NOTES");
+	const beforeCollision = await sm.getSessionConfiguration(codexSession.id);
+	await sm.shutdownSessions();
+	await assert.rejects(
+		sm.setSessionConfiguration(codexSession.id, beforeCollision.revision, {
+			...beforeCollision.choices,
+			skillIds: [...beforeCollision.choices.skillIds, collisionSkill.id],
+		}),
+		/recurso|destino|exist|projeto/i,
+	);
+	assert.equal(
+		(await sm.getSessionConfiguration(codexSession.id)).revision,
+		beforeCollision.revision,
+	);
+	assert.equal(
+		await readFile(join(collision, "SKILL.md"), "utf8"),
+		"USER CONTENT TO PRESERVE",
+	);
+	assert.equal(
+		await readFile(join(collision, "notes.txt"), "utf8"),
+		"USER NOTES",
+	);
+	await rm(collision, { recursive: true });
+	const preparedInactive = await sm.setSessionConfiguration(
+		codexSession.id,
+		beforeCollision.revision,
+		beforeCollision.choices,
+	);
+	assert.equal(preparedInactive.revision, beforeCollision.revision + 1);
+	const claudeSession = sessions.find((s) => s.agent === "claude")!;
+	const oldConversation = await sm.getSessionConfiguration(claudeSession.id);
+	await assert.rejects(
+		sm.setSessionConfiguration(
+			claudeSession.id,
+			oldConversation.revision,
+			oldConversation.choices,
+		),
+		/conversa.*alterada/i,
+	);
+	assert.equal(sm.getActiveSessionId(), codexSession.id);
+	assert.equal(
+		(await sm.getSessionConfiguration(claudeSession.id)).revision,
+		oldConversation.revision,
+	);
+
 	// Editing keeps harness memory and identity, and removes active MCP/Skills before the next turn.
 	for (const { id } of sessions) {
 		await sm.resumeSession(id);
