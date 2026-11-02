@@ -196,6 +196,7 @@ export class McpRegistry {
 	private readonly legacyPath: string;
 	readonly vault: SecretVault;
 	private queue: Promise<unknown> = Promise.resolve();
+	private readinessProvider?: (server: McpServerDefinition) => Promise<boolean>;
 	private statusProvider:
 		| ((id: string) => Promise<McpConnectionStatus>)
 		| undefined;
@@ -207,8 +208,10 @@ export class McpRegistry {
 	}
 	setStatusProvider(
 		provider: (id: string) => Promise<McpConnectionStatus>,
+		readiness?: (server: McpServerDefinition) => Promise<boolean>,
 	): void {
 		this.statusProvider = provider;
+		this.readinessProvider = readiness;
 	}
 	private serial<T>(work: () => Promise<T>): Promise<T> {
 		const run = this.queue.then(work);
@@ -464,6 +467,21 @@ export class McpRegistry {
 				throw Error("Credencial MCP indisponível.");
 		return result;
 	}
+	private async authentication(server: McpServerDefinition) {
+		const required = server.transport === "http" && !!server.auth;
+		const ready =
+			!required || (await this.readinessProvider?.(server)) === true;
+		return {
+			required,
+			ready,
+			...(!ready
+				? {
+						reason: "OAuth indisponível. Conecte novamente em Extensões → MCP.",
+					}
+				: {}),
+		};
+	}
+
 	async list(): Promise<McpServerSummary[]> {
 		const definitions = await this.serial(async () =>
 			structuredClone((await this.load()).servers),
@@ -471,6 +489,7 @@ export class McpRegistry {
 		return Promise.all(
 			definitions.map(async (s) => ({
 				id: s.id,
+				authentication: await this.authentication(s),
 				name: s.name,
 				transport: s.transport,
 				defaults: s.defaults,
@@ -675,7 +694,7 @@ export class McpRegistry {
 		});
 	}
 	async snapshot(ids: string[]): Promise<McpSnapshot> {
-		return this.serial(async () => {
+		const snapshot = await this.serial(async () => {
 			const f = await this.load();
 			const servers = ids.map((id) => {
 				const s = f.servers.find((s) => s.id === id);
@@ -683,9 +702,15 @@ export class McpRegistry {
 				return s;
 			});
 			this.unique(servers);
-			return { version: 1, servers: structuredClone(servers) };
+			return { version: 1 as const, servers: structuredClone(servers) };
 		});
+		for (const server of snapshot.servers) {
+			const auth = await this.authentication(server);
+			if (!auth.ready) throw Error(auth.reason);
+		}
+		return snapshot;
 	}
+
 	/** Resolves only vault references. Runtime obtains OAuth tokens separately with expectedDefinition. Never persist or serialize this return value into CLI argv. */
 	async resolve(snapshot: McpSnapshot): Promise<ResolvedMcpServer[]> {
 		try {

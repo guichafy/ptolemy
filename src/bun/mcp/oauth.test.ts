@@ -277,6 +277,99 @@ describe("MCP browser OAuth", () => {
 		server?.closeAllConnections();
 		await rm(root, { recursive: true, force: true });
 	});
+	it("summaries and new snapshots require a usable OAuth grant without probing endpoints", async () => {
+		const readiness = async () =>
+			(await registry.list()).find((s) => s.id === "one")!.authentication;
+		const counters = () => [metadataRequests, tokenRequests, refreshes];
+		const before = counters();
+		expect(await readiness()).toMatchObject({ required: true, ready: false });
+		await expect(registry.snapshot(["one"])).rejects.toThrow(/OAuth/);
+		expect(counters()).toEqual(before);
+		await authorize();
+		expect(await readiness()).toEqual({ required: true, ready: true });
+		now += 3600_000;
+		const expiredCounters = counters();
+		expect(await readiness()).toEqual({ required: true, ready: true });
+		await expect(registry.snapshot(["one"])).resolves.toMatchObject({
+			servers: [{ id: "one" }],
+		});
+		expect(counters()).toEqual(expiredCounters);
+		await oauth.disconnect("one");
+		expect(await readiness()).toMatchObject({ required: true, ready: false });
+		await expect(registry.snapshot(["one"])).rejects.toThrow(/OAuth/);
+		opened = [];
+		issueRefresh = false;
+		await authorize();
+		now += 3600_000;
+		expect(await readiness()).toMatchObject({ required: true, ready: false });
+		await expect(registry.snapshot(["one"])).rejects.toThrow(/OAuth/);
+		await oauth.getAccessToken("one"); // persisted expired marker
+		expect(await readiness()).toMatchObject({ required: true, ready: false });
+		expect(JSON.stringify(await registry.list())).not.toMatch(
+			/secret-probe|secretRef/,
+		);
+	});
+	it.each([
+		"cancel",
+		"deny",
+		"error",
+	] as const)("%s of reauthentication preserves an independently usable old grant", async (action) => {
+		await authorize();
+		const oldToken = await oauth.getAccessToken("one");
+		opened = [];
+		await start();
+		if (action === "cancel") await oauth.cancel("one");
+		else {
+			await finish(
+				opened[0],
+				action === "deny"
+					? { deny: true }
+					: { issuer: "https://wrong.example" },
+			);
+			await waitFor(
+				async () =>
+					(await oauth.status("one")).state ===
+					(action === "deny" ? "cancelled" : "error"),
+			);
+		}
+		expect((await registry.list())[0].authentication).toEqual({
+			required: true,
+			ready: true,
+		});
+		await expect(registry.snapshot(["one"])).resolves.toMatchObject({
+			servers: [{ id: "one" }],
+		});
+		expect(await oauth.getAccessToken("one")).toBe(oldToken);
+	});
+
+	it("cancelling reauthentication during vault publication restores the older grant", async () => {
+		await authorize();
+		const oldToken = await oauth.getAccessToken("one");
+		let entered = false;
+		let release!: () => void;
+		const hold = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const realSet = registry.vault.set.bind(registry.vault);
+		const spy = vi
+			.spyOn(registry.vault, "set")
+			.mockImplementationOnce(async (key, value) => {
+				entered = true;
+				await hold;
+				await realSet(key, value);
+			});
+		opened = [];
+		await start();
+		await finish();
+		await waitFor(() => entered);
+		const cancel = oauth.cancel("one");
+		release();
+		await cancel;
+		spy.mockRestore();
+		expect(await oauth.getAccessToken("one")).toBe(oldToken);
+		expect((await registry.list())[0].authentication.ready).toBe(true);
+	});
+
 	it("starts promptly, completes discovery/DCR/PKCE and keeps credentials out of status/list/snapshot", async () => {
 		await authorize();
 		expect(exchanges).toBe(1);
@@ -497,6 +590,10 @@ describe("MCP browser OAuth", () => {
 				.filter((s) => s.id !== "one")
 				.map((s) => s.connection.state),
 		).toEqual(["disconnected", "disconnected"]);
+		for (const id of ["stdio", "http"]) {
+			const summary = (await registry.list()).find((s) => s.id === id);
+			expect(summary!.authentication).toEqual({ required: false, ready: true });
+		}
 	});
 	it.each([
 		{ issuer: "https://issuer.example" },

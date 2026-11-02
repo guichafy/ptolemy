@@ -156,7 +156,9 @@ export function ExtensionPicker({
 			inventory?.builtins.some((b) => b.name === n && b.kind === "command"),
 		).length +
 		choices.mcpServerIds.filter((id) =>
-			servers.some((s) => s.id === id && !s.packageId),
+			servers.some(
+				(s) => s.id === id && !s.packageId && s.authentication?.ready !== false,
+			),
 		).length +
 		choices.extensionSelections.reduce(
 			(n, s) =>
@@ -453,7 +455,8 @@ export function ExtensionPicker({
 										className="accent-primary focus-visible:outline-2 focus-visible:outline-primary"
 										checked={choices.mcpServerIds.includes(s.id)}
 										disabled={
-											!!s.packageId && !choices.mcpServerIds.includes(s.id)
+											(!!s.packageId || s.authentication?.ready === false) &&
+											!choices.mcpServerIds.includes(s.id)
 										}
 										onChange={(e) =>
 											update({
@@ -470,7 +473,9 @@ export function ExtensionPicker({
 										<span className="block text-[11px] text-muted-foreground">
 											{s.packageId
 												? "Ative pelo componente da extensão para preservar seu contexto."
-												: `Configurado · ${s.connection.state === "connected" ? "OAuth conectado" : "conexão não testada"}`}
+												: s.authentication?.ready === false
+													? s.authentication.reason
+													: `Configurado · ${s.authentication?.required ? "OAuth disponível" : "conexão não testada"}`}
 										</span>
 									</span>
 								</label>

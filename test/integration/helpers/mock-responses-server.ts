@@ -125,10 +125,45 @@ function messageTurn(n: number, text: string, usage: ResponseUsage): string {
 	]);
 }
 
+type ProbeFunction = {
+	name: string;
+	namespace: string;
+	arguments: Record<string, unknown>;
+};
+function functionTurn(
+	n: number,
+	probe: ProbeFunction,
+	usage: ResponseUsage,
+): string {
+	const item = {
+		type: "function_call",
+		id: `fc_${n}`,
+		call_id: `call_${n}`,
+		name: probe.name,
+		namespace: probe.namespace,
+		arguments: JSON.stringify(probe.arguments),
+		status: "completed",
+	};
+	return sse([
+		{ type: "response.created", response: { id: `resp_${n}` } },
+		{
+			type: "response.output_item.added",
+			output_index: 0,
+			item: { ...item, arguments: "" },
+		},
+		{ type: "response.output_item.done", output_index: 0, item },
+		completed(n, usage),
+	]);
+}
+
 export function startMockResponsesServer(
-	probeScript?:
-		| string
-		| { name: string; namespace: string; arguments: Record<string, unknown> },
+	probeScript?: string | ProbeFunction,
+	options?: {
+		beforeRequest?: (body: Record<string, unknown>) => Promise<void>;
+		respond?: (
+			body: Record<string, unknown>,
+		) => ProbeFunction | { text: string };
+	},
 ): MockResponsesServer {
 	const requests: MockResponsesServer["requests"] = [];
 	const promptCache = createPromptCache();
@@ -145,6 +180,7 @@ export function startMockResponsesServer(
 				return new Response("not found", { status: 404 });
 			}
 			const body = (await req.json()) as Record<string, unknown>;
+			await options?.beforeRequest?.(body);
 			requests.push({ path: url.pathname, body });
 			const input = (body.input ?? []) as InputItem[];
 			const n = ++counter;
@@ -176,6 +212,16 @@ export function startMockResponsesServer(
 			);
 			const usage = responseUsage(cached, fresh);
 
+			if (options?.respond) {
+				const response = options.respond(body);
+				return new Response(
+					"text" in response
+						? messageTurn(n, response.text, usage)
+						: functionTurn(n, response, usage),
+					{ headers: { "content-type": "text/event-stream" } },
+				);
+			}
+
 			const mcpMatch = lastUserText.match(
 				/PTOLEMY_MCP_CALL ([a-z0-9_]+) ([a-z0-9_]+)/,
 			);
@@ -203,35 +249,7 @@ export function startMockResponsesServer(
 					? typeof probeScript === "string"
 						? scriptTurn(n, probeScript, usage)
 						: probeScript
-							? sse([
-									{ type: "response.created", response: { id: `resp_${n}` } },
-									{
-										type: "response.output_item.added",
-										output_index: 0,
-										item: {
-											type: "function_call",
-											id: `fc_${n}`,
-											call_id: `call_${n}`,
-											name: probeScript.name,
-											namespace: probeScript.namespace,
-											arguments: "",
-										},
-									},
-									{
-										type: "response.output_item.done",
-										output_index: 0,
-										item: {
-											type: "function_call",
-											id: `fc_${n}`,
-											call_id: `call_${n}`,
-											name: probeScript.name,
-											namespace: probeScript.namespace,
-											arguments: JSON.stringify(probeScript.arguments),
-											status: "completed",
-										},
-									},
-									completed(n, usage),
-								])
+							? functionTurn(n, probeScript, usage)
 							: execTurn(n, step.file, usage)
 					: messageTurn(n, step.kind === "reply" ? step.text : "Ok.", usage);
 			return new Response(payload, {

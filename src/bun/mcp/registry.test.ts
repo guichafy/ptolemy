@@ -246,6 +246,11 @@ describe("safe editable MCP drafts", () => {
 				legacyPath: join(root, "legacy.json"),
 				vault: new MemorySecretVault(),
 			});
+			// This test isolates credential edits; OAuth grant readiness is exercised with real local HTTP in oauth.test.
+			registry.setStatusProvider(
+				async () => ({ state: "connected" }),
+				async () => true,
+			);
 			await registry.save(
 				{
 					id: "a",

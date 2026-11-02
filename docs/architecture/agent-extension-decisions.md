@@ -66,6 +66,10 @@ O ID de binding inclui pacote, componente e revisão. `extensions/ui-service.ts`
 
 Custo assumido: MCP fornecido pelo pacote exige o fluxo do componente, não duas caixas concorrentes. Se isso estivesse errado, desligar o pacote poderia deixar seu MCP ativo por uma segunda seleção. Um servidor realmente independente possui seu próprio cadastro.
 
+## 11. Prontidão OAuth é independente da tentativa de login
+
+A listagem pública carrega somente indicadores seguros de autenticação necessária/disponível e uma orientação de configuração. O backend consulta a credencial vinculada à definição, sem requisições de rede: token utilizável ou refresh disponível mantém a seleção; falta de credencial ou expiração sem refresh exige conexão. O estado de uma tentativa de reautenticação cancelada/com erro não substitui a validade de uma autorização anterior. Componentes MCP de pacote e servidores independentes seguem a mesma regra de capacidade, contagem e preflight de novas seleções; escolhas antigas continuam removíveis. Isso não certifica conectividade nem compatibilidade com provedores reais.
+
 ## Evidência e manutenção
 
 [Testes de integração](../testing/integration-tests.md) distingue unitários com HTTP real, CLIs contra mocks locais, UI com RPC fake, chat com backend real e launchers no bundle. O teste `extension-snapshot.test.ts` liga catálogo HTTP local, instalação completa, seleção parcial, comando dinâmico, MCP de pacote e retomada após remoção da instalação/alteração do binding/troca de agente. O histórico arquivado permanece; não há novo download na retomada. Não se deve substituir esses limites por alegações de validação com provedores reais ou atualizar a semântica de inventário só com documentação de um CLI mais novo.

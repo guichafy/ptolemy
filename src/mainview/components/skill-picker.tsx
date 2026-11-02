@@ -99,7 +99,9 @@ export function SkillPicker({
 		}
 	}
 	const count =
-		selected.length +
+		selected.filter((id) =>
+			skills.some((s) => s.id === id && !s.unavailableReason),
+		).length +
 		extraSkills.filter((s) => s.checked && !s.unavailableReason).length;
 	return (
 		<Popover>

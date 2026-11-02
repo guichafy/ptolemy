@@ -48,6 +48,11 @@ export interface McpConnectionStatus {
 	state: McpConnectionState;
 	message?: string;
 }
+export interface McpAuthenticationReadiness {
+	required: boolean;
+	ready: boolean;
+	reason?: string;
+}
 /** Safe for RPC: never return a definition or a resolved snapshot as a listing. */
 export interface McpServerSummary {
 	id: string;
@@ -57,6 +62,7 @@ export interface McpServerSummary {
 	packageId?: string;
 	credentials: { env: string[]; headers: string[]; oauthClientSecret: boolean };
 	connection: McpConnectionStatus;
+	authentication: McpAuthenticationReadiness;
 }
 export type ResolvedMcpServer = McpServerBase &
 	(

@@ -143,6 +143,23 @@ test("extension management renders, keeps failed drafts, and supports keyboard s
 		await page.screenshot({
 			path: join(screenshots, "composer-selection.png"),
 		});
+		const unavailableOAuth = page.getByRole("checkbox", {
+			name: /Documentação e referências/,
+		});
+		expect(await unavailableOAuth.isChecked()).toBe(true);
+		expect(
+			await page.getByRole("button", { name: "Iniciar conversa" }).isDisabled(),
+		).toBe(true);
+		await unavailableOAuth.uncheck();
+		expect(await unavailableOAuth.isDisabled()).toBe(true);
+		await page
+			.getByText("OAuth indisponível. Conecte novamente em Extensões → MCP.", {
+				exact: true,
+			})
+			.waitFor();
+		await page.screenshot({
+			path: join(screenshots, "oauth-unavailable-selection.png"),
+		});
 		await page.keyboard.press("Escape");
 		const input = page.getByRole("textbox", { name: "Mensagem para Codex" });
 		await input.fill("/");

@@ -303,3 +303,64 @@ test.each([
 		screen.getByRole("checkbox", { name: "Ativar Comando" }),
 	).toBeChecked();
 });
+
+test("reopening a trusted installed revision reviews siblings with its saved digest", async () => {
+	const installed = {
+		...pkg,
+		components: [
+			...pkg.components,
+			{
+				id: "hook",
+				name: "Hook",
+				kind: "hook",
+				sources: [{ effective: true, harness: "portable" }],
+				diagnostics: [],
+			},
+		],
+	};
+	request.agentExtensionInstalled.mockResolvedValue([installed]);
+	request.agentExtensionInventory.mockResolvedValue({
+		installed: [installed],
+		nativePlugins: [],
+		builtins: [],
+		defaults: {
+			selections: [
+				{
+					packageId: pkg.id,
+					revision: pkg.revision,
+					componentIds: ["c"],
+					trustedHookDigest: pkg.revision,
+				},
+			],
+			builtinCommandNames: [],
+		},
+	});
+	request.agentExtensionReview.mockImplementation(
+		async ({ trustedHookDigest }) => [
+			{
+				componentId: "hook",
+				status:
+					trustedHookDigest === pkg.revision
+						? "adapted"
+						: "requires-configuration",
+				reason: trustedHookDigest ? "Autorizado" : "Autorize",
+			},
+		],
+	);
+	render(<ExtensionsSection />);
+	await userEvent.click(
+		await screen.findByRole("button", { name: `Inspecionar ${pkg.name}` }),
+	);
+	expect(request.agentExtensionReview).toHaveBeenCalledWith(
+		expect.objectContaining({ trustedHookDigest: pkg.revision }),
+	);
+	await screen.findByText("Autorizado");
+	const hook = screen.getByRole("checkbox", { name: "Ativar Hook" });
+	expect(hook).not.toBeChecked();
+	expect(hook).toBeEnabled();
+	expect(
+		screen.getByRole("checkbox", { name: /Autorizar execução dos hooks/ }),
+	).toBeChecked();
+	await userEvent.click(hook);
+	expect(hook).toBeChecked();
+});

@@ -772,3 +772,94 @@ test.each([
 		}),
 	);
 });
+
+test("management refresh initializes builtin defaults when it supersedes the first load", async () => {
+	request.agentExtensionInventory.mockReturnValueOnce(new Promise(() => {}));
+	const { rerender } = render(<Composer agent="claude" />);
+	settingsState.isOpen = true;
+	rerender(<Composer agent="claude" />);
+	request.agentExtensionInventory.mockResolvedValue({
+		installed: [],
+		nativePlugins: [],
+		builtins: [{ name: "debug", kind: "skill", description: "Investigar" }],
+	});
+	settingsState.isOpen = false;
+	rerender(<Composer agent="claude" />);
+	expect(
+		await screen.findByRole("button", { name: "Remover Skill interna debug" }),
+	).toBeInTheDocument();
+});
+test("unavailable standalone Skills remain removable but leave the usable count after refresh", async () => {
+	const { rerender } = render(<Composer />);
+	await screen.findByRole("button", { name: "Configurar Skills (1)" });
+	settingsState.isOpen = true;
+	rerender(<Composer />);
+	request.agentListSkills.mockResolvedValue([
+		{ ...skill, unavailableReason: "Arquivo removido" },
+	]);
+	settingsState.isOpen = false;
+	rerender(<Composer />);
+	await waitFor(() =>
+		expect(
+			screen.getByRole("button", { name: "Configurar Skills" }),
+		).toBeEnabled(),
+	);
+	await userEvent.click(
+		screen.getByRole("button", { name: "Configurar Skills" }),
+	);
+	const choice = screen.getByRole("checkbox", { name: "Usar review" });
+	expect(choice).toBeChecked();
+	expect(choice).toBeEnabled();
+	await userEvent.click(choice);
+	expect(choice).not.toBeChecked();
+});
+
+test("OAuth missing login is excluded from the count and new choices, but stale defaults can be removed", async () => {
+	request.agentMcpList.mockResolvedValue([
+		{
+			id: "login",
+			name: "Precisa login",
+			transport: "http",
+			defaults: { claude: false, codex: true },
+			connection: { state: "disconnected" },
+			authentication: {
+				required: true,
+				ready: false,
+				reason: "Conecte o OAuth em Extensões → MCP.",
+			},
+		},
+		{
+			id: "plain",
+			name: "Sem OAuth",
+			transport: "http",
+			defaults: { claude: false, codex: false },
+			connection: { state: "disconnected" },
+			authentication: { required: false, ready: true },
+		},
+	]);
+	render(<Composer />);
+	await waitFor(() =>
+		expect(
+			screen.getByRole("button", { name: "Configurar extensões (0)" }),
+		).toBeEnabled(),
+	);
+	expect(
+		screen.getByRole("button", { name: "Iniciar conversa" }),
+	).toBeDisabled();
+	await userEvent.click(
+		screen.getByRole("button", { name: "Configurar extensões (0)" }),
+	);
+	const choice = screen.getByRole("checkbox", { name: /Precisa login/ });
+	expect(choice).toBeChecked();
+	expect(choice).toBeEnabled();
+	await userEvent.click(choice);
+	expect(choice).not.toBeChecked();
+	expect(choice).toBeDisabled();
+	expect(screen.getByRole("checkbox", { name: /Sem OAuth/ })).toBeEnabled();
+	await userEvent.keyboard("{Escape}");
+	await waitFor(() =>
+		expect(
+			screen.getByRole("button", { name: "Iniciar conversa" }),
+		).toBeEnabled(),
+	);
+});

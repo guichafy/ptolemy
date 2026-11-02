@@ -40,14 +40,16 @@ export async function resolveExtensionCommand(
 	};
 	const render = (text: string) =>
 		text.replace(
-			/\$ARGUMENTS\[(\d+)\]|\$(\d+)|\$ARGUMENTS\b|\$\{?(CLAUDE_PLUGIN_ROOT|PLUGIN_ROOT)\}?|\$([A-Z][A-Z0-9_]*)\b/g,
+			/\$ARGUMENTS\[(\d+)\]|\$(\d+)|\$ARGUMENTS\b|\$\{?((?:CLAUDE_)?PLUGIN_(?:ROOT|DATA))\}?|\$([A-Z][A-Z0-9_]*)\b/g,
 			(token, index, position, root, name) =>
 				index !== undefined
 					? (args[Number(index)] ?? "")
 					: position !== undefined
 						? (args[Number(position) - 1] ?? "")
 						: root
-							? command.root
+							? root.endsWith("DATA")
+								? (command.data ?? token)
+								: command.root
 							: name
 								? (named[name] ?? token)
 								: raw,

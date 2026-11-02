@@ -16,7 +16,7 @@ import {
 	extensionSelectionCapabilities,
 	importNativeExtension,
 } from "./inventory";
-import { extensionMcpId } from "./mcp";
+import { boundMcpCapability, extensionMcpId } from "./mcp";
 import { extensionsStore } from "./store";
 import * as validate from "./ui-validation";
 
@@ -201,21 +201,10 @@ export const extensionRequestHandlers: Handlers = {
 			if (setupReason && c.kind === "hook" && cap.status === "adapted")
 				cap = { ...cap, status: "requires-configuration", reason: setupReason };
 			return {
-				...cap,
+				...(c.kind === "mcp"
+					? boundMcpCapability(cap, servers, packageId, revision)
+					: cap),
 				packageId,
-				...(c.kind === "mcp" &&
-				cap.status === "requires-configuration" &&
-				servers.some(
-					(s) =>
-						s.id === extensionMcpId(packageId, c.id, revision) &&
-						s.packageId === packageId,
-				)
-					? {
-							status: "adapted" as const,
-							reason:
-								"Configurado no registro MCP compartilhado; conexão não testada.",
-						}
-					: {}),
 			};
 		});
 	},
