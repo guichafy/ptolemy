@@ -5,7 +5,31 @@ import { join, resolve } from "node:path";
 import { chromium } from "playwright";
 
 test("extension management renders, keeps failed drafts, and supports keyboard selection", async () => {
-	const build = process.env.PTOLEMY_UI_DIST ?? "/tmp/ptolemy-extension-ui-dist";
+	const build =
+		process.env.PTOLEMY_UI_DIST ??
+		(await mkdtemp(join(tmpdir(), "ptolemy-extension-ui-dist-")));
+	const buildProcess = Bun.spawn(
+		[
+			process.execPath,
+			"x",
+			"vite",
+			"build",
+			"--config",
+			"test/e2e-extensions/vite.config.ts",
+		],
+		{
+			env: { ...process.env, PTOLEMY_UI_DIST: build },
+			stdout: "pipe",
+			stderr: "pipe",
+		},
+	);
+	const [buildOutput, buildError, buildCode] = await Promise.all([
+		new Response(buildProcess.stdout).text(),
+		new Response(buildProcess.stderr).text(),
+		buildProcess.exited,
+	]);
+	if (buildCode !== 0)
+		throw Error(`Extension UI build failed: ${buildOutput}\n${buildError}`);
 	const screenshots =
 		process.env.PTOLEMY_UI_SCREENSHOTS ??
 		(await mkdtemp(join(tmpdir(), "ptolemy-extension-screenshots-")));
@@ -161,6 +185,42 @@ test("extension management renders, keeps failed drafts, and supports keyboard s
 		await page.waitForTimeout(180);
 		await page.screenshot({
 			path: join(screenshots, "claude-skills-selection.png"),
+		});
+		await page.goto(`${server.url.href}?composer&claude&missing-cli`);
+		const inventoryError =
+			"Claude Code CLI não encontrado. Instale o CLI para validar os recursos.";
+		await page.getByRole("alert").filter({ hasText: inventoryError }).waitFor();
+		await page
+			.getByRole("button", { name: "Configurar Skills", exact: true })
+			.click();
+		await page.getByRole("heading", { name: "Skills da conversa" }).waitFor();
+		expect(
+			await page.getByRole("alert").filter({ hasText: inventoryError }).count(),
+		).toBe(2);
+		expect(
+			await page
+				.getByRole("button", { name: "Gerenciar biblioteca" })
+				.isEnabled(),
+		).toBe(true);
+		expect(
+			await page
+				.getByRole("button", { name: "Usar seleção como padrão" })
+				.isDisabled(),
+		).toBe(true);
+		await page
+			.getByLabel("URL da Skill no GitHub")
+			.fill("https://github.com/offline/skill");
+		expect(
+			await page
+				.getByRole("button", { name: "Importar Skill", exact: true })
+				.isEnabled(),
+		).toBe(true);
+		expect(
+			await page.getByRole("button", { name: "Iniciar conversa" }).isDisabled(),
+		).toBe(true);
+		await page.waitForTimeout(180);
+		await page.screenshot({
+			path: join(screenshots, "claude-missing-cli-skills.png"),
 		});
 		expect(errors).toEqual([]);
 		console.log(`Extension UI screenshots: ${screenshots}`);

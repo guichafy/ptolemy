@@ -34,6 +34,7 @@ interface SkillPickerProps {
 	onImported: (skill: SkillSummary) => void;
 	onBusyChange: (busy: boolean) => void;
 	disabled?: boolean;
+	selectionDisabled?: boolean;
 }
 
 export function SkillPicker({
@@ -49,6 +50,7 @@ export function SkillPicker({
 	onImported,
 	onBusyChange,
 	disabled,
+	selectionDisabled = false,
 }: SkillPickerProps) {
 	const [url, setUrl] = useState("");
 	const [busy, setBusy] = useState(false);
@@ -157,6 +159,7 @@ export function SkillPicker({
 								disabled={
 									busy ||
 									disabled ||
+									selectionDisabled ||
 									(!option.checked && !!option.unavailableReason)
 								}
 								onChange={(e) => {
@@ -194,6 +197,7 @@ export function SkillPicker({
 								disabled={
 									busy ||
 									disabled ||
+									selectionDisabled ||
 									(!selected.includes(skill.id) && !!skill.unavailableReason)
 								}
 								onChange={(event) => {
@@ -286,7 +290,7 @@ export function SkillPicker({
 						size="sm"
 						variant="ghost"
 						className="h-7 gap-1 text-xs"
-						disabled={busy || disabled}
+						disabled={busy || disabled || selectionDisabled}
 						onClick={() => void saveDefaults()}
 					>
 						<Star className="h-3 w-3" />

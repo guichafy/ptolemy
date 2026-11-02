@@ -130,54 +130,60 @@ const request: Record<string, (args?: any) => Promise<any>> = {
 		installed = [];
 		return true;
 	},
-	agentExtensionInventory: async (args) => ({
-		installed,
-		nativePlugins: [
-			{
-				id: "native-local",
-				name: "Pacote instalado localmente no CLI",
-				enabled: true,
-				canImport: true,
-				managed: false,
+	agentExtensionInventory: async (args) => {
+		if (location.search.includes("missing-cli"))
+			throw Error(
+				"Claude Code CLI não encontrado. Instale o CLI para validar os recursos.",
+			);
+		return {
+			installed,
+			nativePlugins: [
+				{
+					id: "native-local",
+					name: "Pacote instalado localmente no CLI",
+					enabled: true,
+					canImport: true,
+					managed: false,
+				},
+				{
+					id: "remote",
+					name: "Conector remoto sem pacote exportável",
+					enabled: true,
+					canImport: false,
+					managed: false,
+					importLimitation:
+						"O CLI não expõe um pacote local exportável para este plugin.",
+				},
+			],
+			builtins:
+				args.agent === "claude"
+					? [
+							{
+								id: "builtin:debug",
+								name: "debug",
+								kind: "skill",
+								origin: "builtin",
+								description: "Investigar um problema no projeto",
+								limitation:
+									"Controle de execução; a descrição pode continuar visível.",
+							},
+							{
+								id: "builtin:clear",
+								name: "clear",
+								kind: "command",
+								origin: "builtin",
+								description: "Limpar contexto",
+								limitation: "",
+							},
+						]
+					: [],
+			defaults: {
+				selections: [],
+				builtinCommandNames: args.agent === "claude" ? ["debug"] : [],
 			},
-			{
-				id: "remote",
-				name: "Conector remoto sem pacote exportável",
-				enabled: true,
-				canImport: false,
-				managed: false,
-				importLimitation:
-					"O CLI não expõe um pacote local exportável para este plugin.",
-			},
-		],
-		builtins:
-			args.agent === "claude"
-				? [
-						{
-							id: "builtin:debug",
-							name: "debug",
-							kind: "skill",
-							origin: "builtin",
-							description: "Investigar um problema no projeto",
-							limitation:
-								"Controle de execução; a descrição pode continuar visível.",
-						},
-						{
-							id: "builtin:clear",
-							name: "clear",
-							kind: "command",
-							origin: "builtin",
-							description: "Limpar contexto",
-							limitation: "",
-						},
-					]
-				: [],
-		defaults: {
-			selections: [],
-			builtinCommandNames: args.agent === "claude" ? ["debug"] : [],
-		},
-		verifiedRuntime: "0.166.0",
-	}),
+			verifiedRuntime: "0.166.0",
+		};
+	},
 	agentExtensionImportNative: async () => pkg,
 	agentExtensionReview: async (args) => capabilities(!!args.trustedHookDigest),
 	agentExtensionCapabilities: async () => [],

@@ -243,6 +243,21 @@ Sessões antigas sem seleção completa mantêm o comportamento legado documenta
 As novas precisam distinguir ausência de seleção de lista vazia. Não inferir a
 seleção antiga usando os padrões atuais. Todos os três schemas RPC permanecem iguais.
 
+## Emenda aprovada: raiz executável protegida
+
+A exigência de confiança vinculada à revisão prevalece sobre a formulação anterior
+que colocava toda execução na cópia gravável do projeto. Skills e o espelho completo
+continuam dentro do workspace. Hooks executáveis, expansões dinâmicas de comandos
+e referências ROOT de processos MCP usam bytes validados do arquivo histórico em
+`~/.ptolomeu/extensions/execution/<sessão>/…`, fora da raiz gravável do agente.
+Nesses contextos, `PLUGIN_ROOT`/`CLAUDE_PLUGIN_ROOT` apontam para o snapshot protegido;
+`PLUGIN_DATA`/`CLAUDE_PLUGIN_DATA` e o cwd continuam na conversa. A execução não pode
+modificar esse snapshot. Scripts que escrevem junto ao próprio pacote devem usar
+PLUGIN_DATA; não há reescrita arbitrária do código para simular compatibilidade.
+A emenda não amplia o sandbox e impede que alterações ou links no espelho gravável
+substituam código já autorizado. As decisões e custos estão registrados em
+[decisões de arquitetura](../architecture/agent-extension-decisions.md).
+
 ## Verificação necessária
 
 - Toggle de Skill local e importada muda o conjunto realmente disponível ao agente;
