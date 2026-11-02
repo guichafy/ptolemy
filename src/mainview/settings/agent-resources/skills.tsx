@@ -95,6 +95,21 @@ export function SkillsResources({
 		});
 	}
 	const detail = navigation.detail;
+	const detailCapability = detail?.pkg
+		? capabilities.find(
+				(cap) =>
+					cap.packageId === detail.pkg!.id &&
+					cap.componentId === detail.componentId &&
+					(!cap.revision || cap.revision === detail.pkg!.revision),
+			)
+		: undefined;
+	const detailUnavailable = detail?.pkg
+		? !detailCapability ||
+			!["native", "adapted"].includes(detailCapability.status)
+			? (detailCapability?.reason ?? "Verificando compatibilidade…")
+			: undefined
+		: detail?.unavailable;
+
 	const checked = detail?.skill
 		? choices.skillIds.includes(detail.skill.id)
 		: detail?.builtinName
@@ -168,7 +183,7 @@ export function SkillsResources({
 									aria-label={`Usar ${detail.name}`}
 									checked={checked}
 									disabled={
-										selectionDisabled || (!checked && !!detail.unavailable)
+										selectionDisabled || (!checked && !!detailUnavailable)
 									}
 									onChange={(e) => changeDetail(e.target.checked)}
 									className="accent-primary"
@@ -187,7 +202,7 @@ export function SkillsResources({
 				>
 					<p className="text-xs text-muted-foreground">{detail.origin}</p>
 					<p className="whitespace-pre-wrap break-words leading-relaxed">
-						{detail.description}
+						{detail.description || detailCapability?.reason}
 					</p>
 					{detail.skill?.source.kind === "harness" && (
 						<p className="text-xs text-muted-foreground">
@@ -221,8 +236,8 @@ export function SkillsResources({
 							remove o pacote da biblioteca compartilhada.
 						</p>
 					)}
-					{detail.unavailable && (
-						<p className="text-xs text-destructive">{detail.unavailable}</p>
+					{detailUnavailable && (
+						<p className="text-xs text-destructive">{detailUnavailable}</p>
 					)}
 					{error && (
 						<p role="alert" className="text-sm text-destructive">
@@ -347,11 +362,10 @@ export function SkillsResources({
 											navigation.open({
 												id,
 												name: c.name,
-												description: c.description ?? cap?.reason ?? "",
+												description: c.description ?? "",
 												origin,
 												pkg,
 												componentId: c.id,
-												unavailable,
 											})
 										}
 									/>
