@@ -35,6 +35,25 @@ const mocks = await configureLocalAgents(
 	root,
 	join(import.meta.dir, "../../.."),
 );
+// `mcp list` also reports derived entries (e.g. desktop codex_app) that do
+// not exist as transport tables in config.toml. Delegate every real CLI call;
+// add only metadata to inventory so exec must validate our disabled override.
+const realCodex = process.env.PTOLEMY_CODEX_PATH!;
+const inventoryCli = join(root, "codex-with-derived-mcp.mjs");
+await writeFile(
+	inventoryCli,
+	`#!${process.execPath}
+import {spawnSync} from "node:child_process";
+const args=process.argv.slice(2);
+const inventory=args[0]==="mcp"&&args[1]==="list"&&args.includes("--json");
+const result=spawnSync(${JSON.stringify(realCodex)},args,{env:process.env,stdio:inventory?["inherit","pipe","pipe"]:"inherit",encoding:"utf8"});
+if(inventory&&result.status===0){const entries=JSON.parse(result.stdout);if(!entries.some(e=>e.name==="codex_app"))entries.push({name:"codex_app",enabled:false,transport:{type:"stdio",command:"/usr/bin/false",args:[],env:{}}});process.stdout.write(JSON.stringify(entries));}
+else if(inventory){process.stdout.write(result.stdout||"");process.stderr.write(result.stderr||"");}
+process.exit(result.status??1);
+`,
+	{ mode: 0o700 },
+);
+process.env.PTOLEMY_CODEX_PATH = inventoryCli;
 const vault = new MemorySecretVault();
 const registry = new McpRegistry({
 	path: join(root, "registry.json"),
