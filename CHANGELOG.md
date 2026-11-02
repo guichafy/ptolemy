@@ -1,3 +1,26 @@
+# [0.17.0](https://github.com/guichafy/ptolemy/compare/v0.16.0...v0.17.0) (2026-11-02)
+
+
+### Bug Fixes
+
+* **codex:** disable derived MCP entries with valid transports ([4c777d2](https://github.com/guichafy/ptolemy/commit/4c777d22e807b7d5e3dd04b87fea82d1ddea28b3))
+* **marketplace:** show feedback while loading item details ([83a46ee](https://github.com/guichafy/ptolemy/commit/83a46ee68696640ff2e164ba3dec94d6a47e4612))
+* **native:** retain Electrobun view hierarchy under glass ([95a0773](https://github.com/guichafy/ptolemy/commit/95a0773c2207d98e5f4afe309efcb24a644310a2))
+* **resources:** preserve revision identity and validate modal changes ([8ec7c9b](https://github.com/guichafy/ptolemy/commit/8ec7c9b4ebbe82ecd3868e54517d29850a474a2c))
+* **resources:** preserve workspace files and isolate conversation drafts ([71a0408](https://github.com/guichafy/ptolemy/commit/71a0408dfa7399f1c822cc907aa19d93a14d4201))
+* **skills:** isolate harness state and clarify library navigation ([7bfd1ae](https://github.com/guichafy/ptolemy/commit/7bfd1ae139ca3b5bdd440adcc22e5b839a31107e))
+* **skills:** refresh detail readiness after compatibility review ([c04a1cd](https://github.com/guichafy/ptolemy/commit/c04a1cd325f5155d1f8f271548fa589ea5ef3630))
+
+
+### Features
+
+* **agents:** edit conversation resources between turns ([1ef1dd2](https://github.com/guichafy/ptolemy/commit/1ef1dd2c2639bb0522a689ff688bd97082fa0d25))
+* **chat:** configure conversation resources in a shared modal ([adc5e33](https://github.com/guichafy/ptolemy/commit/adc5e330d7c1f477818041390c1aedda5e74873c))
+* **settings:** organize Skills plugins and MCP by agent ([2b40910](https://github.com/guichafy/ptolemy/commit/2b40910491b607b51e62f6fb511edaece039f0d3))
+* **tray:** simplify astrolabe icon with GPT Images ([60e7824](https://github.com/guichafy/ptolemy/commit/60e78247630c43c17d696592ccf4ed316c379f9d))
+* **tray:** use astrolabe menu bar icon ([0e0dbb9](https://github.com/guichafy/ptolemy/commit/0e0dbb9376b4b30772ce0c04fe11c062ffae90a4))
+* **ui:** adopt native glass and follow system appearance ([cf74a6f](https://github.com/guichafy/ptolemy/commit/cf74a6f8e5b45fcb0d4be392d9323e9a8b0601ad))
+
 # [0.16.0](https://github.com/guichafy/ptolemy/compare/v0.15.0...v0.16.0) (2026-11-02)
 
 
