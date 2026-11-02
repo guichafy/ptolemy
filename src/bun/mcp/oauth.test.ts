@@ -370,6 +370,31 @@ describe("MCP browser OAuth", () => {
 		expect((await registry.list())[0].authentication.ready).toBe(true);
 	});
 
+	it.each([
+		undefined,
+		[],
+	] as const)("ordinary editable save preserves discovery fallback for scopes=%j", async (scopes) => {
+		const definition = await registry.get("one");
+		if (definition.transport !== "http") throw Error("fixture");
+		definition.auth = {
+			type: "oauth",
+			...(scopes === undefined ? {} : { scopes: [...scopes] }),
+		};
+		await registry.save(definition);
+		const draft = await registry.getEditable("one");
+		draft.name = "Renamed without editing scopes";
+		await registry.saveEditable(draft);
+		await start();
+		expect(opened[0].searchParams.get("scope")).toBe(
+			scopes === undefined ? "read" : null,
+		);
+		await finish();
+		await waitFor(
+			async () => (await oauth.status("one")).state === "connected",
+		);
+		expect(await oauth.getAccessToken("one")).toBe("access-secret-probe");
+	});
+
 	it("starts promptly, completes discovery/DCR/PKCE and keeps credentials out of status/list/snapshot", async () => {
 		await authorize();
 		expect(exchanges).toBe(1);
