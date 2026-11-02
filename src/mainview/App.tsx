@@ -53,6 +53,8 @@ function PaletteContent() {
 	);
 	const { isOpen: isSettingsOpen } = useSettings();
 	const [query, setQuery] = useState("");
+	const [isResourceConfigurationOpen, setResourceConfigurationOpen] =
+		useState(false);
 	const [results, setResults] = useState<SearchResult[]>([]);
 	const [isLoading, setIsLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
@@ -241,16 +243,25 @@ function PaletteContent() {
 
 	// Resize native window only when typing intent or settings/combobox toggle.
 	useEffect(() => {
-		const height = isSettingsOpen
-			? SETTINGS_HEIGHT
-			: agent
-				? 540
-				: shouldShowResultsArea
-					? EXPANDED_HEIGHT
-					: COLLAPSED_HEIGHT;
-		const width = isSettingsOpen ? SETTINGS_WIDTH : DEFAULT_WIDTH;
+		const height =
+			isSettingsOpen || isResourceConfigurationOpen
+				? SETTINGS_HEIGHT
+				: agent
+					? 540
+					: shouldShowResultsArea
+						? EXPANDED_HEIGHT
+						: COLLAPSED_HEIGHT;
+		const width =
+			isSettingsOpen || isResourceConfigurationOpen
+				? SETTINGS_WIDTH
+				: DEFAULT_WIDTH;
 		rpc.request.resizeWindow({ height, width }).catch(() => {});
-	}, [shouldShowResultsArea, isSettingsOpen, agent]);
+	}, [
+		shouldShowResultsArea,
+		isSettingsOpen,
+		isResourceConfigurationOpen,
+		agent,
+	]);
 
 	function handleKeyDown(e: React.KeyboardEvent) {
 		if (
@@ -373,6 +384,7 @@ function PaletteContent() {
 						value={query}
 						onChange={handleQueryChange}
 						onCreated={clearPalette}
+						onConfigurationOpenChange={setResourceConfigurationOpen}
 					/>
 				) : (
 					<div className="border-b px-4 py-3 flex items-center gap-2">
@@ -455,7 +467,7 @@ function PaletteContent() {
 				{shouldShowResultsArea && (
 					<div className="flex items-center justify-between px-4 py-1.5 border-t border-border/40">
 						<span className="text-[10px] text-muted-foreground/60">
-							{agent ? "Skills preparadas antes da conversa" : "↑↓ navegar"}
+							{agent ? "Recursos configuráveis por conversa" : "↑↓ navegar"}
 						</span>
 						{activeProvider.id === "github" && lastSearchCached === true && (
 							<span className="text-[10px] text-amber-300/80">⚡ cache</span>

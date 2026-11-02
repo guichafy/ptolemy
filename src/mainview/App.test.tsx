@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import App from "./App";
@@ -227,18 +227,34 @@ describe("Palette keyboard navigation", () => {
 		await userEvent.keyboard("{ArrowDown}{Enter}");
 		expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 		await userEvent.tab();
-		expect(
-			screen.getByRole("button", { name: "Configurar Skills" }),
-		).toHaveFocus();
+		const resources = screen.getByRole("button", {
+			name: "Configurar recursos da conversa",
+		});
+		expect(resources).toHaveFocus();
+		await userEvent.keyboard("{Enter}");
+		const skills = await screen.findByRole("button", {
+			name: /Configurar Skills da conversa/,
+		});
+		skills.focus();
 		await userEvent.keyboard("{Enter}");
 		const review = await screen.findByRole("checkbox", { name: "Usar review" });
+		for (let i = 0; i < 14 && document.activeElement !== review; i++)
+			await userEvent.tab();
 		expect(review).toHaveFocus();
-		await userEvent.keyboard("{ArrowDown}");
-		expect(screen.getByRole("checkbox", { name: "Usar debug" })).toHaveFocus();
-		await userEvent.keyboard(" {Escape}");
-		expect(
-			screen.getByRole("button", { name: "Configurar Skills (1)" }),
-		).toHaveFocus();
+		await userEvent.keyboard(" ");
+		await userEvent.keyboard("{Escape}");
+		await waitFor(() => expect(resources).toHaveFocus());
+		await waitFor(() =>
+			expect(request.resizeWindow).toHaveBeenLastCalledWith({
+				height: 540,
+				width: 630,
+			}),
+		);
+		expect(request.resizeWindow).toHaveBeenCalledWith({
+			height: 760,
+			width: 1080,
+		});
+
 		expect(request.claudeCreateSession).not.toHaveBeenCalled();
 		expect(screen.getByRole("tab", { name: "Claude Code" })).toHaveAttribute(
 			"aria-selected",
